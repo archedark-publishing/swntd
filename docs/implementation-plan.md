@@ -2,7 +2,7 @@
 
 ## Overview
 
-This plan turns the product spec into a practical implementation sequence. It is optimized for shipping a stable, portfolio-quality v1 with clear checkpoints, low rework risk, and room for Ada-assisted development.
+This plan turns the product spec into a practical implementation sequence. It is optimized for shipping a stable, portfolio-quality v1 with clear checkpoints, low rework risk, and room for service-actor-assisted development.
 
 The sequencing favors:
 
@@ -20,7 +20,7 @@ The project should be built in thin vertical slices rather than by finishing the
 - Keep one household per deployment as a hard invariant in v1.
 - Reuse shared schema and domain logic across API, UI, and MCP surfaces.
 - Prefer server-authoritative state transitions over clever client logic.
-- Keep Ada integration bounded and auditable from the first implementation.
+- Keep service-actor integration bounded and auditable from the first implementation.
 - Do not introduce push realtime until the non-realtime workflow feels complete.
 
 ## Phase 0: Workspace and Delivery Foundation
@@ -80,12 +80,12 @@ Implement the core schema and domain services that define how SWNTD behaves.
 
 ### Status
 
-- [ ] Phase 1 complete
+- [x] Phase 1 complete
 
 ### Scope
 
-- [ ] Choose ORM or query layer suitable for SQLite-first development
-- [ ] Add initial schema and migrations for:
+- [x] Choose ORM or query layer suitable for SQLite-first development
+- [x] Add initial schema and migrations for:
   - household
   - user
   - service token
@@ -100,26 +100,26 @@ Implement the core schema and domain services that define how SWNTD behaves.
   - recurring task template label
   - household settings
   - task event
-- [ ] Implement shared domain rules for:
+- [x] Implement shared domain rules for:
   - task status transitions
   - stable ordering and reorder behavior
   - stale-write revision checks
   - AI assistance eligibility
   - archive behavior
   - recurring template to occurrence generation
-- [ ] Seed bootstrap household, admins, and Ada service actor from config
+- [x] Seed bootstrap household, admins, and service actor from config
 
 ### Deliverables
 
-- [ ] Migrations can create a fresh database from zero
-- [ ] Domain services exist independent of HTTP transport
-- [ ] Test fixtures support realistic household scenarios
+- [x] Migrations can create a fresh database from zero
+- [x] Domain services exist independent of HTTP transport
+- [x] Test fixtures support realistic household scenarios
 
 ### Exit Criteria
 
-- [ ] Domain tests cover core task lifecycle and permission logic
-- [ ] Recurring occurrence generation is idempotent
-- [ ] Reorder behavior is stable and deterministic
+- [x] Domain tests cover core task lifecycle and permission logic
+- [x] Recurring occurrence generation is idempotent
+- [x] Reorder behavior is stable and deterministic
 
 ### Risks
 
@@ -134,7 +134,7 @@ Implement the core schema and domain services that define how SWNTD behaves.
 
 ### Goal
 
-Implement the trust boundary for humans and Ada without locking the app to one deployment platform.
+Implement the trust boundary for humans and service actors without locking the app to one deployment platform.
 
 ### Status
 
@@ -152,19 +152,19 @@ Implement the trust boundary for humans and Ada without locking the app to one d
 - [ ] Add permission policy helpers for:
   - human admins
   - service actors
-  - Ada task eligibility
+  - service-actor task eligibility
 - [ ] Add authenticated file download guards
 
 ### Deliverables
 
 - [ ] Browser requests can resolve human actors
-- [ ] Programmatic requests can resolve Ada via service token
+- [ ] Programmatic requests can resolve service actors via service token
 - [ ] Unknown authenticated users are denied
 
 ### Exit Criteria
 
 - [ ] Tests prove that spoofed direct headers are not trusted in unsupported mode
-- [ ] Ada cannot mutate ineligible tasks
+- [ ] Service actors cannot mutate ineligible tasks
 - [ ] Human admins can manage all expected v1 operations
 
 ### Risks
@@ -314,11 +314,11 @@ Automate the recurring and archival behaviors that make the product useful over 
 
 - Normalize scheduling logic around household timezone and add date-boundary tests
 
-## Phase 6: MCP Server for Ada
+## Phase 6: MCP Server for Service Actors
 
 ### Goal
 
-Expose a bounded, policy-respecting tool surface for Ada.
+Expose a bounded, policy-respecting tool surface for service actors.
 
 ### Status
 
@@ -333,17 +333,17 @@ Expose a bounded, policy-respecting tool surface for Ada.
   - `transition_task_status`
   - `add_comment`
   - `attach_link`
-- [ ] Authenticate Ada via service token
+- [ ] Authenticate service actors via service token
 - [ ] Add audit logging for MCP-triggered mutations
 
 ### Deliverables
 
-- [ ] Ada can work on eligible tasks without bypassing app rules
+- [ ] Service actors can work on eligible tasks without bypassing app rules
 - [ ] MCP behavior is consistent with API behavior
 
 ### Exit Criteria
 
-- [ ] Ada can complete a realistic task lifecycle through MCP
+- [ ] Service actors can complete a realistic task lifecycle through MCP
 - [ ] MCP requests fail cleanly when AI assistance is disabled or assignment changes
 - [ ] Audit trails show MCP-originated actions clearly
 
@@ -435,13 +435,13 @@ At this point the repo has working tooling, persistence, auth boundaries, and do
 
 - [ ] Complete phases 3 through 5.
 
-At this point you and Rachel can use SWNTD through the web app for real household planning.
+At this point a household can use SWNTD through the web app for real planning and execution.
 
-### Milestone C: Ada Integration
+### Milestone C: Service Actor Integration
 
 - [ ] Complete phase 6.
 
-At this point Ada can collaborate safely through MCP on explicitly eligible tasks.
+At this point a service actor can collaborate safely through MCP on explicitly eligible tasks.
 
 ### Milestone D: Publishable OSS Project
 
@@ -459,14 +459,14 @@ At this point the repo is ready for broader public visibility and outside contri
 6. Minimal board UI with create, edit, move, and archive
 7. Settings and recurring template management
 
-This order should get the project to a usable internal MVP quickly without forcing us to solve Ada, self-host docs, and deployment automation all at once.
+This order should get the project to a usable internal MVP quickly without forcing us to solve service-actor integration, self-host docs, and deployment automation all at once.
 
 ## Definition of Done for V1
 
 V1 should be considered done when:
 
-- [ ] Josh and Rachel can manage household tasks entirely through the web app
+- [ ] Human admins can manage household tasks entirely through the web app
 - [ ] Recurring chores work reliably through template-driven occurrences
-- [ ] Ada can safely collaborate on eligible tasks through MCP
+- [ ] Service actors can safely collaborate on eligible tasks through MCP
 - [ ] The official deployment is automated through GitHub Actions
 - [ ] The repository is documented clearly enough for outside readers to understand and run the project

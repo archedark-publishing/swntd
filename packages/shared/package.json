@@ -9,6 +9,22 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./server/config": {
+      "types": "./src/server/config.ts",
+      "default": "./src/server/config.ts"
+    },
+    "./server/db/schema": {
+      "types": "./src/server/db/schema.ts",
+      "default": "./src/server/db/schema.ts"
+    },
+    "./server/domain/tasks": {
+      "types": "./src/server/domain/tasks.ts",
+      "default": "./src/server/domain/tasks.ts"
+    },
+    "./server/domain/fixtures": {
+      "types": "./src/server/domain/fixtures.ts",
+      "default": "./src/server/domain/fixtures.ts"
     }
   },
   "scripts": {
@@ -16,5 +32,8 @@
     "lint": "eslint src --ext .ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run"
+  },
+  "dependencies": {
+    "zod": "^4.3.6"
   }
 }

@@ -27,6 +27,9 @@ To bootstrap the workspace locally:
 ```bash
 pnpm install
 cp .env.example .env
+pnpm db:generate
+pnpm db:migrate
+pnpm db:bootstrap
 pnpm lint
 pnpm typecheck
 pnpm test
@@ -36,12 +39,14 @@ pnpm build
 Useful package-level commands:
 
 ```bash
+pnpm db:migrate
+pnpm db:bootstrap
 pnpm --filter @swntd/web dev
 pnpm --filter @swntd/api dev
 pnpm --filter @swntd/mcp dev
 ```
 
-Phase 0 currently provides a working workspace skeleton, CI entrypoint, environment examples, and placeholder app stubs so later phases can build vertically on top of a stable foundation.
+The bootstrap configuration is intentionally generic. Household-specific admin emails, service actor names, and deployment secrets should live in local `.env` files or GitHub Actions secrets, not in committed repository data.
 
 ## Product Goals
 
@@ -57,7 +62,7 @@ Phase 0 currently provides a working workspace skeleton, CI entrypoint, environm
 - Recurring task reset behavior for chores and ongoing responsibilities
 - Checklist-style subtasks inside cards
 - Comments, labels, attachments, and due dates
-- Human-admin permissions with constrained Ada automation
+- Human-admin permissions with constrained service-actor automation
 - REST API plus a built-in MCP server for agent workflows
 - Realtime board updates
 - "Add to Calendar" support for tasks that should surface in personal calendars
@@ -76,7 +81,7 @@ Phase 0 currently provides a working workspace skeleton, CI entrypoint, environm
 - Keep product decisions documented before implementation.
 - Preserve deployment-agnostic boundaries around auth, storage, and runtime assumptions.
 - Prefer explicit contracts and shared schemas over hidden coupling.
-- Treat Ada support as a first-class interface, not an afterthought.
+- Treat service-actor support as a first-class interface, not an afterthought.
 
 ## Naming Notes
 

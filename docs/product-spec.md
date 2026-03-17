@@ -4,7 +4,7 @@
 
 S#!% We Need To Do (SWNTD) is a lightweight, story-forward household kanban board and issue tracker for humans and AI collaborators. The product is intended to be open source, self-hostable, and useful as a polished portfolio-quality project, while still solving a practical day-to-day household need.
 
-The first release targets a single household with two human admins and one AI collaborator named Ada. Each deployed instance serves exactly one household in v1. The architecture must remain deployment-target agnostic so other users can fork the repository and deploy it on infrastructure other than exe.dev, even though exe.dev is the initial deployment and authentication target.
+The first release targets a single household with two human admins and one non-admin AI service actor. Each deployed instance serves exactly one household in v1. The architecture must remain deployment-target agnostic so other users can fork the repository and deploy it on infrastructure other than exe.dev, even though exe.dev is the initial deployment and authentication target.
 
 ### Primary Goals
 
@@ -19,7 +19,7 @@ The first release targets a single household with two human admins and one AI co
 - Multi-household productization
 - Full nested task hierarchies
 - Push notifications managed by the application
-- Autonomous Ada self-assignment without explicit human approval
+- Autonomous service-actor self-assignment without explicit human approval
 
 ## 2. Requirements
 
@@ -102,23 +102,23 @@ The first release targets a single household with two human admins and one AI co
 - The initial household contains two human admins.
 - Human admins may create, edit, assign, comment on, attach files to, archive, and manage settings.
 - Human admins may manage recurring task templates and reorder tasks.
-- Ada is not an admin.
-- Only human admins may assign tasks to Ada.
-- Ada may interact only with tasks that are both:
-  - assigned to Ada
+- Service actors are not admins.
+- Only human admins may assign tasks to service actors.
+- Service actors may interact only with tasks that are both:
+  - assigned to the acting service actor
   - explicitly marked with AI assistance enabled
-- On eligible tasks, Ada may:
+- On eligible tasks, service actors may:
   - move status among `To Do`, `In Progress`, `Waiting`, and `Done`
   - leave comments
   - add external-link attachments
-- Ada may not:
+- Service actors may not:
   - access admin settings
   - create tasks in v1
   - upload binary files in v1
   - assign tasks to humans
   - change permissions
   - self-assign new work in v1
-- If AI assistance is disabled or a task is reassigned away from Ada, any subsequent Ada write must be rejected immediately.
+- If AI assistance is disabled or a task is reassigned away from a service actor, any subsequent service-actor write must be rejected immediately.
 
 ### 2.3 UX and Responsiveness Requirements
 
@@ -177,8 +177,8 @@ The initial implementation should use a small workspace-oriented monorepo:
 - Initial deployment may use exe.dev for:
   - HTTP hosting
   - user login
-  - runtime environment for Ada
-- The official deployment may bootstrap only Josh, Rachel, and Ada through deployment secrets and CI configuration.
+  - runtime environment for service actors
+- The official deployment may bootstrap only deployment-specific household admins and service actors through deployment secrets and CI configuration.
 - Unknown authenticated users must be denied until an admin explicitly adds them to the household.
 - V1 must not include self-service signup, invites, or multi-household tenant switching.
 - The application must remain self-hostable with alternate auth and deployment providers added later.
@@ -204,7 +204,7 @@ Initial adapters and auth modes:
   - the first implementation reads exe.dev-provided identity headers such as `X-ExeDev-UserID` and `X-ExeDev-Email`
   - unauthenticated browser requests may be redirected to the provider login flow, such as `/__exe.dev/login`
 - `service_token`
-  - used by Ada and other programmatic clients
+  - used by service actors and other programmatic clients
   - authenticates via bearer token tied to a service actor record
   - tokens must be hashed at rest and support rotation or revocation
 - local development adapter
@@ -215,8 +215,8 @@ Initial adapters and auth modes:
 
 - Users must be represented as actor records in the application database.
 - Human users are authenticated via configured auth adapters.
-- Ada must be represented as a non-admin service actor in the same household.
-- Programmatic Ada access must use service-token-backed application API or MCP authentication, not direct database access as part of the formal product contract.
+- Service actors must be represented as non-admin actors in the same household.
+- Programmatic service-actor access must use service-token-backed application API or MCP authentication, not direct database access as part of the formal product contract.
 - Authenticated actors must still be members of the deployment household to receive access.
 - Service tokens must only be accepted for non-browser programmatic clients.
 
@@ -241,7 +241,7 @@ Note: v1 operates on a single household, but household scoping should still exis
 - `email`
 - `display_name`
 - `role` with values `admin` or `service`
-- `service_kind` nullable, used for Ada-style actors
+- `service_kind` nullable, used for service actors
 - `created_at`
 - `updated_at`
 
@@ -416,7 +416,7 @@ The backend must expose a versioned API under `/api/v1`.
   - store uploaded files outside the web root using randomized filenames
   - serve downloads through authenticated application endpoints
   - never fetch remote URLs server-side for external-link attachments
-- Ada service actors may attach external links but may not upload binary files in v1.
+- Service actors may attach external links but may not upload binary files in v1.
 - Hard delete should not be exposed in the v1 API.
 - The API must return enough structured error information for the UI and MCP layers to present actionable failures.
 
@@ -435,7 +435,7 @@ The system must include a built-in MCP server that exposes bounded task-manageme
 #### MCP Requirements
 
 - MCP calls must use the same permission rules as the standard API.
-- Ada must only receive access appropriate to the bound service identity.
+- Service actors must only receive access appropriate to the bound service identity.
 - The MCP layer must not bypass task-level eligibility rules for AI assistance.
 - V1 MCP tools must not expose task creation, task reassignment, admin settings, or binary file upload.
 
@@ -517,7 +517,7 @@ The visual direction should feel warm, slightly literary, and a little whimsical
 - V1 is one household per deployment, but the schema and authorization model should not hard-code a permanent single-tenant assumption.
 - The initial deployment target is exe.dev, but application internals should remain portable.
 - Both initial human users are admins.
-- Ada is a non-admin service actor.
+- Service actors are non-admin actors.
 - The official deployment should default to the `America/New_York` timezone.
 - Unknown users are denied by default.
 - Trusted-header auth requires a trusted upstream proxy and is not safe for direct internet exposure without that boundary.
@@ -536,12 +536,12 @@ The visual direction should feel warm, slightly literary, and a little whimsical
 
 ### 7.1 Interview Notes
 
-- Project origin: a shared household kanban board and issue tracker for Josh, Rachel, and Ada
+- Project origin: a shared household kanban board and issue tracker for two human admins and one service actor
 - Deployment posture: deployment-target agnostic, with exe.dev as the initial runtime and auth integration
 - Deployment tenancy: one household per deployment in v1
 - Core statuses: `To Do`, `In Progress`, `Waiting`, `Done`
 - Task types: one-off errands, recurring chores, and checklist-style subtasks
-- AI posture: Ada can act only on explicitly AI-enabled tasks assigned to Ada
+- AI posture: service actors can act only on explicitly AI-enabled tasks assigned to them
 - Reminder philosophy: keep notifications lightweight by letting users add selected tasks to their calendars
 - OSS goal: polished, general-purpose project suitable for public adoption and portfolio value
 - Delivery expectations: GitHub Actions from the start, docs-first implementation, future API/MCP-friendly developer experience

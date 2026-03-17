@@ -15,7 +15,7 @@ Each deployed SWNTD instance serves exactly one household in v1.
 
 - It keeps authorization and onboarding much simpler.
 - It avoids accidental cross-household access in a public internet-facing deployment.
-- It matches the initial use case for Josh, Rachel, and Ada.
+- It matches the initial use case for a single household with two human admins and one service actor.
 
 ### Consequences
 
@@ -23,7 +23,7 @@ Each deployed SWNTD instance serves exactly one household in v1.
 - Self-service signup and multi-household UX are explicitly deferred.
 - The official deployment pipeline may use household-specific bootstrap settings without changing the OSS app contract.
 
-## AD-002: Auth Uses Trusted Headers for Humans and Service Tokens for Ada
+## AD-002: Auth Uses Trusted Headers for Humans and Service Tokens for Service Actors
 
 - Date: 2026-03-16
 - Status: Accepted
@@ -33,14 +33,14 @@ Each deployed SWNTD instance serves exactly one household in v1.
 V1 supports three auth modes:
 
 - `trusted_header` for browser users behind a trusted auth proxy such as exe.dev
-- `service_token` for Ada and other programmatic clients
+- `service_token` for service actors and other programmatic clients
 - `local_dev` for development and automated testing
 
 ### Rationale
 
 - It keeps the application deployment-target agnostic while still fitting exe.dev cleanly.
 - It avoids building a first-party auth system before the core product exists.
-- It gives Ada a bounded, auditable identity independent from browser auth.
+- It gives service actors a bounded, auditable identity independent from browser auth.
 
 ### Consequences
 
@@ -144,7 +144,7 @@ V1 supports uploaded files and external links with conservative upload defaults.
 
 - Uploads are stored outside the web root with randomized filenames.
 - External links are stored as URLs only; the server does not fetch remote content.
-- Ada may attach links in v1; binary service uploads can be added later if needed.
+- Service actors may attach links in v1; binary service uploads can be added later if needed.
 
 ## AD-008: Self-Hosted Auth Reference Uses oauth2-proxy Behind Caddy
 
@@ -166,20 +166,20 @@ The first non-exe.dev self-hosting guide should recommend `oauth2-proxy` as the 
 - The self-hosting guide should document the proxy boundary clearly so SWNTD never trusts end-user-supplied identity headers directly.
 - The first self-hosting path will optimize for simplicity over supporting every reverse proxy from day one.
 
-## AD-009: Ada Remains Link-Only for Attachments in V1
+## AD-009: Service Actors Remain Link-Only for Attachments in V1
 
 - Date: 2026-03-16
 - Status: Accepted
 
 ### Decision
 
-Ada may add external-link attachments in v1, but binary file uploads remain human-only until a later release.
+Service actors may add external-link attachments in v1, but binary file uploads remain human-only until a later release.
 
 ### Rationale
 
 - It keeps the first service-token permission model simpler.
 - It avoids expanding the upload threat surface before the core product is proven.
-- It still allows Ada to reference documents, URLs, and artifacts generated elsewhere.
+- It still allows service actors to reference documents, URLs, and artifacts generated elsewhere.
 
 ### Consequences
 

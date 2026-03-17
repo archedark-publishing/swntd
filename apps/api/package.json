@@ -6,11 +6,16 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsup src/index.ts --format esm --dts --clean",
+    "db:generate": "drizzle-kit generate --config drizzle.config.ts",
+    "db:migrate": "tsx src/db/migrate.ts",
+    "db:bootstrap": "tsx src/db/bootstrap.ts",
     "lint": "eslint src --ext .ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run"
   },
   "dependencies": {
-    "@swntd/shared": "workspace:*"
+    "@libsql/client": "^0.17.0",
+    "@swntd/shared": "workspace:*",
+    "dotenv": "^17.3.1"
   }
 }
