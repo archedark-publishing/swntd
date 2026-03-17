@@ -23,6 +23,14 @@ type MeResponse = {
   };
 };
 
+type UsersResponse = {
+  items: Array<{
+    id: string;
+    role: "admin" | "service";
+    serviceKind: string | null;
+  }>;
+};
+
 type OpenApiResponse = {
   paths: Record<string, string[]>;
 };
@@ -371,6 +379,18 @@ describe("Phase 3 API", () => {
     const me = await parseJson<MeResponse>(meResponse);
     expect(me.actor.email).toBe("admin2@example.com");
 
+    const usersResponse = await app.request("/api/v1/users", {
+      headers: adminHeaders
+    });
+    expect(usersResponse.status).toBe(200);
+    const users = await parseJson<UsersResponse>(usersResponse);
+    expect(users.items).toHaveLength(3);
+    expect(
+      users.items.some(
+        (user) => user.role === "service" && user.serviceKind === "assistant"
+      )
+    ).toBe(true);
+
     const settingsPatchResponse = await app.request(
       "/api/v1/settings",
       jsonRequest({
@@ -528,6 +548,11 @@ describe("Phase 3 API", () => {
       headers: serviceHeaders
     });
     expect(settingsAsServiceResponse.status).toBe(403);
+
+    const usersAsServiceResponse = await app.request("/api/v1/users", {
+      headers: serviceHeaders
+    });
+    expect(usersAsServiceResponse.status).toBe(403);
 
     const listTasksResponse = await app.request("/api/v1/tasks", {
       headers: serviceHeaders

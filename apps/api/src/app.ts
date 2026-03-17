@@ -28,6 +28,7 @@ import {
   getSettings,
   getTaskAttachmentDownload,
   getTaskDetail,
+  listHouseholdUsers,
   listLabels,
   listRecurringTemplates,
   listTasks,
@@ -245,6 +246,10 @@ export function createApp() {
     jsonOk(c, await getCurrentActor(c.var.actor))
   );
 
+  app.get("/api/v1/users", async (c) =>
+    jsonOk(c, await listHouseholdUsers(c.var.db, c.var.actor))
+  );
+
   app.get("/api/v1/settings", async (c) =>
     jsonOk(c, await getSettings(c.var.db, c.var.actor))
   );
@@ -460,7 +465,8 @@ export function createApp() {
         "/api/v1/tasks/{taskId}/reorder": ["post"],
         "/api/v1/tasks/{taskId}/status": ["post"],
         "/api/v1/tasks/{taskId}/unarchive": ["post"],
-        "/api/v1/tasks/{taskId}/uploads": ["post"]
+        "/api/v1/tasks/{taskId}/uploads": ["post"],
+        "/api/v1/users": ["get"]
       }
     })
   );

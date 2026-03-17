@@ -6,9 +6,9 @@ The project is being built as a polished, general-purpose open source web app th
 
 ## Status
 
-Phase 3 complete: core API is implemented and validated.
+Phase 4 complete: the web MVP is implemented and wired to the core API.
 
-The current implementation baseline includes the `/api/v1` HTTP surface, upload/download handling, task event recording, and integration coverage for the main household workflows. Product details still follow [docs/product-spec.md](docs/product-spec.md), with execution tracking in [docs/implementation-plan.md](docs/implementation-plan.md).
+The current implementation baseline includes the `/api/v1` HTTP surface, upload/download handling, task event recording, and a responsive board-oriented web app with board, my tasks, archive, and settings views. Product details still follow [docs/product-spec.md](docs/product-spec.md), with execution tracking in [docs/implementation-plan.md](docs/implementation-plan.md).
 
 Key architectural choices and their rationale are tracked in [ARCHITECTURE_DECISIONS.md](ARCHITECTURE_DECISIONS.md).
 The API also exposes a lightweight machine-readable contract at `/api/v1/openapi.json`.
@@ -45,6 +45,8 @@ pnpm --filter @swntd/web dev
 pnpm --filter @swntd/api dev
 pnpm --filter @swntd/mcp dev
 ```
+
+For browser development, `apps/web` proxies `/api` requests to `SWNTD_API_PROXY_TARGET`, which defaults to `http://127.0.0.1:3001`, and can optionally send `VITE_SWNTD_DEV_ACTOR_EMAIL` in local development when the API is running in `local_dev` auth mode.
 
 The bootstrap configuration is intentionally generic. Household-specific admin emails, service actor names, and deployment secrets should live in local `.env` files or GitHub Actions secrets, not in committed repository data.
 

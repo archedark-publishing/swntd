@@ -234,37 +234,37 @@ Deliver a fully usable household task board for humans on mobile and desktop bro
 
 ### Status
 
-- [ ] Phase 4 complete
+- [x] Phase 4 complete
 
 ### Scope
 
-- [ ] Build app shell and authenticated session flow
-- [ ] Implement views:
+- [x] Build app shell and authenticated session flow
+- [x] Implement views:
   - board
   - my tasks
   - archive/history
   - settings
-- [ ] Implement task creation and editing
-- [ ] Implement task detail sheet or page
-- [ ] Implement checklist editing
-- [ ] Implement comments UI
-- [ ] Implement attachment UI for uploads and links
-- [ ] Implement recurrence template management UI
-- [ ] Implement reorder UX
-- [ ] Implement refetch-on-focus and optional polling
-- [ ] Add loading, empty, error, and conflict states
+- [x] Implement task creation and editing
+- [x] Implement task detail sheet or page
+- [x] Implement checklist editing
+- [x] Implement comments UI
+- [x] Implement attachment UI for uploads and links
+- [x] Implement recurrence template management UI
+- [x] Implement reorder UX
+- [x] Implement refetch-on-focus and optional polling
+- [x] Add loading, empty, error, and conflict states
 
 ### Deliverables
 
-- [ ] Humans can manage household work entirely through the web app
-- [ ] Mobile-first interactions are usable on iPhone and Android browsers
-- [ ] The core board feels stable and coherent without realtime push
+- [x] Humans can manage household work entirely through the web app
+- [x] Mobile-first interactions are usable on iPhone and Android browsers
+- [x] The core board feels stable and coherent without realtime push
 
 ### Exit Criteria
 
-- [ ] Full manual household workflow works without terminal or API calls
-- [ ] Accessibility basics are in place for navigation, forms, and status changes
-- [ ] UI handles conflict and permission failures cleanly
+- [x] Full manual household workflow works without terminal or API calls
+- [x] Accessibility basics are in place for navigation, forms, and status changes
+- [x] UI handles conflict and permission failures cleanly
 
 ### Risks
 

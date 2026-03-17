@@ -596,6 +596,30 @@ export async function getCurrentActor(actor: AuthenticatedActor) {
   };
 }
 
+export async function listHouseholdUsers(
+  db: DatabaseClient,
+  actor: AuthenticatedActor
+) {
+  assertAdmin(actor);
+
+  const rows = await db
+    .select({
+      displayName: users.displayName,
+      email: users.email,
+      id: users.id,
+      role: users.role,
+      serviceKind: users.serviceKind
+    })
+    .from(users)
+    .where(eq(users.householdId, actor.householdId));
+
+  rows.sort((left, right) => left.displayName.localeCompare(right.displayName));
+
+  return {
+    items: rows.map((row) => mapUserRef(row))
+  };
+}
+
 export async function listLabels(db: DatabaseClient, actor: AuthenticatedActor) {
   assertAdmin(actor);
 
