@@ -1,0 +1,58 @@
+:root {
+  color-scheme: light;
+  font-family: "Georgia", serif;
+  background:
+    radial-gradient(circle at top, #f8f0dc 0%, #efe2c3 42%, #e2d1ab 100%);
+  color: #2f2116;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+.app-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 2rem;
+}
+
+.hero-card {
+  width: min(100%, 44rem);
+  padding: 2rem;
+  border-radius: 1.5rem;
+  background: rgb(255 250 240 / 88%);
+  box-shadow: 0 1.5rem 4rem rgb(78 48 18 / 0.15);
+  border: 1px solid rgb(120 78 43 / 0.12);
+}
+
+.hero-card h1 {
+  margin: 0.3rem 0 1rem;
+  font-size: clamp(2.2rem, 5vw, 4rem);
+  line-height: 1;
+}
+
+.hero-card p {
+  margin: 0 0 1rem;
+  font-size: 1.05rem;
+  line-height: 1.6;
+}
+
+.eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-size: 0.75rem;
+  color: #7f5530;
+}
+
+.hero-card code {
+  display: inline-flex;
+  padding: 0.5rem 0.75rem;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.72);
+}

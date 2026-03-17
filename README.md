@@ -13,6 +13,36 @@ The first implementation work should follow the product spec in [docs/product-sp
 Key architectural choices and their rationale are tracked in [ARCHITECTURE_DECISIONS.md](ARCHITECTURE_DECISIONS.md).
 The execution sequence is tracked in [docs/implementation-plan.md](docs/implementation-plan.md).
 
+## Local Development
+
+The repository is organized as a `pnpm` workspace with four packages:
+
+- `apps/web` for the React + Vite frontend
+- `apps/api` for the HTTP API
+- `apps/mcp` for the MCP server
+- `packages/shared` for shared types and domain utilities
+
+To bootstrap the workspace locally:
+
+```bash
+pnpm install
+cp .env.example .env
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+```
+
+Useful package-level commands:
+
+```bash
+pnpm --filter @swntd/web dev
+pnpm --filter @swntd/api dev
+pnpm --filter @swntd/mcp dev
+```
+
+Phase 0 currently provides a working workspace skeleton, CI entrypoint, environment examples, and placeholder app stubs so later phases can build vertically on top of a stable foundation.
+
 ## Product Goals
 
 - Keep household task management simple, fast, and mobile-friendly.

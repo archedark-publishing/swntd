@@ -35,34 +35,34 @@ Create a clean monorepo foundation with enough tooling to support fast, safe ite
 
 ### Scope
 
-- [ ] Initialize workspace structure:
+- [x] Initialize workspace structure:
   - `apps/web`
   - `apps/api`
   - `apps/mcp`
   - `packages/shared`
-- [ ] Configure package management and workspace tooling
-- [ ] Add TypeScript base configuration
-- [ ] Add linting and formatting setup
-- [ ] Add test runner setup
-- [ ] Add basic GitHub Actions workflows for:
+- [x] Configure package management and workspace tooling
+- [x] Add TypeScript base configuration
+- [x] Add linting and formatting setup
+- [x] Add test runner setup
+- [x] Add basic GitHub Actions workflows for:
   - lint
   - typecheck
   - test
   - build
-- [ ] Add environment configuration examples
-- [ ] Add a minimal local development README section
+- [x] Add environment configuration examples
+- [x] Add a minimal local development README section
 
 ### Deliverables
 
-- [ ] Monorepo boots locally with one install command
+- [x] Monorepo boots locally with one install command
 - [ ] CI runs successfully on empty or stubbed apps
-- [ ] Shared package is importable from all app packages
+- [x] Shared package is importable from all app packages
 
 ### Exit Criteria
 
-- [ ] `install`, `lint`, `typecheck`, `test`, and `build` commands exist and pass
+- [x] `install`, `lint`, `typecheck`, `test`, and `build` commands exist and pass
 - [ ] CI is green on the default branch
-- [ ] Repo structure matches the product spec
+- [x] Repo structure matches the product spec
 
 ### Risks
 
