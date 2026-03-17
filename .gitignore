@@ -1,0 +1,34 @@
+# Node and package managers
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+build/
+coverage/
+.vite/
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Local databases and storage
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+data/
+uploads/
+storage/
+
+# OS/editor noise
+.DS_Store
+.idea/
+.vscode/
