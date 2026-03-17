@@ -68,7 +68,10 @@ export const serviceTokens = sqliteTable(
       .notNull()
       .$defaultFn(now)
   },
-  (table) => [index("service_tokens_user_id_idx").on(table.userId)]
+  (table) => [
+    index("service_tokens_user_id_idx").on(table.userId),
+    uniqueIndex("service_tokens_token_hash_idx").on(table.tokenHash)
+  ]
 );
 
 export const recurringTaskTemplates = sqliteTable(

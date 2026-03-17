@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX `service_tokens_token_hash_idx` ON `service_tokens` (`token_hash`);

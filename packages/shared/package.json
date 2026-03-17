@@ -22,6 +22,10 @@
       "types": "./src/server/domain/tasks.ts",
       "default": "./src/server/domain/tasks.ts"
     },
+    "./server/domain/authorization": {
+      "types": "./src/server/domain/authorization.ts",
+      "default": "./src/server/domain/authorization.ts"
+    },
     "./server/domain/fixtures": {
       "types": "./src/server/domain/fixtures.ts",
       "default": "./src/server/domain/fixtures.ts"

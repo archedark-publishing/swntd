@@ -138,34 +138,34 @@ Implement the trust boundary for humans and service actors without locking the a
 
 ### Status
 
-- [ ] Phase 2 complete
+- [x] Phase 2 complete
 
 ### Scope
 
-- [ ] Implement auth mode abstraction:
+- [x] Implement auth mode abstraction:
   - `trusted_header`
   - `service_token`
   - `local_dev`
-- [ ] Build actor resolution and household membership enforcement
-- [ ] Implement bootstrap admin email handling
-- [ ] Implement service-token creation and verification primitives
-- [ ] Add permission policy helpers for:
+- [x] Build actor resolution and household membership enforcement
+- [x] Implement bootstrap admin email handling
+- [x] Implement service-token creation and verification primitives
+- [x] Add permission policy helpers for:
   - human admins
   - service actors
   - service-actor task eligibility
-- [ ] Add authenticated file download guards
+- [x] Add authenticated file download guards
 
 ### Deliverables
 
-- [ ] Browser requests can resolve human actors
-- [ ] Programmatic requests can resolve service actors via service token
-- [ ] Unknown authenticated users are denied
+- [x] Browser requests can resolve human actors
+- [x] Programmatic requests can resolve service actors via service token
+- [x] Unknown authenticated users are denied
 
 ### Exit Criteria
 
-- [ ] Tests prove that spoofed direct headers are not trusted in unsupported mode
-- [ ] Service actors cannot mutate ineligible tasks
-- [ ] Human admins can manage all expected v1 operations
+- [x] Tests prove that spoofed direct headers are not trusted in unsupported mode
+- [x] Service actors cannot mutate ineligible tasks
+- [x] Human admins can manage all expected v1 operations
 
 ### Risks
 
