@@ -31,7 +31,7 @@ Create a clean monorepo foundation with enough tooling to support fast, safe ite
 
 ### Status
 
-- [ ] Phase 0 complete
+- [x] Phase 0 complete
 
 ### Scope
 
@@ -55,13 +55,13 @@ Create a clean monorepo foundation with enough tooling to support fast, safe ite
 ### Deliverables
 
 - [x] Monorepo boots locally with one install command
-- [ ] CI runs successfully on empty or stubbed apps
+- [x] CI runs successfully on empty or stubbed apps
 - [x] Shared package is importable from all app packages
 
 ### Exit Criteria
 
 - [x] `install`, `lint`, `typecheck`, `test`, and `build` commands exist and pass
-- [ ] CI is green on the default branch
+- [x] CI is green on the default branch
 - [x] Repo structure matches the product spec
 
 ### Risks
