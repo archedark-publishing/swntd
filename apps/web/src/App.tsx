@@ -3,6 +3,7 @@ import {
   useDeferredValue,
   useEffect,
   useEffectEvent,
+  useRef,
   useState
 } from "react";
 import {
@@ -254,6 +255,8 @@ export function App() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [archiveSearch, setArchiveSearch] = useState("");
   const deferredArchiveSearch = useDeferredValue(archiveSearch);
+  const hasLoadedRef = useRef(false);
+  const refreshInFlightRef = useRef<Promise<void> | null>(null);
 
   useEffect(() => {
     window.location.hash = view;
@@ -281,59 +284,69 @@ export function App() {
   });
 
   const refreshApp = useEffectEvent(async (options?: { background?: boolean }) => {
-    if (!options?.background) {
-      setIsBooting(true);
-    } else {
+    if (refreshInFlightRef.current) {
+      return refreshInFlightRef.current;
+    }
+
+    if (options?.background || hasLoadedRef.current) {
       setIsRefreshing(true);
     }
 
-    try {
-      const me = await api.getMe();
-      const [activeTasks, archivedTasks] = await Promise.all([
-        api.listTasks({ archived: "exclude" }),
-        api.listTasks({ archived: "only" })
-      ]);
-
-      if (me.actor.role === "admin") {
-        const [users, labels, settings, recurringTemplates] = await Promise.all([
-          api.listUsers(),
-          api.listLabels(),
-          api.getSettings(),
-          api.listRecurringTemplates()
+    const refreshPromise = (async () => {
+      try {
+        const me = await api.getMe();
+        const [activeTasks, archivedTasks] = await Promise.all([
+          api.listTasks({ archived: "exclude" }),
+          api.listTasks({ archived: "only" })
         ]);
 
-        setSnapshot({
-          activeTasks: activeTasks.items,
-          actor: me.actor,
-          archivedTasks: archivedTasks.items,
-          labels: labels.items,
-          recurringTemplates: recurringTemplates.items,
-          settings: settings.settings,
-          users: users.items
-        });
-      } else {
-        setSnapshot({
-          activeTasks: activeTasks.items,
-          actor: me.actor,
-          archivedTasks: archivedTasks.items,
-          labels: [],
-          recurringTemplates: [],
-          settings: null,
-          users: []
-        });
-      }
+        if (me.actor.role === "admin") {
+          const [users, labels, settings, recurringTemplates] = await Promise.all([
+            api.listUsers(),
+            api.listLabels(),
+            api.getSettings(),
+            api.listRecurringTemplates()
+          ]);
 
-      if (selectedTaskId) {
-        await loadTaskDetail(selectedTaskId);
-      }
+          setSnapshot({
+            activeTasks: activeTasks.items,
+            actor: me.actor,
+            archivedTasks: archivedTasks.items,
+            labels: labels.items,
+            recurringTemplates: recurringTemplates.items,
+            settings: settings.settings,
+            users: users.items
+          });
+        } else {
+          setSnapshot({
+            activeTasks: activeTasks.items,
+            actor: me.actor,
+            archivedTasks: archivedTasks.items,
+            labels: [],
+            recurringTemplates: [],
+            settings: null,
+            users: []
+          });
+        }
 
-      setErrorMessage(null);
-    } catch (error) {
-      setErrorMessage(buildFlashMessage(error));
-    } finally {
-      setIsBooting(false);
-      setIsRefreshing(false);
-    }
+        if (selectedTaskId) {
+          await loadTaskDetail(selectedTaskId);
+        }
+
+        hasLoadedRef.current = true;
+        setErrorMessage(null);
+      } catch (error) {
+        setErrorMessage(buildFlashMessage(error));
+      } finally {
+        setIsBooting(false);
+        setIsRefreshing(false);
+        refreshInFlightRef.current = null;
+      }
+    })();
+
+    refreshInFlightRef.current = refreshPromise;
+
+    return refreshPromise;
   });
 
   useEffect(() => {
