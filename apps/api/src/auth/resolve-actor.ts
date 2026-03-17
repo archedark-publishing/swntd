@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import type { AuthenticatedActor } from "@swntd/shared/server/domain/authorization";
 import { users } from "@swntd/shared/server/db/schema";
 import { getApiConfig } from "../config";
+import type { DatabaseClient } from "../db/client";
 import { createDatabase } from "../db/client";
 import { resolveServiceActorFromBearerToken } from "./service-tokens";
 
@@ -50,7 +51,8 @@ function toActor(row: {
 }
 
 export async function resolveRequestActor(
-  request: AuthRequestContext = {}
+  request: AuthRequestContext = {},
+  db?: DatabaseClient
 ): Promise<AuthenticatedActor | null> {
   const config = getApiConfig();
   const headers = request.headers ?? {};
@@ -58,10 +60,11 @@ export async function resolveRequestActor(
   const bearerToken = getBearerToken(headers);
 
   if (bearerToken) {
-    return resolveServiceActorFromBearerToken(bearerToken);
+    return resolveServiceActorFromBearerToken(bearerToken, db);
   }
 
-  const { client, db } = await createDatabase();
+  const database = db ? null : await createDatabase();
+  const resolvedDb = db ?? database!.db;
 
   try {
     if (config.authMode === "trusted_header") {
@@ -75,7 +78,7 @@ export async function resolveRequestActor(
         return null;
       }
 
-      const [user] = await db
+      const [user] = await resolvedDb
         .select({
           id: users.id,
           householdId: users.householdId,
@@ -105,7 +108,7 @@ export async function resolveRequestActor(
         return null;
       }
 
-      const [user] = await db
+      const [user] = await resolvedDb
         .select({
           id: users.id,
           householdId: users.householdId,
@@ -127,6 +130,6 @@ export async function resolveRequestActor(
 
     return null;
   } finally {
-    client.close();
+    database?.client.close();
   }
 }

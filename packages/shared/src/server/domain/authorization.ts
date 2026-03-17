@@ -28,6 +28,17 @@ export function canManageSettings(actor: AuthenticatedActor) {
   return isAdminActor(actor);
 }
 
+export function canReadTask(actor: AuthenticatedActor, task: TaskAccessRecord) {
+  if (isAdminActor(actor)) {
+    return true;
+  }
+
+  return canServiceActorMutateTask({
+    actorId: actor.id,
+    task
+  });
+}
+
 export function canCreateTask(actor: AuthenticatedActor) {
   return isAdminActor(actor);
 }
@@ -44,40 +55,19 @@ export function canAttachExternalLink(
   actor: AuthenticatedActor,
   task: TaskAccessRecord
 ) {
-  if (isAdminActor(actor)) {
-    return true;
-  }
-
-  return canServiceActorMutateTask({
-    actorId: actor.id,
-    task
-  });
+  return canReadTask(actor, task);
 }
 
 export function canTransitionTask(
   actor: AuthenticatedActor,
   task: TaskAccessRecord
 ) {
-  if (isAdminActor(actor)) {
-    return true;
-  }
-
-  return canServiceActorMutateTask({
-    actorId: actor.id,
-    task
-  });
+  return canReadTask(actor, task);
 }
 
 export function canDownloadAttachment(
   actor: AuthenticatedActor,
   task: TaskAccessRecord
 ) {
-  if (isAdminActor(actor)) {
-    return true;
-  }
-
-  return canServiceActorMutateTask({
-    actorId: actor.id,
-    task
-  });
+  return canReadTask(actor, task);
 }

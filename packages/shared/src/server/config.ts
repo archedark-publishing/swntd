@@ -27,6 +27,12 @@ const rawConfigSchema = z.object({
   SWNTD_DEFAULT_CALENDAR_EXPORT_KIND: z
     .enum(calendarExportKinds)
     .default("google"),
+  SWNTD_UPLOADS_DIR: z.string().trim().min(1).default("./data/uploads"),
+  SWNTD_MAX_UPLOAD_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(20 * 1024 * 1024),
   SWNTD_DATABASE_URL: z
     .string()
     .trim()
@@ -57,6 +63,8 @@ export function parseSwntdConfig(env: NodeJS.ProcessEnv = process.env) {
     defaultTimezone: raw.SWNTD_DEFAULT_TIMEZONE,
     doneArchiveAfterDays: raw.SWNTD_DONE_ARCHIVE_AFTER_DAYS,
     defaultCalendarExportKind: raw.SWNTD_DEFAULT_CALENDAR_EXPORT_KIND,
+    uploadsDir: raw.SWNTD_UPLOADS_DIR,
+    maxUploadBytes: raw.SWNTD_MAX_UPLOAD_BYTES,
     databaseUrl: raw.SWNTD_DATABASE_URL
   };
 }

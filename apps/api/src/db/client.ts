@@ -38,3 +38,6 @@ export async function createDatabase() {
 
   return { client, db, config };
 }
+
+export type DatabaseConnection = Awaited<ReturnType<typeof createDatabase>>;
+export type DatabaseClient = DatabaseConnection["db"];

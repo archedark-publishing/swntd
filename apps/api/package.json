@@ -14,8 +14,10 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@hono/node-server": "^1.19.11",
     "@libsql/client": "^0.17.0",
     "@swntd/shared": "workspace:*",
-    "dotenv": "^17.3.1"
+    "dotenv": "^17.3.1",
+    "hono": "^4.12.8"
   }
 }

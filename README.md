@@ -6,12 +6,12 @@ The project is being built as a polished, general-purpose open source web app th
 
 ## Status
 
-Planning and specification.
+Phase 3 complete: core API is implemented and validated.
 
-The first implementation work should follow the product spec in [docs/product-spec.md](docs/product-spec.md).
+The current implementation baseline includes the `/api/v1` HTTP surface, upload/download handling, task event recording, and integration coverage for the main household workflows. Product details still follow [docs/product-spec.md](docs/product-spec.md), with execution tracking in [docs/implementation-plan.md](docs/implementation-plan.md).
 
 Key architectural choices and their rationale are tracked in [ARCHITECTURE_DECISIONS.md](ARCHITECTURE_DECISIONS.md).
-The execution sequence is tracked in [docs/implementation-plan.md](docs/implementation-plan.md).
+The API also exposes a lightweight machine-readable contract at `/api/v1/openapi.json`.
 
 ## Local Development
 
@@ -64,7 +64,7 @@ The bootstrap configuration is intentionally generic. Household-specific admin e
 - Comments, labels, attachments, and due dates
 - Human-admin permissions with constrained service-actor automation
 - REST API plus a built-in MCP server for agent workflows
-- Realtime board updates
+- Server-authoritative sync with refetch/polling in v1
 - "Add to Calendar" support for tasks that should surface in personal calendars
 
 ## Recommended Stack

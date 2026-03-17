@@ -184,11 +184,11 @@ Expose the domain model through a clean, versioned HTTP API that fully supports 
 
 ### Status
 
-- [ ] Phase 3 complete
+- [x] Phase 3 complete
 
 ### Scope
 
-- [ ] Implement `/api/v1` endpoints for:
+- [x] Implement `/api/v1` endpoints for:
   - tasks
   - status transitions
   - reorder
@@ -200,22 +200,22 @@ Expose the domain model through a clean, versioned HTTP API that fully supports 
   - labels
   - settings
   - current actor
-- [ ] Add request validation and structured error responses
-- [ ] Implement upload storage abstraction for local disk
-- [ ] Add pagination and filtering where needed for archive/history
-- [ ] Record task events on mutating operations
+- [x] Add request validation and structured error responses
+- [x] Implement upload storage abstraction for local disk
+- [x] Add pagination and filtering where needed for archive/history
+- [x] Record task events on mutating operations
 
 ### Deliverables
 
-- [ ] API contract matches the product spec
-- [ ] OpenAPI or equivalent machine-readable contract is generated if practical
-- [ ] Integration tests cover the primary workflows
+- [x] API contract matches the product spec
+- [x] OpenAPI or equivalent machine-readable contract is generated if practical
+- [x] Integration tests cover the primary workflows
 
 ### Exit Criteria
 
-- [ ] A scriptable client can complete the household workflows end to end
-- [ ] Uploads are stored safely outside the web root
-- [ ] Conflict responses are returned for stale revisions
+- [x] A scriptable client can complete the household workflows end to end
+- [x] Uploads are stored safely outside the web root
+- [x] Conflict responses are returned for stale revisions
 
 ### Risks
 

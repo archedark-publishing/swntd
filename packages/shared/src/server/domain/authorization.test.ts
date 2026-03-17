@@ -6,6 +6,7 @@ import {
   canCreateTask,
   canDownloadAttachment,
   canManageSettings,
+  canReadTask,
   canTransitionTask,
   canUploadBinaryAttachment,
   type AuthenticatedActor
@@ -39,6 +40,7 @@ describe("authorization policies", () => {
     expect(canCreateTask(adminActor)).toBe(true);
     expect(canAssignTasks(adminActor)).toBe(true);
     expect(canUploadBinaryAttachment(adminActor)).toBe(true);
+    expect(canReadTask(adminActor, task)).toBe(true);
     expect(canAttachExternalLink(adminActor, task)).toBe(true);
     expect(canTransitionTask(adminActor, task)).toBe(true);
     expect(canDownloadAttachment(adminActor, task)).toBe(true);
@@ -58,6 +60,7 @@ describe("authorization policies", () => {
     expect(canAssignTasks(serviceActor)).toBe(false);
     expect(canManageSettings(serviceActor)).toBe(false);
     expect(canUploadBinaryAttachment(serviceActor)).toBe(false);
+    expect(canReadTask(serviceActor, eligibleTask)).toBe(true);
     expect(canAttachExternalLink(serviceActor, eligibleTask)).toBe(true);
     expect(canTransitionTask(serviceActor, eligibleTask)).toBe(true);
     expect(canDownloadAttachment(serviceActor, eligibleTask)).toBe(true);

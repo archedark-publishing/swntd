@@ -2,6 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { and, eq, gt, isNull, or } from "drizzle-orm";
 import { serviceTokens, users } from "@swntd/shared/server/db/schema";
 import type { AuthenticatedActor } from "@swntd/shared/server/domain/authorization";
+import type { DatabaseClient } from "../db/client";
 import { createDatabase } from "../db/client";
 
 export function createServiceTokenSecret() {
@@ -23,8 +24,10 @@ export async function issueServiceToken(args: {
   userId: string;
   name: string;
   expiresAt?: Date;
+  db?: DatabaseClient;
 }) {
-  const { client, db } = await createDatabase();
+  const database = args.db ? null : await createDatabase();
+  const db = args.db ?? database!.db;
 
   try {
     const [user] = await db
@@ -60,18 +63,22 @@ export async function issueServiceToken(args: {
       record: created
     };
   } finally {
-    client.close();
+    database?.client.close();
   }
 }
 
-export async function resolveServiceActorFromBearerToken(token: string) {
-  const { client, db } = await createDatabase();
+export async function resolveServiceActorFromBearerToken(
+  token: string,
+  db?: DatabaseClient
+) {
+  const database = db ? null : await createDatabase();
+  const resolvedDb = db ?? database!.db;
 
   try {
     const tokenHash = hashServiceToken(token);
     const now = new Date();
 
-    const [match] = await db
+    const [match] = await resolvedDb
       .select({
         tokenId: serviceTokens.id,
         userId: users.id,
@@ -96,7 +103,7 @@ export async function resolveServiceActorFromBearerToken(token: string) {
       return null;
     }
 
-    await db
+    await resolvedDb
       .update(serviceTokens)
       .set({
         lastUsedAt: new Date()
@@ -115,6 +122,6 @@ export async function resolveServiceActorFromBearerToken(token: string) {
 
     return actor;
   } finally {
-    client.close();
+    database?.client.close();
   }
 }

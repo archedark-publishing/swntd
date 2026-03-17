@@ -12,5 +12,6 @@ describe("parseSwntdConfig", () => {
       "admin2@example.com"
     ]);
     expect(config.serviceActorName).toBe("Household Assistant");
+    expect(config.maxUploadBytes).toBe(20 * 1024 * 1024);
   });
 });
