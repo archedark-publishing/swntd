@@ -38,7 +38,7 @@ import {
   updateSettings,
   updateTask
 } from "./services/api";
-import { deleteStoredUpload, readStoredUpload, storeUpload } from "./storage/uploads";
+import { deleteStoredUpload, readStoredUpload, storeUpload } from "./files/uploads";
 
 type JsonStatus = 200 | 201 | 400 | 401 | 403 | 404 | 409 | 413 | 415 | 500;
 
