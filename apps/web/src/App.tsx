@@ -245,7 +245,7 @@ export function App() {
   const [view, setView] = useState<ViewName>(() => readViewFromHash());
   const [snapshot, setSnapshot] = useState<AppSnapshot>(emptySnapshot);
   const [isBooting, setIsBooting] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isManualRefreshPending, setIsManualRefreshPending] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [selectedTask, setSelectedTask] = useState<TaskDetail | null>(null);
   const [isTaskSheetOpen, setIsTaskSheetOpen] = useState(false);
@@ -283,77 +283,83 @@ export function App() {
     }
   });
 
-  const refreshApp = useEffectEvent(async (options?: { background?: boolean }) => {
+  const refreshApp = useEffectEvent(
+    async (options?: { background?: boolean; showSpinner?: boolean }) => {
     if (refreshInFlightRef.current) {
       return refreshInFlightRef.current;
     }
 
-    if (options?.background || hasLoadedRef.current) {
-      setIsRefreshing(true);
-    }
+      if (options?.showSpinner) {
+        setIsManualRefreshPending(true);
+      }
 
-    const refreshPromise = (async () => {
-      try {
-        const me = await api.getMe();
-        const [activeTasks, archivedTasks] = await Promise.all([
-          api.listTasks({ archived: "exclude" }),
-          api.listTasks({ archived: "only" })
-        ]);
+      if (!options?.background && !hasLoadedRef.current) {
+        setIsBooting(true);
+      }
 
-        if (me.actor.role === "admin") {
-          const [users, labels, settings, recurringTemplates] = await Promise.all([
-            api.listUsers(),
-            api.listLabels(),
-            api.getSettings(),
-            api.listRecurringTemplates()
+      const refreshPromise = (async () => {
+        try {
+          const me = await api.getMe();
+          const [activeTasks, archivedTasks] = await Promise.all([
+            api.listTasks({ archived: "exclude" }),
+            api.listTasks({ archived: "only" })
           ]);
 
-          setSnapshot({
-            activeTasks: activeTasks.items,
-            actor: me.actor,
-            archivedTasks: archivedTasks.items,
-            labels: labels.items,
-            recurringTemplates: recurringTemplates.items,
-            settings: settings.settings,
-            users: users.items
-          });
-        } else {
-          setSnapshot({
-            activeTasks: activeTasks.items,
-            actor: me.actor,
-            archivedTasks: archivedTasks.items,
-            labels: [],
-            recurringTemplates: [],
-            settings: null,
-            users: []
-          });
+          if (me.actor.role === "admin") {
+            const [users, labels, settings, recurringTemplates] = await Promise.all([
+              api.listUsers(),
+              api.listLabels(),
+              api.getSettings(),
+              api.listRecurringTemplates()
+            ]);
+
+            setSnapshot({
+              activeTasks: activeTasks.items,
+              actor: me.actor,
+              archivedTasks: archivedTasks.items,
+              labels: labels.items,
+              recurringTemplates: recurringTemplates.items,
+              settings: settings.settings,
+              users: users.items
+            });
+          } else {
+            setSnapshot({
+              activeTasks: activeTasks.items,
+              actor: me.actor,
+              archivedTasks: archivedTasks.items,
+              labels: [],
+              recurringTemplates: [],
+              settings: null,
+              users: []
+            });
+          }
+
+          if (selectedTaskId) {
+            await loadTaskDetail(selectedTaskId);
+          }
+
+          hasLoadedRef.current = true;
+          setErrorMessage(null);
+        } catch (error) {
+          setErrorMessage(buildFlashMessage(error));
+        } finally {
+          setIsBooting(false);
+          setIsManualRefreshPending(false);
+          refreshInFlightRef.current = null;
         }
+      })();
 
-        if (selectedTaskId) {
-          await loadTaskDetail(selectedTaskId);
-        }
+      refreshInFlightRef.current = refreshPromise;
 
-        hasLoadedRef.current = true;
-        setErrorMessage(null);
-      } catch (error) {
-        setErrorMessage(buildFlashMessage(error));
-      } finally {
-        setIsBooting(false);
-        setIsRefreshing(false);
-        refreshInFlightRef.current = null;
-      }
-    })();
-
-    refreshInFlightRef.current = refreshPromise;
-
-    return refreshPromise;
-  });
+      return refreshPromise;
+    }
+  );
 
   useEffect(() => {
     startTransition(() => {
       void refreshApp();
     });
-  }, [refreshApp]);
+  }, []);
 
   useEffect(() => {
     const onFocus = () => {
@@ -373,11 +379,11 @@ export function App() {
       window.clearInterval(intervalId);
       window.removeEventListener("focus", onFocus);
     };
-  }, [refreshApp]);
+  }, []);
 
   useEffect(() => {
     void loadTaskDetail(selectedTaskId);
-  }, [loadTaskDetail, selectedTaskId]);
+  }, [selectedTaskId]);
 
   const activeTasks = snapshot.activeTasks.slice().sort((left, right) => {
     if (left.status !== right.status) {
@@ -636,12 +642,12 @@ export function App() {
             className="secondary-button"
             onClick={() => {
               startTransition(() => {
-                void refreshApp({ background: true });
+                void refreshApp({ background: true, showSpinner: true });
               });
             }}
             type="button"
           >
-            {isRefreshing ? "Refreshing..." : "Refresh"}
+            {isManualRefreshPending ? "Refreshing..." : "Refresh"}
           </button>
           {canAdmin ? (
             <button className="primary-button" onClick={openNewTask} type="button">
