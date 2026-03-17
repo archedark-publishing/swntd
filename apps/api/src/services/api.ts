@@ -216,6 +216,12 @@ export type CreateUploadAttachmentInput = {
   storagePath: string;
 };
 
+export type TaskEventSource = "api" | "mcp";
+
+type MutationAuditOptions = {
+  eventSource?: TaskEventSource;
+};
+
 function getRequiredRow<T>(row: T | undefined, code: string, message: string) {
   if (!row) {
     throw new ApiError(500, code, message);
@@ -559,12 +565,18 @@ async function createTaskEventRecord(
   taskId: string,
   actorUserId: string,
   eventType: string,
-  payload: unknown
+  payload: unknown,
+  options: MutationAuditOptions = {}
 ) {
+  const eventSource = options.eventSource ?? "api";
+
   await db.insert(taskEvents).values({
     actorUserId,
     eventType,
-    payloadJson: JSON.stringify(payload),
+    payloadJson: JSON.stringify({
+      data: payload,
+      source: eventSource
+    }),
     taskId
   });
 }
@@ -1225,7 +1237,8 @@ export async function transitionTask(
   db: DatabaseClient,
   actor: AuthenticatedActor,
   taskId: string,
-  input: TransitionTaskInput
+  input: TransitionTaskInput,
+  options: MutationAuditOptions = {}
 ) {
   const current = await getTaskOrThrow(db, actor, taskId);
 
@@ -1258,7 +1271,7 @@ export async function transitionTask(
   await createTaskEventRecord(db, taskId, actor.id, "task.status_changed", {
     nextStatus: input.status,
     revision: transitioned.revision
-  });
+  }, options);
 
   return getTaskDetail(db, actor, taskId);
 }
@@ -1316,7 +1329,8 @@ export async function addCommentToTask(
   db: DatabaseClient,
   actor: AuthenticatedActor,
   taskId: string,
-  input: AddCommentInput
+  input: AddCommentInput,
+  options: MutationAuditOptions = {}
 ) {
   const task = await getTaskOrThrow(db, actor, taskId);
 
@@ -1330,7 +1344,7 @@ export async function addCommentToTask(
     taskId
   });
 
-  await createTaskEventRecord(db, taskId, actor.id, "task.comment_added", {});
+  await createTaskEventRecord(db, taskId, actor.id, "task.comment_added", {}, options);
 
   return getTaskDetail(db, actor, taskId);
 }
@@ -1339,7 +1353,8 @@ export async function addAttachmentLinkToTask(
   db: DatabaseClient,
   actor: AuthenticatedActor,
   taskId: string,
-  input: AddAttachmentLinkInput
+  input: AddAttachmentLinkInput,
+  options: MutationAuditOptions = {}
 ) {
   const task = await getTaskOrThrow(db, actor, taskId);
 
@@ -1357,7 +1372,7 @@ export async function addAttachmentLinkToTask(
 
   await createTaskEventRecord(db, taskId, actor.id, "task.attachment_linked", {
     url: input.url
-  });
+  }, options);
 
   return getTaskDetail(db, actor, taskId);
 }

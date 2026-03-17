@@ -1,9 +1,19 @@
-import { workspaceMessage } from "@swntd/shared";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { getMcpConfig } from "./config";
+import { createMcpBanner, createSwntdMcpServer } from "./server";
 
-export function createMcpBanner() {
-  return `MCP bootstrap ready: ${workspaceMessage}`;
+async function main() {
+  const config = getMcpConfig();
+  const { server } = await createSwntdMcpServer({
+    config
+  });
+  const transport = new StdioServerTransport();
+
+  await server.connect(transport);
 }
 
-if (process.argv[1]?.endsWith("index.ts")) {
-  console.log(createMcpBanner());
+if (import.meta.url === new URL(process.argv[1] ?? "", "file:").href) {
+  await main();
 }
+
+export { createMcpBanner, createSwntdMcpServer };

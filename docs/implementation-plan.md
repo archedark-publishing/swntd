@@ -322,30 +322,30 @@ Expose a bounded, policy-respecting tool surface for service actors.
 
 ### Status
 
-- [ ] Phase 6 complete
+- [x] Phase 6 complete
 
 ### Scope
 
-- [ ] Implement MCP server backed by the same domain services as the API
-- [ ] Expose only approved v1 tools:
+- [x] Implement MCP server backed by the same domain services as the API
+- [x] Expose only approved v1 tools:
   - `list_my_tasks`
   - `get_task`
   - `transition_task_status`
   - `add_comment`
   - `attach_link`
-- [ ] Authenticate service actors via service token
-- [ ] Add audit logging for MCP-triggered mutations
+- [x] Authenticate service actors via service token
+- [x] Add audit logging for MCP-triggered mutations
 
 ### Deliverables
 
-- [ ] Service actors can work on eligible tasks without bypassing app rules
-- [ ] MCP behavior is consistent with API behavior
+- [x] Service actors can work on eligible tasks without bypassing app rules
+- [x] MCP behavior is consistent with API behavior
 
 ### Exit Criteria
 
-- [ ] Service actors can complete a realistic task lifecycle through MCP
-- [ ] MCP requests fail cleanly when AI assistance is disabled or assignment changes
-- [ ] Audit trails show MCP-originated actions clearly
+- [x] Service actors can complete a realistic task lifecycle through MCP
+- [x] MCP requests fail cleanly when AI assistance is disabled or assignment changes
+- [x] Audit trails show MCP-originated actions clearly
 
 ### Risks
 
