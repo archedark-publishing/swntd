@@ -14,7 +14,8 @@
     "build": "pnpm -r build",
     "db:generate": "pnpm --filter @swntd/api db:generate",
     "db:migrate": "pnpm --filter @swntd/api db:migrate",
-    "db:bootstrap": "pnpm --filter @swntd/api db:bootstrap"
+    "db:bootstrap": "pnpm --filter @swntd/api db:bootstrap",
+    "jobs:run": "pnpm --filter @swntd/api jobs:run"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

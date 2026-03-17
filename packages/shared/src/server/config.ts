@@ -33,6 +33,7 @@ const rawConfigSchema = z.object({
     .int()
     .positive()
     .default(20 * 1024 * 1024),
+  SWNTD_STALE_UPLOAD_GRACE_HOURS: z.coerce.number().int().positive().default(24),
   SWNTD_DATABASE_URL: z
     .string()
     .trim()
@@ -65,6 +66,7 @@ export function parseSwntdConfig(env: NodeJS.ProcessEnv = process.env) {
     defaultCalendarExportKind: raw.SWNTD_DEFAULT_CALENDAR_EXPORT_KIND,
     uploadsDir: raw.SWNTD_UPLOADS_DIR,
     maxUploadBytes: raw.SWNTD_MAX_UPLOAD_BYTES,
+    staleUploadGraceHours: raw.SWNTD_STALE_UPLOAD_GRACE_HOURS,
     databaseUrl: raw.SWNTD_DATABASE_URL
   };
 }

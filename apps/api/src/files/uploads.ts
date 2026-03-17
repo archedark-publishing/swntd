@@ -39,14 +39,14 @@ export type StoredUpload = {
   storagePath: string;
 };
 
-function getResolvedUploadsDir(config: UploadConfig) {
+export function resolveUploadsDir(config: UploadConfig) {
   return path.isAbsolute(config.uploadsDir)
     ? config.uploadsDir
     : path.resolve(process.cwd(), config.uploadsDir);
 }
 
 async function ensureUploadsDir(config: UploadConfig) {
-  await mkdir(getResolvedUploadsDir(config), { recursive: true });
+  await mkdir(resolveUploadsDir(config), { recursive: true });
 }
 
 function getSafeExtension(filename: string) {
@@ -85,7 +85,7 @@ export async function storeUpload(file: File, config: UploadConfig) {
 
   const extension = getSafeExtension(file.name || "upload");
   const storagePath = `${crypto.randomUUID()}${extension}`;
-  const absolutePath = path.join(getResolvedUploadsDir(config), storagePath);
+  const absolutePath = path.join(resolveUploadsDir(config), storagePath);
   const bytes = Buffer.from(await file.arrayBuffer());
 
   await writeFile(absolutePath, bytes);
@@ -107,7 +107,7 @@ function resolveStoredUploadPath(storagePath: string, config: UploadConfig) {
     throw new ApiError(400, "invalid_attachment_path", "Invalid attachment path.");
   }
 
-  return path.join(getResolvedUploadsDir(config), safeName);
+  return path.join(resolveUploadsDir(config), safeName);
 }
 
 export async function readStoredUpload(

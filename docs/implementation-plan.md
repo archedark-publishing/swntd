@@ -283,27 +283,27 @@ Automate the recurring and archival behaviors that make the product useful over 
 
 ### Status
 
-- [ ] Phase 5 complete
+- [x] Phase 5 complete
 
 ### Scope
 
-- [ ] Implement recurring occurrence generation job
-- [ ] Implement done-task archival job
-- [ ] Implement stale-upload cleanup job
-- [ ] Add observability for job runs and failures
-- [ ] Ensure jobs are safe to re-run
+- [x] Implement recurring occurrence generation job
+- [x] Implement done-task archival job
+- [x] Implement stale-upload cleanup job
+- [x] Add observability for job runs and failures
+- [x] Ensure jobs are safe to re-run
 
 ### Deliverables
 
-- [ ] Recurring tasks generate future occurrences correctly
-- [ ] Done tasks archive automatically after retention period
-- [ ] Failed partial uploads do not accumulate indefinitely
+- [x] Recurring tasks generate future occurrences correctly
+- [x] Done tasks archive automatically after retention period
+- [x] Failed partial uploads do not accumulate indefinitely
 
 ### Exit Criteria
 
-- [ ] Job tests cover idempotency and duplicate-trigger safety
-- [ ] Recurring templates never produce more than one open occurrence
-- [ ] Archival behavior matches configured retention defaults
+- [x] Job tests cover idempotency and duplicate-trigger safety
+- [x] Recurring templates never produce more than one open occurrence
+- [x] Archival behavior matches configured retention defaults
 
 ### Risks
 

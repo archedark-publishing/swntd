@@ -6,9 +6,9 @@ The project is being built as a polished, general-purpose open source web app th
 
 ## Status
 
-Phase 4 complete: the web MVP is implemented and wired to the core API.
+Phase 5 complete: lifecycle automation is in place for recurring task generation, done-task archival, and stale upload cleanup.
 
-The current implementation baseline includes the `/api/v1` HTTP surface, upload/download handling, task event recording, and a responsive board-oriented web app with board, my tasks, archive, and settings views. Product details still follow [docs/product-spec.md](docs/product-spec.md), with execution tracking in [docs/implementation-plan.md](docs/implementation-plan.md).
+The current implementation baseline includes the `/api/v1` HTTP surface, upload/download handling, task event recording, recurring/archive cleanup jobs, and a responsive board-oriented web app with board, my tasks, archive, and settings views. Product details still follow [docs/product-spec.md](docs/product-spec.md), with execution tracking in [docs/implementation-plan.md](docs/implementation-plan.md).
 
 Key architectural choices and their rationale are tracked in [ARCHITECTURE_DECISIONS.md](ARCHITECTURE_DECISIONS.md).
 The API also exposes a lightweight machine-readable contract at `/api/v1/openapi.json`.
@@ -41,6 +41,7 @@ Useful package-level commands:
 ```bash
 pnpm db:migrate
 pnpm db:bootstrap
+pnpm jobs:run
 pnpm --filter @swntd/web dev
 pnpm --filter @swntd/api dev
 pnpm --filter @swntd/mcp dev
