@@ -11,6 +11,7 @@ Planning and specification.
 The first implementation work should follow the product spec in [docs/product-spec.md](docs/product-spec.md).
 
 Key architectural choices and their rationale are tracked in [ARCHITECTURE_DECISIONS.md](ARCHITECTURE_DECISIONS.md).
+The execution sequence is tracked in [docs/implementation-plan.md](docs/implementation-plan.md).
 
 ## Product Goals
 
