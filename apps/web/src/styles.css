@@ -340,6 +340,11 @@ a {
   gap: 0.45rem;
 }
 
+.sheet-header-copy {
+  display: grid;
+  gap: 0.65rem;
+}
+
 .section-heading-actions,
 .header-action-row {
   display: flex;
@@ -513,6 +518,18 @@ a {
 
 .section-copy {
   max-width: 26rem;
+}
+
+.sheet-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.sheet-summary-badge {
+  border-color: rgb(86 58 30 / 0.14);
+  background: rgb(255 255 255 / 0.68);
+  color: rgb(32 23 15 / 0.82);
 }
 
 .search-field,

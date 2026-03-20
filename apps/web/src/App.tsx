@@ -1223,9 +1223,26 @@ function TaskSheet(props: {
     <div className="sheet-backdrop" role="presentation">
       <aside aria-label="Task details" className="sheet-panel">
         <header className="sheet-header">
-          <div>
+          <div className="sheet-header-copy">
             <p className="eyebrow">{props.variant === "create" ? "New Task" : "Task Detail"}</p>
             <h2>{props.variant === "create" ? "Add Something to the Board" : currentTask?.title}</h2>
+            {currentTask ? (
+              <div className="sheet-summary">
+                <Badge className="sheet-summary-badge" variant="secondary">
+                  {currentTask.status}
+                </Badge>
+                <Badge className="sheet-summary-badge" variant="outline">
+                  {currentTask.assignee?.displayName ?? "Unassigned"}
+                </Badge>
+                <Badge className="sheet-summary-badge" variant="outline">
+                  {formatDate(currentTask.dueOn, currentTask.dueTime)}
+                </Badge>
+              </div>
+            ) : (
+              <p className="section-copy">
+                Capture the errand, chore, or recurring ritual with enough context for anyone in the household to pick it up.
+              </p>
+            )}
           </div>
           <Button className="rounded-full" onClick={props.onClose} size="sm" type="button" variant="outline">
             Close
