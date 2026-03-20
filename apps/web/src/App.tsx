@@ -66,7 +66,6 @@ type TemplateDraft = {
 };
 
 type HouseholdUserDraft = {
-  deactivated: boolean;
   displayName: string;
   email: string;
   mode: "admin" | "service";
@@ -187,7 +186,6 @@ function createHouseholdUserDraft(
 ): HouseholdUserDraft {
   if (!user) {
     return {
-      deactivated: false,
       displayName: "",
       email: "",
       mode,
@@ -196,7 +194,6 @@ function createHouseholdUserDraft(
   }
 
   return {
-    deactivated: Boolean(user.deactivatedAt),
     displayName: user.displayName,
     email: user.email ?? "",
     mode: user.role,
@@ -720,12 +717,10 @@ export function App() {
       const updateInput =
         draft.mode === "admin"
           ? {
-              deactivated: draft.deactivated,
               displayName: draft.displayName.trim(),
               email: draft.email.trim()
             }
           : {
-              deactivated: draft.deactivated,
               displayName: draft.displayName.trim(),
               serviceKind: draft.serviceKind.trim()
             };
@@ -768,6 +763,19 @@ export function App() {
     }
 
     return Boolean(created);
+  }
+
+  async function handleHouseholdUserRemove(userId: string) {
+    const removed = await runMutation(
+      () => api.removeUser(userId),
+      "Household actor removed from the cast."
+    );
+
+    if (removed) {
+      setEditingUserKey(null);
+    }
+
+    return Boolean(removed);
   }
 
   async function handleServiceTokenIssue(userId: string, name: string) {
@@ -929,6 +937,7 @@ export function App() {
           labels={snapshot.labels}
           onCreateLabel={handleLabelCreate}
           onIssueServiceToken={handleServiceTokenIssue}
+          onRemoveUser={handleHouseholdUserRemove}
           onRevokeServiceToken={handleServiceTokenRevoke}
           onSaveSettings={handleSettingsSave}
           onSaveTemplate={handleTemplateSave}
@@ -1744,6 +1753,7 @@ function SettingsView(props: {
     userId: string,
     name: string
   ) => Promise<{ item: ServiceToken; plainTextToken: string } | null>;
+  onRemoveUser: (userId: string) => Promise<boolean>;
   onRevokeServiceToken: (tokenId: string) => Promise<void>;
   onSaveSettings: (settings: Settings) => Promise<void>;
   onSaveTemplate: (draft: TemplateDraft) => Promise<void>;
@@ -1770,6 +1780,7 @@ function SettingsView(props: {
   const [serviceTokenName, setServiceTokenName] = useState("");
   const [issuedServiceToken, setIssuedServiceToken] = useState<string | null>(null);
   const [userActionMessage, setUserActionMessage] = useState<string | null>(null);
+  const [isUserRemovePending, setIsUserRemovePending] = useState(false);
   const [isUserSavePending, setIsUserSavePending] = useState(false);
 
   useEffect(() => {
@@ -1785,6 +1796,7 @@ function SettingsView(props: {
     setServiceTokenName("");
     setIssuedServiceToken(null);
     setUserActionMessage(null);
+    setIsUserRemovePending(false);
     setIsUserSavePending(false);
   }, [props.selectedUser, props.userEditorMode]);
 
@@ -1910,11 +1922,7 @@ function SettingsView(props: {
                 type="button"
               >
                 <strong>{user.displayName}</strong>
-                <span>
-                  {user.deactivatedAt
-                    ? `${formatRoleLabel(user)} · Deactivated`
-                    : formatRoleLabel(user)}
-                </span>
+                <span>{formatRoleLabel(user)}</span>
               </button>
             ))}
           </div>
@@ -1969,26 +1977,12 @@ function SettingsView(props: {
                   />
                 </label>
               )}
-              {props.selectedUser ? (
-                <label className="toggle-field">
-                  <input
-                    checked={userDraft.deactivated}
-                    onChange={(event) =>
-                      setUserDraft({
-                        ...userDraft,
-                        deactivated: event.target.checked
-                      })
-                    }
-                    type="checkbox"
-                  />
-                  <span>Deactivate this household actor</span>
-                </label>
-              ) : null}
             </div>
             <div className="sheet-actions">
               <button
                 className="primary-button"
                 disabled={
+                  isUserRemovePending ||
                   isUserSavePending ||
                   !userDraft.displayName.trim() ||
                   (userDraft.mode === "admin"
@@ -2018,8 +2012,44 @@ function SettingsView(props: {
                     ? "Save Actor"
                     : "Create Actor"}
               </button>
+              {props.selectedUser ? (
+                <button
+                  className="ghost-button"
+                  disabled={isUserRemovePending || isUserSavePending}
+                  onClick={async () => {
+                    const selectedUserId = props.selectedUser?.id;
+
+                    if (!selectedUserId) {
+                      return;
+                    }
+
+                    if (
+                      !window.confirm(
+                        "Remove this household actor permanently from the active cast? They will stay in task history, lose open assignments, and any assistant tokens will be revoked."
+                      )
+                    ) {
+                      return;
+                    }
+
+                    setIsUserRemovePending(true);
+                    setUserActionMessage(null);
+                    await props.onRemoveUser(selectedUserId);
+                    setIsUserRemovePending(false);
+                  }}
+                  type="button"
+                >
+                  {isUserRemovePending ? "Removing..." : "Remove Actor"}
+                </button>
+              ) : null}
             </div>
             {userActionMessage ? <div className="empty-card">{userActionMessage}</div> : null}
+            {props.selectedUser ? (
+              <div className="empty-card">
+                Removing an actor is permanent. They stay attached to past comments and
+                history, but disappear from the household cast, cannot be assigned to
+                anything new, and assistants lose any active tokens.
+              </div>
+            ) : null}
 
             {props.selectedUser?.role === "service" ? (
               <section className="sheet-section">
@@ -2040,7 +2070,9 @@ function SettingsView(props: {
                   </label>
                   <button
                     className="secondary-button"
-                    disabled={!serviceTokenName.trim() || userDraft.deactivated}
+                    disabled={
+                      !serviceTokenName.trim() || isUserRemovePending || isUserSavePending
+                    }
                     onClick={async () => {
                       const issued = await props.onIssueServiceToken(
                         props.selectedUser!.id,

@@ -35,6 +35,7 @@ import {
   listRecurringTemplates,
   listServiceTokensForUser,
   listTasks,
+  removeHouseholdUser,
   reorderTask,
   revokeServiceToken,
   transitionTask,
@@ -118,7 +119,6 @@ const createHouseholdUserSchema = z.discriminatedUnion("role", [
 
 const updateHouseholdUserSchema = z
   .object({
-    deactivated: z.boolean().optional(),
     displayName: z.string().trim().min(1).optional(),
     email: z.email().nullable().optional(),
     serviceKind: z.string().trim().min(1).optional()
@@ -297,6 +297,13 @@ export function createApp() {
       await updateHouseholdUser(c.var.db, c.var.actor, c.req.param("userId"), input)
     );
   });
+
+  app.post("/api/v1/users/:userId/remove", async (c) =>
+    jsonOk(
+      c,
+      await removeHouseholdUser(c.var.db, c.var.actor, c.req.param("userId"))
+    )
+  );
 
   app.get("/api/v1/users/:userId/service-tokens", async (c) =>
     jsonOk(
@@ -545,6 +552,7 @@ export function createApp() {
         "/api/v1/tasks/{taskId}/uploads": ["post"],
         "/api/v1/users": ["get", "post"],
         "/api/v1/users/{userId}": ["patch"],
+        "/api/v1/users/{userId}/remove": ["post"],
         "/api/v1/users/{userId}/service-tokens": ["get", "post"],
         "/api/v1/service-tokens/{tokenId}/revoke": ["post"]
       }

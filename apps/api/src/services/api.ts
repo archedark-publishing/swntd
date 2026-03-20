@@ -242,7 +242,6 @@ export type CreateHouseholdUserInput =
     };
 
 export type UpdateHouseholdUserInput = {
-  deactivated?: boolean | undefined;
   displayName?: string | undefined;
   email?: string | null | undefined;
   serviceKind?: string | undefined;
@@ -686,19 +685,9 @@ export async function listHouseholdUsers(
       serviceKind: users.serviceKind
     })
     .from(users)
-    .where(eq(users.householdId, actor.householdId));
+    .where(and(eq(users.householdId, actor.householdId), isNull(users.deactivatedAt)));
 
-  rows.sort((left, right) => {
-    if (left.deactivatedAt && !right.deactivatedAt) {
-      return 1;
-    }
-
-    if (!left.deactivatedAt && right.deactivatedAt) {
-      return -1;
-    }
-
-    return left.displayName.localeCompare(right.displayName);
-  });
+  rows.sort((left, right) => left.displayName.localeCompare(right.displayName));
 
   return {
     items: rows.map((row) => mapUserRef(row))
@@ -812,11 +801,11 @@ export async function updateHouseholdUser(
 
   const current = await getHouseholdUserOrThrow(db, actor.householdId, userId);
 
-  if (current.id === actor.id && input.deactivated === true) {
+  if (current.deactivatedAt) {
     throw new ApiError(
-      400,
-      "cannot_deactivate_current_actor",
-      "You cannot deactivate the currently authenticated admin."
+      409,
+      "user_removed",
+      "Removed household actors cannot be edited."
     );
   }
 
@@ -857,17 +846,9 @@ export async function updateHouseholdUser(
     }
   }
 
-  const nextDeactivatedAt =
-    input.deactivated === undefined
-      ? current.deactivatedAt
-      : input.deactivated
-        ? new Date()
-        : null;
-
   await db
     .update(users)
     .set({
-      deactivatedAt: nextDeactivatedAt,
       displayName: input.displayName?.trim() || current.displayName,
       email: current.role === "admin" ? normalizedEmail : null,
       serviceKind:
@@ -878,39 +859,79 @@ export async function updateHouseholdUser(
     })
     .where(eq(users.id, current.id));
 
-  if (input.deactivated === true) {
-    await db
-      .update(tasks)
-      .set({
-        assigneeUserId: null,
-        updatedAt: new Date(),
-        updatedByUserId: actor.id
-      })
-      .where(and(eq(tasks.assigneeUserId, current.id), isNull(tasks.archivedAt)));
-
-    await db
-      .update(recurringTaskTemplates)
-      .set({
-        defaultAssigneeUserId: null,
-        updatedAt: new Date(),
-        updatedByUserId: actor.id
-      })
-      .where(eq(recurringTaskTemplates.defaultAssigneeUserId, current.id));
-
-    if (current.role === "service") {
-      await db
-        .update(serviceTokens)
-        .set({
-          revokedAt: new Date()
-        })
-        .where(and(eq(serviceTokens.userId, current.id), isNull(serviceTokens.revokedAt)));
-    }
-  }
-
   const updated = await getHouseholdUserOrThrow(db, actor.householdId, current.id);
 
   return {
     item: mapUserRef(updated)
+  };
+}
+
+export async function removeHouseholdUser(
+  db: DatabaseClient,
+  actor: AuthenticatedActor,
+  userId: string
+) {
+  assertAdmin(actor);
+
+  const current = await getHouseholdUserOrThrow(db, actor.householdId, userId);
+
+  if (current.id === actor.id) {
+    throw new ApiError(
+      400,
+      "cannot_remove_current_actor",
+      "You cannot remove the currently authenticated admin."
+    );
+  }
+
+  if (current.deactivatedAt) {
+    throw new ApiError(
+      409,
+      "user_removed",
+      "This household actor has already been removed."
+    );
+  }
+
+  const removedAt = new Date();
+
+  await db
+    .update(users)
+    .set({
+      deactivatedAt: removedAt,
+      updatedAt: removedAt
+    })
+    .where(eq(users.id, current.id));
+
+  await db
+    .update(tasks)
+    .set({
+      assigneeUserId: null,
+      updatedAt: removedAt,
+      updatedByUserId: actor.id
+    })
+    .where(and(eq(tasks.assigneeUserId, current.id), isNull(tasks.archivedAt)));
+
+  await db
+    .update(recurringTaskTemplates)
+    .set({
+      defaultAssigneeUserId: null,
+      updatedAt: removedAt,
+      updatedByUserId: actor.id
+    })
+    .where(eq(recurringTaskTemplates.defaultAssigneeUserId, current.id));
+
+  if (current.role === "service") {
+    await db
+      .update(serviceTokens)
+      .set({
+        revokedAt: removedAt
+      })
+      .where(and(eq(serviceTokens.userId, current.id), isNull(serviceTokens.revokedAt)));
+  }
+
+  const removed = await getHouseholdUserOrThrow(db, actor.householdId, current.id);
+
+  return {
+    item: mapUserRef(removed)
   };
 }
 

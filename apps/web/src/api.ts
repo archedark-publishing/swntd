@@ -399,6 +399,11 @@ export const api = {
       method: "POST"
     });
   },
+  removeUser(userId: string) {
+    return request<{ item: UserRef }>(`/api/v1/users/${userId}/remove`, {
+      method: "POST"
+    });
+  },
   reorderTask(taskId: string, input: { expectedRevision: number; targetIndex: number }) {
     return request<{ item: TaskDetail }>(`/api/v1/tasks/${taskId}/reorder`, {
       body: JSON.stringify(input),
@@ -469,7 +474,6 @@ export const api = {
   updateUser(
     userId: string,
     input: {
-      deactivated?: boolean;
       displayName?: string;
       email?: string | null;
       serviceKind?: string;

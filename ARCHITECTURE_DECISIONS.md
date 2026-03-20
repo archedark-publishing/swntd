@@ -204,5 +204,5 @@ Bootstrap configuration creates missing initial admins and the initial service a
 ### Consequences
 
 - `SWNTD_BOOTSTRAP_ADMIN_EMAILS` and `SWNTD_SERVICE_ACTOR_NAME` remain useful for fresh deployments, but they no longer dictate ongoing actor state.
-- The settings UI and API now own household actor creation, updates, deactivation, and assistant token lifecycle.
-- Deactivating a service actor revokes their active tokens and clears them from open assignments and recurring defaults.
+- The settings UI and API now own household actor creation, updates, permanent soft-removal, and assistant token lifecycle.
+- Removing a service actor revokes their active tokens and clears them from open assignments and recurring defaults while preserving historical references.

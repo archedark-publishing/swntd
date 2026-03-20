@@ -521,6 +521,7 @@ describe("Phase 3 API", () => {
     const openApi = await parseJson<OpenApiResponse>(openApiResponse);
     expect(openApi.paths["/api/v1/tasks/{taskId}/status"]).toContain("post");
     expect(openApi.paths["/api/v1/users/{userId}/service-tokens"]).toContain("post");
+    expect(openApi.paths["/api/v1/users/{userId}/remove"]).toContain("post");
   });
 
   it("supports managing household actors and assistant tokens", async () => {
@@ -586,33 +587,35 @@ describe("Phase 3 API", () => {
     expect(createTaskResponse.status).toBe(201);
     const createdTask = await parseJson<TaskItemResponse>(createTaskResponse);
 
-    const deactivateAssistantResponse = await app.request(
-      `/api/v1/users/${createdAssistant.item.id}`,
-      jsonRequest({
-        body: {
-          deactivated: true
-        },
+    const removeAssistantResponse = await app.request(
+      `/api/v1/users/${createdAssistant.item.id}/remove`,
+      {
         headers: adminHeaders,
-        method: "PATCH"
-      })
+        method: "POST"
+      }
     );
-    expect(deactivateAssistantResponse.status).toBe(200);
-    const deactivatedAssistant = await parseJson<UserResponse>(
-      deactivateAssistantResponse
-    );
-    expect(deactivatedAssistant.item.deactivatedAt).toBeTruthy();
+    expect(removeAssistantResponse.status).toBe(200);
+    const removedAssistant = await parseJson<UserResponse>(removeAssistantResponse);
+    expect(removedAssistant.item.deactivatedAt).toBeTruthy();
 
-    const taskDetailAfterDeactivation = await app.request(
+    const taskDetailAfterRemoval = await app.request(
       `/api/v1/tasks/${createdTask.item.id}`,
       {
         headers: adminHeaders
       }
     );
-    expect(taskDetailAfterDeactivation.status).toBe(200);
-    const taskAfterDeactivation = await parseJson<TaskItemResponse>(
-      taskDetailAfterDeactivation
+    expect(taskDetailAfterRemoval.status).toBe(200);
+    const taskAfterRemoval = await parseJson<TaskItemResponse>(taskDetailAfterRemoval);
+    expect(taskAfterRemoval.item.assignee).toBeNull();
+
+    const listUsersResponse = await app.request("/api/v1/users", {
+      headers: adminHeaders
+    });
+    expect(listUsersResponse.status).toBe(200);
+    const listedUsers = await parseJson<UsersResponse>(listUsersResponse);
+    expect(listedUsers.items.some((user) => user.id === createdAssistant.item.id)).toBe(
+      false
     );
-    expect(taskAfterDeactivation.item.assignee).toBeNull();
 
     const serviceTokensResponse = await app.request(
       `/api/v1/users/${createdAssistant.item.id}/service-tokens`,
@@ -627,11 +630,10 @@ describe("Phase 3 API", () => {
     expect(serviceTokens.items).toHaveLength(1);
     expect(serviceTokens.items[0]?.revokedAt).toBeTruthy();
 
-    const reactivateAssistantResponse = await app.request(
+    const editRemovedAssistantResponse = await app.request(
       `/api/v1/users/${createdAssistant.item.id}`,
       jsonRequest({
         body: {
-          deactivated: false,
           displayName: "Ada Lovelace",
           serviceKind: "assistant"
         },
@@ -639,12 +641,7 @@ describe("Phase 3 API", () => {
         method: "PATCH"
       })
     );
-    expect(reactivateAssistantResponse.status).toBe(200);
-    const reactivatedAssistant = await parseJson<UserResponse>(
-      reactivateAssistantResponse
-    );
-    expect(reactivatedAssistant.item.deactivatedAt).toBeNull();
-    expect(reactivatedAssistant.item.displayName).toBe("Ada Lovelace");
+    expect(editRemovedAssistantResponse.status).toBe(409);
 
     const revokeTokenResponse = await app.request(
       `/api/v1/service-tokens/${issuedToken.item.id}/revoke`,
@@ -654,6 +651,35 @@ describe("Phase 3 API", () => {
       }
     );
     expect(revokeTokenResponse.status).toBe(200);
+  });
+
+  it("does not let an admin remove the currently authenticated actor", async () => {
+    const adminHeaders = trustedHeader("admin1@example.com");
+
+    const meResponse = await app.request("/api/v1/me", {
+      headers: adminHeaders
+    });
+    expect(meResponse.status).toBe(200);
+    const me = await parseJson<MeResponse>(meResponse);
+    expect(me.actor.email).toBe("admin1@example.com");
+
+    const listUsersResponse = await app.request("/api/v1/users", {
+      headers: adminHeaders
+    });
+    expect(listUsersResponse.status).toBe(200);
+    const users = await parseJson<UsersResponse>(listUsersResponse);
+    const currentAdmin = users.items.find((user) => user.email === me.actor.email);
+
+    expect(currentAdmin).toBeDefined();
+
+    const removeCurrentAdminResponse = await app.request(
+      `/api/v1/users/${currentAdmin!.id}/remove`,
+      {
+        headers: adminHeaders,
+        method: "POST"
+      }
+    );
+    expect(removeCurrentAdminResponse.status).toBe(400);
   });
 
   it("enforces service-actor permissions through the HTTP API", async () => {
