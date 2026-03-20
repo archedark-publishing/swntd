@@ -547,7 +547,7 @@ describe("Phase 3 API", () => {
       "/api/v1/users",
       jsonRequest({
         body: {
-          displayName: "Ada",
+          displayName: "Household Assistant",
           role: "service",
           serviceKind: "assistant"
         },
@@ -562,7 +562,7 @@ describe("Phase 3 API", () => {
       `/api/v1/users/${createdAssistant.item.id}/service-tokens`,
       jsonRequest({
         body: {
-          name: "Ada exe.dev"
+          name: "Assistant exe.dev"
         },
         headers: adminHeaders,
         method: "POST"
@@ -578,7 +578,7 @@ describe("Phase 3 API", () => {
         body: {
           aiAssistanceEnabled: true,
           assigneeUserId: createdAssistant.item.id,
-          title: "Ada-owned task"
+          title: "Assistant-owned task"
         },
         headers: adminHeaders,
         method: "POST"
@@ -634,7 +634,7 @@ describe("Phase 3 API", () => {
       `/api/v1/users/${createdAssistant.item.id}`,
       jsonRequest({
         body: {
-          displayName: "Ada Lovelace",
+          displayName: "Helpful Assistant",
           serviceKind: "assistant"
         },
         headers: adminHeaders,

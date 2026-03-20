@@ -60,8 +60,8 @@ describe("Phase 6 MCP server", () => {
           { body: "Gather supplies" },
           { body: "Finish the first pass" }
         ],
-        description: "A task Ada should be allowed to pick up.",
-        title: "Ada-ready task"
+        description: "A task the household assistant should be allowed to pick up.",
+        title: "Assistant-ready task"
       });
 
       const assistantToken = await issueAssistantBearerToken();
@@ -83,7 +83,7 @@ describe("Phase 6 MCP server", () => {
           {
             id: createdTask.item.id,
             status: "To Do",
-            title: "Ada-ready task"
+            title: "Assistant-ready task"
           }
         ],
         total: 1
@@ -99,10 +99,10 @@ describe("Phase 6 MCP server", () => {
             { body: "Gather supplies" },
             { body: "Finish the first pass" }
           ],
-          description: "A task Ada should be allowed to pick up.",
+          description: "A task the household assistant should be allowed to pick up.",
           id: createdTask.item.id,
           status: "To Do",
-          title: "Ada-ready task"
+          title: "Assistant-ready task"
         }
       });
 
@@ -194,7 +194,7 @@ describe("Phase 6 MCP server", () => {
       const createdTask = await createTask(db, adminActor, {
         aiAssistanceEnabled: true,
         assigneeUserId: assistantId,
-        title: "Ephemeral Ada task"
+        title: "Ephemeral assistant task"
       });
 
       const assistantToken = await issueAssistantBearerToken();
@@ -212,7 +212,7 @@ describe("Phase 6 MCP server", () => {
         aiAssistanceEnabled: false,
         assigneeUserId: assistantId,
         expectedRevision: createdTask.item.revision,
-        title: "Ephemeral Ada task"
+        title: "Ephemeral assistant task"
       });
 
       const listAfterDisable = await callTool("list_my_tasks", {});
@@ -234,7 +234,7 @@ describe("Phase 6 MCP server", () => {
         aiAssistanceEnabled: true,
         assigneeUserId: null,
         expectedRevision: 1,
-        title: "Ephemeral Ada task"
+        title: "Ephemeral assistant task"
       });
 
       const deniedGet = await callTool("get_task", {
