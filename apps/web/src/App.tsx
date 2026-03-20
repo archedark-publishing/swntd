@@ -9,7 +9,6 @@ import {
 import {
   AppChrome,
   EmptyStateCard,
-  FlashBanner,
   InfoRow,
   SectionHeading,
   SurfaceCard,
@@ -30,6 +29,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { Toaster } from "@/components/ui/sonner";
 import {
   api,
   downloadAttachment,
@@ -51,6 +51,7 @@ import {
   buildGoogleCalendarUrl,
   downloadIcsFile
 } from "./calendar";
+import { toast } from "sonner";
 import "./styles.css";
 
 type ViewName = "archive" | "board" | "my-tasks" | "settings";
@@ -337,6 +338,10 @@ function normalizeApiError(error: unknown) {
   return null;
 }
 
+function showErrorToast(message: string, toastId?: string) {
+  toast.error(message, { id: toastId ?? `error:${message}` });
+}
+
 export function App() {
   const [view, setView] = useState<ViewName>(() => readViewFromHash());
   const [snapshot, setSnapshot] = useState<AppSnapshot>(emptySnapshot);
@@ -348,8 +353,6 @@ export function App() {
   const [isCreatingTask, setIsCreatingTask] = useState(false);
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
   const [editingUserKey, setEditingUserKey] = useState<string | "new-admin" | "new-service" | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [archiveSearch, setArchiveSearch] = useState("");
   const deferredArchiveSearch = useDeferredValue(archiveSearch);
   const hasLoadedRef = useRef(false);
@@ -376,7 +379,7 @@ export function App() {
         return;
       }
 
-      setErrorMessage(buildFlashMessage(error));
+      showErrorToast(buildFlashMessage(error), "task-detail-error");
     }
   });
 
@@ -446,9 +449,13 @@ export function App() {
           }
 
           hasLoadedRef.current = true;
-          setErrorMessage(null);
         } catch (error) {
-          setErrorMessage(buildFlashMessage(error));
+          if (!options?.background || options?.showSpinner) {
+            showErrorToast(
+              buildFlashMessage(error),
+              options?.showSpinner ? "manual-refresh-error" : "refresh-error"
+            );
+          }
         } finally {
           setIsBooting(false);
           setIsManualRefreshPending(false);
@@ -522,8 +529,7 @@ export function App() {
   ) {
     try {
       const result = await action();
-      setNotice(successMessage);
-      setErrorMessage(null);
+      toast.success(successMessage);
 
       if (options?.closeTaskSheet) {
         setIsTaskSheetOpen(false);
@@ -533,7 +539,10 @@ export function App() {
       await refreshApp({ background: true });
       return result;
     } catch (error) {
-      setErrorMessage(buildFlashMessage(error));
+      showErrorToast(
+        buildFlashMessage(error),
+        isConflictError(error) ? "mutation-conflict" : undefined
+      );
 
       if (isConflictError(error)) {
         await refreshApp({ background: true });
@@ -846,14 +855,6 @@ export function App() {
 
       <ViewSwitcher items={navItems} onSelect={setView} selected={view} />
 
-      {notice ? (
-        <FlashBanner kind="notice" message={notice} onDismiss={() => setNotice(null)} />
-      ) : null}
-
-      {errorMessage ? (
-        <FlashBanner kind="error" message={errorMessage} onDismiss={() => setErrorMessage(null)} />
-      ) : null}
-
       {isBooting ? (
         <StatusMessageCard
           description="Fetching the latest board state, settings, and household cast."
@@ -976,7 +977,7 @@ export function App() {
           try {
             await downloadAttachment(attachment.downloadUrl, attachment.originalName);
           } catch (error) {
-            setErrorMessage(buildFlashMessage(error));
+            showErrorToast(buildFlashMessage(error), "attachment-download-error");
           }
         }}
         onSave={handleTaskSubmit}
@@ -988,6 +989,7 @@ export function App() {
         users={snapshot.users}
         variant={isCreatingTask ? "create" : "detail"}
       />
+      <Toaster />
     </main>
   );
 }

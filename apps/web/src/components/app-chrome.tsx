@@ -1,6 +1,5 @@
 import type { ComponentProps, ReactNode } from "react";
-import { AlertCircle, RefreshCw, ScrollText } from "lucide-react";
-import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { RefreshCw, ScrollText } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -75,30 +74,6 @@ export function ViewSwitcher<TView extends string>(props: {
         </Button>
       ))}
     </nav>
-  );
-}
-
-export function FlashBanner(props: {
-  kind: "error" | "notice";
-  message: string;
-  onDismiss: () => void;
-}) {
-  return (
-    <Alert
-      className={cn(
-        "mx-auto mb-4 max-w-[95rem] border-border/60 bg-white/78 shadow-sm backdrop-blur-sm",
-        props.kind === "error" && "border-destructive/25 text-destructive"
-      )}
-    >
-      <AlertCircle className="size-4" />
-      <AlertTitle>{props.kind === "error" ? "Something needs attention" : "Update"}</AlertTitle>
-      <AlertDescription>{props.message}</AlertDescription>
-      <AlertAction>
-        <Button onClick={props.onDismiss} size="sm" type="button" variant="ghost">
-          Dismiss
-        </Button>
-      </AlertAction>
-    </Alert>
   );
 }
 

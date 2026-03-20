@@ -106,10 +106,12 @@ a {
   opacity: 0.6;
 }
 
+.toaster {
+  z-index: 60;
+}
+
 .masthead,
 .view-nav,
-.notice-banner,
-.error-banner,
 .board-grid,
 .panel-stack,
 .settings-grid {
@@ -263,35 +265,6 @@ a {
   flex-wrap: wrap;
   max-width: 95rem;
   margin: 0 auto 1rem;
-}
-
-.notice-banner,
-.error-banner {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 1rem;
-  max-width: 95rem;
-  margin: 0 auto 1rem;
-  padding: 0.95rem 1.1rem;
-  border-radius: 1rem;
-  border: 1px solid var(--border-soft);
-  background: rgb(255 255 255 / 0.72);
-}
-
-.notice-banner {
-  border-color: rgb(41 77 67 / 0.24);
-}
-
-.error-banner {
-  border-color: rgb(140 71 61 / 0.28);
-}
-
-.notice-banner button,
-.error-banner button {
-  border: 0;
-  background: transparent;
-  color: inherit;
 }
 
 .status-panel,
