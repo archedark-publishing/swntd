@@ -9,13 +9,22 @@ import {
 import {
   AppChrome,
   FlashBanner,
+  SurfaceCard,
   SearchField,
   StatusMessageCard,
-  SurfaceCard,
   ViewSwitcher
 } from "@/components/app-chrome";
+import {
+  FormField,
+  FormInput,
+  FormSelect,
+  FormTextarea,
+  ToggleField
+} from "@/components/app-forms";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
 import {
   api,
   downloadAttachment,
@@ -1204,9 +1213,9 @@ function TaskSheet(props: {
             <p className="eyebrow">{props.variant === "create" ? "New Task" : "Task Detail"}</p>
             <h2>{props.variant === "create" ? "Add Something to the Board" : currentTask?.title}</h2>
           </div>
-          <button className="secondary-button" onClick={props.onClose} type="button">
+          <Button className="rounded-full" onClick={props.onClose} size="sm" type="button" variant="outline">
             Close
-          </button>
+          </Button>
         </header>
 
         <div className="sheet-body">
@@ -1223,6 +1232,8 @@ function TaskSheet(props: {
             users={props.users}
           />
 
+          {currentTask ? <Separator className="bg-border/50" /> : null}
+
           {currentTask ? (
             <section className="sheet-section">
               <div className="section-header compact">
@@ -1232,44 +1243,44 @@ function TaskSheet(props: {
                 </div>
                 <div className="status-row">
                   {taskStatuses.map((status) => (
-                    <button
-                      className={
-                        currentTask.status === status
-                          ? "status-button status-button-active"
-                          : "status-button"
-                      }
+                    <Button
+                      className="rounded-full"
                       key={status}
                       onClick={() => {
                         void props.onStatusChange(currentTask, status);
                       }}
+                      size="sm"
                       type="button"
+                      variant={currentTask.status === status ? "default" : "outline"}
                     >
                       {status}
-                    </button>
+                    </Button>
                   ))}
                 </div>
               </div>
               <div className="sheet-actions">
                 {currentTask.archivedAt ? (
-                  <button
-                    className="secondary-button"
+                  <Button
                     onClick={() => {
                       void props.onUnarchive(currentTask);
                     }}
+                    size="sm"
                     type="button"
+                    variant="outline"
                   >
                     Restore from Archive
-                  </button>
+                  </Button>
                 ) : (
-                  <button
-                    className="secondary-button"
+                  <Button
                     onClick={() => {
                       void props.onArchive(currentTask);
                     }}
+                    size="sm"
                     type="button"
+                    variant="outline"
                   >
                     Archive Task
-                  </button>
+                  </Button>
                 )}
                 {currentTask.dueOn && props.settings ? (
                   <CalendarActions
@@ -1305,17 +1316,15 @@ function TaskSheet(props: {
                     </article>
                   ))}
                 </div>
-                <label className="stack-field">
-                  <span>Add a comment</span>
-                  <textarea
+                <FormField label="Add a comment">
+                  <FormTextarea
                     onChange={(event) => setCommentBody(event.target.value)}
                     placeholder="Leave a note for the household."
                     rows={3}
                     value={commentBody}
                   />
-                </label>
-                <button
-                  className="secondary-button"
+                </FormField>
+                <Button
                   onClick={() => {
                     if (!commentBody.trim()) {
                       return;
@@ -1324,10 +1333,12 @@ function TaskSheet(props: {
                     void props.onAddComment(currentTask, commentBody.trim());
                     setCommentBody("");
                   }}
+                  size="sm"
                   type="button"
+                  variant="outline"
                 >
                   Add Comment
-                </button>
+                </Button>
               </section>
 
               <section className="sheet-section">
@@ -1351,31 +1362,32 @@ function TaskSheet(props: {
                         </p>
                       </div>
                       {attachment.storageKind === "upload" ? (
-                        <button
-                          className="secondary-button"
+                        <Button
                           onClick={() => {
                             void props.onDownloadAttachment(attachment);
                           }}
+                          size="sm"
                           type="button"
+                          variant="outline"
                         >
                           Download
-                        </button>
+                        </Button>
                       ) : (
-                        <a
-                          className="secondary-link"
-                          href={attachment.externalUrl ?? "#"}
-                          rel="noreferrer"
-                          target="_blank"
-                        >
-                          Open Link
-                        </a>
+                        <Button asChild size="sm" variant="outline">
+                          <a
+                            href={attachment.externalUrl ?? "#"}
+                            rel="noreferrer"
+                            target="_blank"
+                          >
+                            Open Link
+                          </a>
+                        </Button>
                       )}
                     </article>
                   ))}
                 </div>
                 <div className="sheet-actions">
-                  <label className="file-input">
-                    <span>Upload file</span>
+                  <FormField className="file-input" label="Upload file">
                     <input
                       accept=".csv,.heic,.jpeg,.jpg,.json,.md,.pdf,.png,.txt,.webp"
                       onChange={(event) => {
@@ -1390,10 +1402,9 @@ function TaskSheet(props: {
                       }}
                       type="file"
                     />
-                  </label>
-                  <label className="stack-field compact-field">
-                    <span>Link label</span>
-                    <input
+                  </FormField>
+                  <FormField className="compact-field" label="Link label">
+                    <FormInput
                       onChange={(event) =>
                         setLinkDraft((current) => ({
                           ...current,
@@ -1403,10 +1414,9 @@ function TaskSheet(props: {
                       placeholder="Reference note"
                       value={linkDraft.name}
                     />
-                  </label>
-                  <label className="stack-field compact-field">
-                    <span>URL</span>
-                    <input
+                  </FormField>
+                  <FormField className="compact-field" label="URL">
+                    <FormInput
                       onChange={(event) =>
                         setLinkDraft((current) => ({
                           ...current,
@@ -1417,9 +1427,8 @@ function TaskSheet(props: {
                       type="url"
                       value={linkDraft.url}
                     />
-                  </label>
-                  <button
-                    className="secondary-button"
+                  </FormField>
+                  <Button
                     onClick={() => {
                       if (!linkDraft.name.trim() || !linkDraft.url.trim()) {
                         return;
@@ -1431,10 +1440,12 @@ function TaskSheet(props: {
                       });
                       setLinkDraft({ name: "", url: "" });
                     }}
+                    size="sm"
                     type="button"
+                    variant="outline"
                   >
                     Attach Link
-                  </button>
+                  </Button>
                 </div>
               </section>
             </>
@@ -1452,20 +1463,20 @@ function CalendarActions(props: {
 }) {
   return (
     <>
-      <button
-        className="secondary-button"
+      <Button
         onClick={() =>
           props.onCalendarAction(
             props.currentTask,
             props.settings.defaultCalendarExportKind
           )
         }
+        size="sm"
         type="button"
+        variant="outline"
       >
         Add to Calendar
-      </button>
-      <button
-        className="secondary-button"
+      </Button>
+      <Button
         onClick={() =>
           props.onCalendarAction(
             props.currentTask,
@@ -1474,10 +1485,12 @@ function CalendarActions(props: {
               : "google"
           )
         }
+        size="sm"
         type="button"
+        variant="outline"
       >
         Use {props.settings.defaultCalendarExportKind === "google" ? "ICS" : "Google"} Instead
-      </button>
+      </Button>
     </>
   );
 }
@@ -1495,9 +1508,8 @@ function TaskForm(props: {
   return (
     <section className="sheet-section">
       <div className="form-grid">
-        <label className="stack-field wide">
-          <span>Title</span>
-          <input
+        <FormField className="wide" label="Title">
+          <FormInput
             disabled={!props.canEdit}
             onChange={(event) =>
               props.onChange({
@@ -1508,11 +1520,10 @@ function TaskForm(props: {
             placeholder="What needs doing?"
             value={props.draft.title}
           />
-        </label>
+        </FormField>
 
-        <label className="stack-field wide">
-          <span>Description</span>
-          <textarea
+        <FormField className="wide" label="Description">
+          <FormTextarea
             disabled={!props.canEdit}
             onChange={(event) =>
               props.onChange({
@@ -1524,34 +1535,30 @@ function TaskForm(props: {
             rows={4}
             value={props.draft.description}
           />
-        </label>
+        </FormField>
 
-        <label className="stack-field">
-          <span>Assignee</span>
-          <select
-            disabled={!props.canEdit}
-            onChange={(event) =>
-              props.onChange({
-                ...props.draft,
-                assigneeUserId: event.target.value
-              })
-            }
-            value={props.draft.assigneeUserId}
-          >
-            <option value="">Unassigned</option>
-            {props.users
-              .filter((user) => !user.deactivatedAt)
-              .map((user) => (
-              <option key={user.id} value={user.id}>
-                {user.displayName}
-              </option>
-              ))}
-          </select>
-        </label>
+        <FormSelect
+          className=""
+          disabled={!props.canEdit}
+          label="Assignee"
+          onValueChange={(value) =>
+            props.onChange({
+              ...props.draft,
+              assigneeUserId: value
+            })
+          }
+          options={props.users
+            .filter((user) => !user.deactivatedAt)
+            .map((user) => ({
+              label: user.displayName,
+              value: user.id
+            }))}
+          placeholder="Unassigned"
+          value={props.draft.assigneeUserId}
+        />
 
-        <label className="stack-field">
-          <span>Due date</span>
-          <input
+        <FormField label="Due date">
+          <FormInput
             disabled={!props.canEdit}
             onChange={(event) =>
               props.onChange({
@@ -1562,11 +1569,10 @@ function TaskForm(props: {
             type="date"
             value={props.draft.dueOn}
           />
-        </label>
+        </FormField>
 
-        <label className="stack-field">
-          <span>Due time</span>
-          <input
+        <FormField label="Due time">
+          <FormInput
             disabled={!props.canEdit}
             onChange={(event) =>
               props.onChange({
@@ -1577,22 +1583,19 @@ function TaskForm(props: {
             type="time"
             value={props.draft.dueTime}
           />
-        </label>
+        </FormField>
 
-        <label className="toggle-field">
-          <input
-            checked={props.draft.aiAssistanceEnabled}
-            disabled={!props.canEdit}
-            onChange={(event) =>
-              props.onChange({
-                ...props.draft,
-                aiAssistanceEnabled: event.target.checked
-              })
-            }
-            type="checkbox"
-          />
-          <span>{props.aiAssistanceToggleLabel}</span>
-        </label>
+        <ToggleField
+          checked={props.draft.aiAssistanceEnabled}
+          disabled={!props.canEdit}
+          label={props.aiAssistanceToggleLabel}
+          onCheckedChange={(value) =>
+            props.onChange({
+              ...props.draft,
+              aiAssistanceEnabled: value
+            })
+          }
+        />
       </div>
 
       <div className="sheet-section">
@@ -1601,8 +1604,7 @@ function TaskForm(props: {
             <p className="eyebrow">Checklist</p>
             <h3>Subtasks</h3>
           </div>
-          <button
-            className="secondary-button"
+          <Button
             disabled={!props.canEdit}
             onClick={() =>
               props.onChange({
@@ -1617,30 +1619,31 @@ function TaskForm(props: {
                 ]
               })
             }
+            size="sm"
             type="button"
+            variant="outline"
           >
             Add Item
-          </button>
+          </Button>
         </div>
         <div className="checklist-editor">
           {props.draft.checklistItems.map((item, index) => (
             <div className="checklist-row" key={item.clientId}>
-              <input
+              <Checkbox
                 checked={item.isCompleted}
                 disabled={!props.canEdit}
-                onChange={(event) =>
+                onCheckedChange={(checked) =>
                   props.onChange({
                     ...props.draft,
                     checklistItems: props.draft.checklistItems.map((entry, entryIndex) =>
                       entryIndex === index
-                        ? { ...entry, isCompleted: event.target.checked }
+                        ? { ...entry, isCompleted: checked === true }
                         : entry
                     )
                   })
                 }
-                type="checkbox"
               />
-              <input
+              <FormInput
                 disabled={!props.canEdit}
                 onChange={(event) =>
                   props.onChange({
@@ -1655,8 +1658,7 @@ function TaskForm(props: {
                 placeholder="Subtask description"
                 value={item.body}
               />
-              <button
-                className="ghost-button"
+              <Button
                 disabled={!props.canEdit}
                 onClick={() =>
                   props.onChange({
@@ -1666,10 +1668,12 @@ function TaskForm(props: {
                     )
                   })
                 }
+                size="sm"
                 type="button"
+                variant="ghost"
               >
                 Remove
-              </button>
+              </Button>
             </div>
           ))}
           {props.draft.checklistItems.length === 0 ? (
@@ -1688,18 +1692,17 @@ function TaskForm(props: {
         <div className="checkbox-grid">
           {props.labels.map((label) => (
             <label className="choice-pill" key={label.id}>
-              <input
+              <Checkbox
                 checked={props.draft.labelIds.includes(label.id)}
                 disabled={!props.canEdit}
-                onChange={(event) =>
+                onCheckedChange={(checked) =>
                   props.onChange({
                     ...props.draft,
-                    labelIds: event.target.checked
+                    labelIds: checked === true
                       ? [...props.draft.labelIds, label.id]
                       : props.draft.labelIds.filter((entry) => entry !== label.id)
                   })
                 }
-                type="checkbox"
               />
               <span>{label.name}</span>
             </label>
@@ -1711,14 +1714,13 @@ function TaskForm(props: {
       </div>
 
       <div className="sheet-actions">
-        <button
-          className="primary-button"
+        <Button
           disabled={!props.canEdit || !props.draft.title.trim()}
           onClick={props.onSubmit}
           type="button"
         >
           {props.submitLabel}
-        </button>
+        </Button>
       </div>
     </section>
   );
@@ -1795,7 +1797,7 @@ function SettingsView(props: {
 
   return (
     <section className="settings-grid">
-      <article className="settings-card">
+      <SurfaceCard className="settings-card gap-0 py-0">
         <div className="section-header">
           <div>
             <p className="eyebrow">House Rules</p>
@@ -1806,9 +1808,8 @@ function SettingsView(props: {
           </p>
         </div>
         <div className="form-grid">
-          <label className="stack-field">
-            <span>Timezone</span>
-            <input
+          <FormField label="Timezone">
+            <FormInput
               onChange={(event) =>
                 setSettingsDraft({
                   ...settingsDraft,
@@ -1817,10 +1818,9 @@ function SettingsView(props: {
               }
               value={settingsDraft.defaultTimezone}
             />
-          </label>
-          <label className="stack-field">
-            <span>Done retention (days)</span>
-            <input
+          </FormField>
+          <FormField label="Done retention (days)">
+            <FormInput
               min={1}
               onChange={(event) =>
                 setSettingsDraft({
@@ -1831,57 +1831,57 @@ function SettingsView(props: {
               type="number"
               value={settingsDraft.doneArchiveAfterDays}
             />
-          </label>
-          <label className="stack-field">
-            <span>Default calendar export</span>
-            <select
-              onChange={(event) =>
-                setSettingsDraft({
-                  ...settingsDraft,
-                  defaultCalendarExportKind: event.target.value as "google" | "ics"
-                })
-              }
-              value={settingsDraft.defaultCalendarExportKind}
-            >
-              <option value="google">Google Calendar</option>
-              <option value="ics">ICS download</option>
-            </select>
-          </label>
+          </FormField>
+          <FormSelect
+            label="Default calendar export"
+            onValueChange={(value) =>
+              setSettingsDraft({
+                ...settingsDraft,
+                defaultCalendarExportKind: value as "google" | "ics"
+              })
+            }
+            options={[
+              { label: "Google Calendar", value: "google" },
+              { label: "ICS download", value: "ics" }
+            ]}
+            value={settingsDraft.defaultCalendarExportKind}
+          />
         </div>
         <div className="sheet-actions">
-          <button
-            className="primary-button"
+          <Button
             onClick={() => {
               void props.onSaveSettings(settingsDraft);
             }}
             type="button"
           >
             Save Settings
-          </button>
+          </Button>
         </div>
-      </article>
+      </SurfaceCard>
 
-      <article className="settings-card">
+      <SurfaceCard className="settings-card gap-0 py-0">
         <div className="section-header">
           <div>
             <p className="eyebrow">Household Cast</p>
             <h2>People and Assistants</h2>
           </div>
           <div className="sheet-actions">
-            <button
-              className="secondary-button"
+            <Button
               onClick={() => props.onSelectUser("new-admin")}
+              size="sm"
               type="button"
+              variant="outline"
             >
               New Person
-            </button>
-            <button
-              className="secondary-button"
+            </Button>
+            <Button
               onClick={() => props.onSelectUser("new-service")}
+              size="sm"
               type="button"
+              variant="outline"
             >
               New Assistant
-            </button>
+            </Button>
           </div>
         </div>
         <div className="template-grid">
@@ -1907,16 +1907,14 @@ function SettingsView(props: {
           </div>
           <div className="template-editor">
             <div className="form-grid">
-              <label className="stack-field">
-                <span>Type</span>
-                <input
+              <FormField label="Type">
+                <FormInput
                   disabled
                   value={userDraft.mode === "admin" ? "Person" : "Assistant"}
                 />
-              </label>
-              <label className="stack-field">
-                <span>Display name</span>
-                <input
+              </FormField>
+              <FormField label="Display name">
+                <FormInput
                   onChange={(event) =>
                     setUserDraft({
                       ...userDraft,
@@ -1925,11 +1923,10 @@ function SettingsView(props: {
                   }
                   value={userDraft.displayName}
                 />
-              </label>
+              </FormField>
               {userDraft.mode === "admin" ? (
-                <label className="stack-field wide">
-                  <span>Email</span>
-                  <input
+                <FormField className="wide" label="Email">
+                  <FormInput
                     onChange={(event) =>
                       setUserDraft({
                         ...userDraft,
@@ -1940,11 +1937,10 @@ function SettingsView(props: {
                     type="email"
                     value={userDraft.email}
                   />
-                </label>
+                </FormField>
               ) : (
-                <label className="stack-field wide">
-                  <span>Service kind</span>
-                  <input
+                <FormField className="wide" label="Service kind">
+                  <FormInput
                     onChange={(event) =>
                       setUserDraft({
                         ...userDraft,
@@ -1954,12 +1950,11 @@ function SettingsView(props: {
                     placeholder="assistant"
                     value={userDraft.serviceKind}
                   />
-                </label>
+                </FormField>
               )}
             </div>
             <div className="sheet-actions">
-              <button
-                className="primary-button"
+              <Button
                 disabled={
                   isUserRemovePending ||
                   isUserSavePending ||
@@ -1990,10 +1985,9 @@ function SettingsView(props: {
                   : props.selectedUser
                     ? "Save Actor"
                     : "Create Actor"}
-              </button>
+              </Button>
               {props.selectedUser ? (
-                <button
-                  className="ghost-button"
+                <Button
                   disabled={isUserRemovePending || isUserSavePending}
                   onClick={async () => {
                     const selectedUserId = props.selectedUser?.id;
@@ -2015,10 +2009,12 @@ function SettingsView(props: {
                     await props.onRemoveUser(selectedUserId);
                     setIsUserRemovePending(false);
                   }}
+                  size="sm"
                   type="button"
+                  variant="ghost"
                 >
                   {isUserRemovePending ? "Removing..." : "Remove Actor"}
-                </button>
+                </Button>
               ) : null}
             </div>
             {userActionMessage ? <div className="empty-card">{userActionMessage}</div> : null}
@@ -2039,16 +2035,14 @@ function SettingsView(props: {
                   </div>
                 </div>
                 <div className="sheet-actions">
-                  <label className="stack-field compact-field">
-                    <span>Token name</span>
-                    <input
+                  <FormField className="compact-field" label="Token name">
+                    <FormInput
                       onChange={(event) => setServiceTokenName(event.target.value)}
                       placeholder="Primary assistant"
                       value={serviceTokenName}
                     />
-                  </label>
-                  <button
-                    className="secondary-button"
+                  </FormField>
+                  <Button
                     disabled={
                       !serviceTokenName.trim() || isUserRemovePending || isUserSavePending
                     }
@@ -2063,10 +2057,12 @@ function SettingsView(props: {
                         setServiceTokenName("");
                       }
                     }}
+                    size="sm"
                     type="button"
+                    variant="outline"
                   >
                     Issue Token
-                  </button>
+                  </Button>
                 </div>
                 {issuedServiceToken ? (
                   <div className="empty-card">
@@ -2092,16 +2088,17 @@ function SettingsView(props: {
                             : ""}
                         </span>
                       </div>
-                      <button
-                        className="ghost-button"
+                      <Button
                         disabled={Boolean(token.revokedAt)}
                         onClick={() => {
                           void props.onRevokeServiceToken(token.id);
                         }}
+                        size="sm"
                         type="button"
+                        variant="ghost"
                       >
                         {token.revokedAt ? "Revoked" : "Revoke"}
-                      </button>
+                      </Button>
                     </div>
                   ))}
                 </div>
@@ -2117,24 +2114,21 @@ function SettingsView(props: {
           </div>
         </div>
         <div className="sheet-actions">
-          <label className="stack-field compact-field">
-            <span>Name</span>
-            <input
+          <FormField className="compact-field" label="Name">
+            <FormInput
               onChange={(event) => setLabelName(event.target.value)}
               placeholder="Errand"
               value={labelName}
             />
-          </label>
-          <label className="stack-field compact-field">
-            <span>Color note</span>
-            <input
+          </FormField>
+          <FormField className="compact-field" label="Color note">
+            <FormInput
               onChange={(event) => setLabelColor(event.target.value)}
               placeholder="#c96 or brass"
               value={labelColor}
             />
-          </label>
-          <button
-            className="secondary-button"
+          </FormField>
+          <Button
             onClick={() => {
               if (!labelName.trim()) {
                 return;
@@ -2147,33 +2141,36 @@ function SettingsView(props: {
               setLabelName("");
               setLabelColor("");
             }}
+            size="sm"
             type="button"
+            variant="outline"
           >
             Add Label
-          </button>
+          </Button>
         </div>
         <div className="label-row roomy">
           {props.labels.map((label) => (
-            <span className="label-pill" key={label.id}>
+            <Badge className="label-pill" key={label.id} variant="outline">
               {label.name}
-            </span>
+            </Badge>
           ))}
         </div>
-      </article>
+      </SurfaceCard>
 
-      <article className="settings-card settings-card-wide">
+      <SurfaceCard className="settings-card settings-card-wide gap-0 py-0">
         <div className="section-header">
           <div>
             <p className="eyebrow">Recurring Work</p>
             <h2>Templates</h2>
           </div>
-          <button
-            className="secondary-button"
+          <Button
             onClick={() => props.onSelectTemplate(null)}
+            size="sm"
             type="button"
+            variant="outline"
           >
             New Template
-          </button>
+          </Button>
         </div>
         <div className="template-grid">
           <div className="template-list">
@@ -2210,7 +2207,7 @@ function SettingsView(props: {
             />
           </div>
         </div>
-      </article>
+      </SurfaceCard>
     </section>
   );
 }
@@ -2224,9 +2221,8 @@ function RecurringTemplateForm(props: {
 }) {
   return (
     <div className="form-grid">
-      <label className="stack-field wide">
-        <span>Title</span>
-        <input
+      <FormField className="wide" label="Title">
+        <FormInput
           onChange={(event) =>
             props.onChange({
               ...props.draft,
@@ -2235,10 +2231,9 @@ function RecurringTemplateForm(props: {
           }
           value={props.draft.title}
         />
-      </label>
-      <label className="stack-field wide">
-        <span>Description</span>
-        <textarea
+      </FormField>
+      <FormField className="wide" label="Description">
+        <FormTextarea
           onChange={(event) =>
             props.onChange({
               ...props.draft,
@@ -2248,31 +2243,26 @@ function RecurringTemplateForm(props: {
           rows={4}
           value={props.draft.description}
         />
-      </label>
-      <label className="stack-field">
-        <span>Default assignee</span>
-        <select
-          onChange={(event) =>
-            props.onChange({
-              ...props.draft,
-              defaultAssigneeUserId: event.target.value
-            })
-          }
-          value={props.draft.defaultAssigneeUserId}
-        >
-          <option value="">Unassigned</option>
-          {props.users
-            .filter((user) => !user.deactivatedAt)
-            .map((user) => (
-            <option key={user.id} value={user.id}>
-              {user.displayName}
-            </option>
-            ))}
-        </select>
-      </label>
-      <label className="stack-field">
-        <span>Next occurrence</span>
-        <input
+      </FormField>
+      <FormSelect
+        label="Default assignee"
+        onValueChange={(value) =>
+          props.onChange({
+            ...props.draft,
+            defaultAssigneeUserId: value
+          })
+        }
+        options={props.users
+          .filter((user) => !user.deactivatedAt)
+          .map((user) => ({
+            label: user.displayName,
+            value: user.id
+          }))}
+        placeholder="Unassigned"
+        value={props.draft.defaultAssigneeUserId}
+      />
+      <FormField label="Next occurrence">
+        <FormInput
           onChange={(event) =>
             props.onChange({
               ...props.draft,
@@ -2282,10 +2272,9 @@ function RecurringTemplateForm(props: {
           type="date"
           value={props.draft.nextOccurrenceOn}
         />
-      </label>
-      <label className="stack-field">
-        <span>Due time</span>
-        <input
+      </FormField>
+      <FormField label="Due time">
+        <FormInput
           onChange={(event) =>
             props.onChange({
               ...props.draft,
@@ -2295,26 +2284,24 @@ function RecurringTemplateForm(props: {
           type="time"
           value={props.draft.defaultDueTime}
         />
-      </label>
-      <label className="stack-field">
-        <span>Cadence</span>
-        <select
-          onChange={(event) =>
-            props.onChange({
-              ...props.draft,
-              recurrenceCadence: event.target.value as "daily" | "weekly" | "monthly"
-            })
-          }
-          value={props.draft.recurrenceCadence}
-        >
-          <option value="daily">Daily</option>
-          <option value="weekly">Weekly</option>
-          <option value="monthly">Monthly</option>
-        </select>
-      </label>
-      <label className="stack-field">
-        <span>Interval</span>
-        <input
+      </FormField>
+      <FormSelect
+        label="Cadence"
+        onValueChange={(value) =>
+          props.onChange({
+            ...props.draft,
+            recurrenceCadence: value as "daily" | "weekly" | "monthly"
+          })
+        }
+        options={[
+          { label: "Daily", value: "daily" },
+          { label: "Weekly", value: "weekly" },
+          { label: "Monthly", value: "monthly" }
+        ]}
+        value={props.draft.recurrenceCadence}
+      />
+      <FormField label="Interval">
+        <FormInput
           min={1}
           onChange={(event) =>
             props.onChange({
@@ -2325,33 +2312,27 @@ function RecurringTemplateForm(props: {
           type="number"
           value={props.draft.recurrenceInterval}
         />
-      </label>
-      <label className="toggle-field">
-        <input
-          checked={props.draft.isActive}
-          onChange={(event) =>
-            props.onChange({
-              ...props.draft,
-              isActive: event.target.checked
-            })
-          }
-          type="checkbox"
-        />
-        <span>Template is active</span>
-      </label>
-      <label className="toggle-field">
-        <input
-          checked={props.draft.aiAssistanceEnabledDefault}
-          onChange={(event) =>
-            props.onChange({
-              ...props.draft,
-              aiAssistanceEnabledDefault: event.target.checked
-            })
-          }
-          type="checkbox"
-        />
-        <span>Occurrences are AI-eligible by default</span>
-      </label>
+      </FormField>
+      <ToggleField
+        checked={props.draft.isActive}
+        label="Template is active"
+        onCheckedChange={(value) =>
+          props.onChange({
+            ...props.draft,
+            isActive: value
+          })
+        }
+      />
+      <ToggleField
+        checked={props.draft.aiAssistanceEnabledDefault}
+        label="Occurrences are AI-eligible by default"
+        onCheckedChange={(value) =>
+          props.onChange({
+            ...props.draft,
+            aiAssistanceEnabledDefault: value
+          })
+        }
+      />
 
       <div className="sheet-section wide">
         <div className="section-header compact">
@@ -2359,8 +2340,7 @@ function RecurringTemplateForm(props: {
             <p className="eyebrow">Template Checklist</p>
             <h3>Recurring subtasks</h3>
           </div>
-          <button
-            className="secondary-button"
+          <Button
             onClick={() =>
               props.onChange({
                 ...props.draft,
@@ -2373,15 +2353,17 @@ function RecurringTemplateForm(props: {
                 ]
               })
             }
+            size="sm"
             type="button"
+            variant="outline"
           >
             Add Item
-          </button>
+          </Button>
         </div>
         <div className="checklist-editor">
           {props.draft.checklistItems.map((item, index) => (
             <div className="checklist-row" key={item.clientId}>
-              <input
+              <FormInput
                 onChange={(event) =>
                   props.onChange({
                     ...props.draft,
@@ -2395,8 +2377,7 @@ function RecurringTemplateForm(props: {
                 placeholder="Template checklist item"
                 value={item.body}
               />
-              <button
-                className="ghost-button"
+              <Button
                 onClick={() =>
                   props.onChange({
                     ...props.draft,
@@ -2405,10 +2386,12 @@ function RecurringTemplateForm(props: {
                     )
                   })
                 }
+                size="sm"
                 type="button"
+                variant="ghost"
               >
                 Remove
-              </button>
+              </Button>
             </div>
           ))}
         </div>
@@ -2424,17 +2407,16 @@ function RecurringTemplateForm(props: {
         <div className="checkbox-grid">
           {props.labels.map((label) => (
             <label className="choice-pill" key={label.id}>
-              <input
+              <Checkbox
                 checked={props.draft.labelIds.includes(label.id)}
-                onChange={(event) =>
+                onCheckedChange={(checked) =>
                   props.onChange({
                     ...props.draft,
-                    labelIds: event.target.checked
+                    labelIds: checked === true
                       ? [...props.draft.labelIds, label.id]
                       : props.draft.labelIds.filter((entry) => entry !== label.id)
                   })
                 }
-                type="checkbox"
               />
               <span>{label.name}</span>
             </label>
@@ -2443,14 +2425,13 @@ function RecurringTemplateForm(props: {
       </div>
 
       <div className="sheet-actions wide">
-        <button
-          className="primary-button"
+        <Button
           disabled={!props.draft.title.trim() || !props.draft.nextOccurrenceOn}
           onClick={props.onSubmit}
           type="button"
         >
           Save Template
-        </button>
+        </Button>
       </div>
     </div>
   );

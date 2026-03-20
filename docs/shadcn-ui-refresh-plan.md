@@ -38,6 +38,8 @@ Status: initial pass complete
 
 ## Phase 3: Core Screen Migration
 
+Status: in progress, with task sheet and settings forms migrated to the shared `shadcn` form controls
+
 - Move the board, task list, task sheet, and settings UI onto `shadcn` primitives.
 - Prefer `Card`, `Button`, `Badge`, `Sheet`, `Tabs`, `Input`, `Textarea`, `Select`, `Checkbox`, `Alert`, and related primitives.
 - Preserve touch-friendly flows and mobile-first behavior.
