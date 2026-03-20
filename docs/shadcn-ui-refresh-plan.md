@@ -13,6 +13,8 @@ Adopt `shadcn/ui` in the web app on a dedicated branch, using preset `b7BrBnhIm`
 
 ## Phase 1: Safe Foundation
 
+Status: complete
+
 - Initialize `shadcn/ui` in `apps/web` using preset `b7BrBnhIm`.
 - Add any required Tailwind, alias, config, and generated support files.
 - Keep the existing app screens in place.
@@ -23,6 +25,8 @@ Adopt `shadcn/ui` in the web app on a dedicated branch, using preset `b7BrBnhIm`
   - `pnpm --filter @swntd/web build`
 
 ## Phase 2: Shell Migration
+
+Status: initial pass complete
 
 - Migrate the app shell first:
   - masthead

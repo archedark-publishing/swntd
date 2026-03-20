@@ -7,6 +7,16 @@ import {
   useState
 } from "react";
 import {
+  AppChrome,
+  FlashBanner,
+  SearchField,
+  StatusMessageCard,
+  SurfaceCard,
+  ViewSwitcher
+} from "@/components/app-chrome";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
   api,
   downloadAttachment,
   isConflictError,
@@ -807,75 +817,34 @@ export function App() {
   return (
     <main className="app-shell">
       <div className="grain" />
-      <header className="masthead">
-        <div>
-          <p className="eyebrow">Household Ledger</p>
-          <h1>S#!% We Need To Do</h1>
-          <p className="subtitle">
-            A shared board for chores, errands, recurring rituals, and the small
-            domestic plot twists that keep a household moving.
-          </p>
-        </div>
-        <div className="masthead-actions">
-          <button
-            className="secondary-button"
-            onClick={() => {
-              startTransition(() => {
-                void refreshApp({ background: true, showSpinner: true });
-              });
-            }}
-            type="button"
-          >
-            {isManualRefreshPending ? "Refreshing..." : "Refresh"}
-          </button>
-          {canAdmin ? (
-            <button className="primary-button" onClick={openNewTask} type="button">
-              New Task
-            </button>
-          ) : null}
-          <div className="actor-chip">
-            <strong>{snapshot.actor?.displayName ?? "Loading..."}</strong>
-            <span>{snapshot.actor ? formatRoleLabel(snapshot.actor) : "guest"}</span>
-          </div>
-        </div>
-      </header>
+      <AppChrome
+        actorDisplayName={snapshot.actor?.displayName ?? "Loading..."}
+        actorRoleLabel={snapshot.actor ? formatRoleLabel(snapshot.actor) : "guest"}
+        canAdmin={canAdmin}
+        isManualRefreshPending={isManualRefreshPending}
+        onCreateTask={openNewTask}
+        onRefresh={() => {
+          startTransition(() => {
+            void refreshApp({ background: true, showSpinner: true });
+          });
+        }}
+      />
 
-      <nav aria-label="Primary views" className="view-nav">
-        {navItems.map((item) => (
-          <button
-            className={item.id === view ? "nav-pill nav-pill-active" : "nav-pill"}
-            key={item.id}
-            onClick={() => setView(item.id)}
-            type="button"
-          >
-            {item.label}
-          </button>
-        ))}
-      </nav>
+      <ViewSwitcher items={navItems} onSelect={setView} selected={view} />
 
       {notice ? (
-        <div aria-live="polite" className="notice-banner">
-          <span>{notice}</span>
-          <button onClick={() => setNotice(null)} type="button">
-            Dismiss
-          </button>
-        </div>
+        <FlashBanner kind="notice" message={notice} onDismiss={() => setNotice(null)} />
       ) : null}
 
       {errorMessage ? (
-        <div aria-live="polite" className="error-banner">
-          <span>{errorMessage}</span>
-          <button onClick={() => setErrorMessage(null)} type="button">
-            Dismiss
-          </button>
-        </div>
+        <FlashBanner kind="error" message={errorMessage} onDismiss={() => setErrorMessage(null)} />
       ) : null}
 
       {isBooting ? (
-        <section className="status-panel">
-          <h2>Opening the ledger...</h2>
-          <p>Fetching the latest board state, settings, and household cast.</p>
-        </section>
+        <StatusMessageCard
+          description="Fetching the latest board state, settings, and household cast."
+          title="Opening the ledger..."
+        />
       ) : null}
 
       {!isBooting && view === "board" ? (
@@ -908,15 +877,12 @@ export function App() {
               <p className="eyebrow">History</p>
               <h2>Archive</h2>
             </div>
-            <label className="search-field">
-              <span>Search archive</span>
-              <input
-                onChange={(event) => setArchiveSearch(event.target.value)}
-                placeholder="Search titles or notes"
-                type="search"
-                value={archiveSearch}
-              />
-            </label>
+            <SearchField
+              label="Search archive"
+              onChange={setArchiveSearch}
+              placeholder="Search titles or notes"
+              value={archiveSearch}
+            />
           </div>
           <TaskListView
             aiAssistanceLabel={getAiAssistanceLabel(snapshot.users)}
@@ -1025,13 +991,15 @@ function BoardView(props: {
         const tasks = getTaskColumnOrder(props.tasks, status);
 
         return (
-          <article className="board-column" key={status}>
+          <SurfaceCard className="board-column gap-0 py-0" key={status}>
             <header className="column-header">
               <div>
                 <p className="eyebrow">Status</p>
                 <h2>{status}</h2>
               </div>
-              <span className="count-pill">{tasks.length}</span>
+              <Badge className="count-pill" variant="secondary">
+                {tasks.length}
+              </Badge>
             </header>
             <div className="column-stack">
               {tasks.length === 0 ? (
@@ -1050,7 +1018,7 @@ function BoardView(props: {
                 />
               ))}
             </div>
-          </article>
+          </SurfaceCard>
         );
       })}
     </section>
@@ -1076,7 +1044,7 @@ function TaskListView(props: {
         </div>
         <p className="section-copy">{props.description}</p>
       </div>
-      <div className="list-surface">
+      <SurfaceCard className="list-surface gap-0 py-0">
         {props.tasks.length === 0 ? (
           <div className="empty-card">{props.emptyMessage}</div>
         ) : null}
@@ -1092,7 +1060,7 @@ function TaskListView(props: {
             total={props.tasks.length}
           />
         ))}
-      </div>
+      </SurfaceCard>
     </section>
   );
 }
@@ -1110,13 +1078,16 @@ function TaskCard(props: {
   const nextStatus = getStatusStep(props.task.status, 1);
 
   return (
-    <article className="task-card">
+    <SurfaceCard className="task-card gap-0 py-0">
       <button className="task-card-main" onClick={() => props.onOpen(props.task.id)} type="button">
         <div className="task-card-header">
           <h3>{props.task.title}</h3>
-          <span className={props.task.aiAssistanceEnabled ? "assist-badge assist-on" : "assist-badge"}>
+          <Badge
+            className={props.task.aiAssistanceEnabled ? "assist-badge assist-on" : "assist-badge"}
+            variant={props.task.aiAssistanceEnabled ? "secondary" : "outline"}
+          >
             {props.task.aiAssistanceEnabled ? props.aiAssistanceLabel : "Human only"}
-          </span>
+          </Badge>
         </div>
         <p>{props.task.description || "No notes yet."}</p>
         <div className="task-meta">
@@ -1130,53 +1101,61 @@ function TaskCard(props: {
         </div>
         <div className="label-row">
           {props.task.labels.map((label) => (
-            <span className="label-pill" key={label.id}>
+            <Badge className="label-pill" key={label.id} variant="outline">
               {label.name}
-            </span>
+            </Badge>
           ))}
         </div>
       </button>
       {!props.task.archivedAt ? (
         <div className="card-actions">
-          <button
+          <Button
             disabled={props.index === 0}
             onClick={() => {
               void props.onReorder(props.task, -1);
             }}
+            size="sm"
             type="button"
+            variant="ghost"
           >
             Move Up
-          </button>
-          <button
+          </Button>
+          <Button
             disabled={props.index === props.total - 1}
             onClick={() => {
               void props.onReorder(props.task, 1);
             }}
+            size="sm"
             type="button"
+            variant="ghost"
           >
             Move Down
-          </button>
-          <button
+          </Button>
+          <Button
             disabled={!previousStatus}
             onClick={() => {
               void props.onQuickMove(props.task, -1);
             }}
+            size="sm"
             type="button"
+            variant="outline"
           >
             Back
-          </button>
-          <button
+          </Button>
+          <Button
             disabled={!nextStatus}
             onClick={() => {
               void props.onQuickMove(props.task, 1);
             }}
+            size="sm"
             type="button"
+            variant="outline"
           >
             Advance
-          </button>
+          </Button>
         </div>
       ) : null}
-    </article>
+    </SurfaceCard>
   );
 }
 
@@ -1802,10 +1781,10 @@ function SettingsView(props: {
 
   if (!props.canAdmin || !settingsDraft) {
     return (
-      <section className="status-panel">
-        <h2>Settings are reserved for household admins.</h2>
-        <p>The current browser session does not have admin access.</p>
-      </section>
+      <StatusMessageCard
+        description="The current browser session does not have admin access."
+        title="Settings are reserved for household admins."
+      />
     );
   }
 
