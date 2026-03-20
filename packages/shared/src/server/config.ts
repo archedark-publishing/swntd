@@ -10,6 +10,11 @@ export const calendarExportKinds = ["google", "ics"] as const;
 
 const rawConfigSchema = z.object({
   SWNTD_AUTH_MODE: z.enum(authModes).default("local_dev"),
+  SWNTD_TRUSTED_EMAIL_HEADER: z
+    .string()
+    .trim()
+    .min(1)
+    .default("x-forwarded-email"),
   SWNTD_HOUSEHOLD_NAME: z.string().trim().min(1).default("My Household"),
   SWNTD_BOOTSTRAP_ADMIN_EMAILS: z
     .string()
@@ -57,6 +62,7 @@ export function parseSwntdConfig(env: NodeJS.ProcessEnv = process.env) {
 
   return {
     authMode: raw.SWNTD_AUTH_MODE,
+    trustedEmailHeader: raw.SWNTD_TRUSTED_EMAIL_HEADER,
     householdName: raw.SWNTD_HOUSEHOLD_NAME,
     bootstrapAdminEmails: parseAdminEmails(raw.SWNTD_BOOTSTRAP_ADMIN_EMAILS),
     serviceActorName: raw.SWNTD_SERVICE_ACTOR_NAME,

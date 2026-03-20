@@ -2,7 +2,7 @@
 
 S#!% We Need To Do is a lightweight household kanban board and issue tracker designed for humans and AI collaborators to share a single source of truth for chores, errands, and recurring home tasks.
 
-The project is being built as a polished, general-purpose open source web app that other households can fork and self-host, while still working well with exe.dev deployment and authentication.
+The project is being built as a polished, general-purpose open source web app that other households can fork and self-host behind the auth and hosting stack of their choice.
 
 ## Status
 
@@ -57,7 +57,7 @@ The bootstrap configuration is intentionally generic. Household-specific admin e
 
 - Keep household task management simple, fast, and mobile-friendly.
 - Support a shared board for humans plus a bounded AI collaborator workflow.
-- Stay deployment-target agnostic even though exe.dev is the first deployment target.
+- Stay deployment-target agnostic across hosting and authentication providers.
 - Provide a clean open source codebase with strong documentation, CI/CD, and contributor ergonomics.
 
 ## Planned V1 Highlights

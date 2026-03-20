@@ -64,7 +64,7 @@ describe("resolveRequestActor", () => {
 
     const actor = await resolveRequestActor({
       headers: {
-        "x-exedev-email": "admin1@example.com"
+        "x-forwarded-email": "admin1@example.com"
       },
       trustedProxy: false
     });
@@ -77,7 +77,7 @@ describe("resolveRequestActor", () => {
 
     const actor = await resolveRequestActor({
       headers: {
-        "x-exedev-email": "admin1@example.com"
+        "x-forwarded-email": "admin1@example.com"
       },
       trustedProxy: true
     });
@@ -88,7 +88,7 @@ describe("resolveRequestActor", () => {
 
     const unknown = await resolveRequestActor({
       headers: {
-        "x-exedev-email": "stranger@example.com"
+        "x-forwarded-email": "stranger@example.com"
       },
       trustedProxy: true
     });

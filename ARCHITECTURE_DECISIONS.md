@@ -32,13 +32,13 @@ Each deployed SWNTD instance serves exactly one household in v1.
 
 V1 supports three auth modes:
 
-- `trusted_header` for browser users behind a trusted auth proxy such as exe.dev
+- `trusted_header` for browser users behind a trusted auth proxy
 - `service_token` for service actors and other programmatic clients
 - `local_dev` for development and automated testing
 
 ### Rationale
 
-- It keeps the application deployment-target agnostic while still fitting exe.dev cleanly.
+- It keeps the application deployment-target agnostic while still fitting proxy-based deployments cleanly.
 - It avoids building a first-party auth system before the core product exists.
 - It gives service actors a bounded, auditable identity independent from browser auth.
 
@@ -153,7 +153,7 @@ V1 supports uploaded files and external links with conservative upload defaults.
 
 ### Decision
 
-The first non-exe.dev self-hosting guide should recommend `oauth2-proxy` as the authentication gateway, fronted by Caddy using `forward_auth`.
+The first self-hosting guide should recommend `oauth2-proxy` as the authentication gateway, fronted by Caddy using `forward_auth`.
 
 ### Rationale
 

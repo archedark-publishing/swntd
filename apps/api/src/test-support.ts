@@ -49,7 +49,7 @@ export async function teardownApiTestEnvironment(uploadsDir: string) {
 
 export function trustedHeader(email: string) {
   return {
-    "x-exedev-email": email
+    [process.env.SWNTD_TRUSTED_EMAIL_HEADER ?? "x-forwarded-email"]: email
   };
 }
 

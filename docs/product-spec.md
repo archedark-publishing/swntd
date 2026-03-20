@@ -4,7 +4,7 @@
 
 S#!% We Need To Do (SWNTD) is a lightweight, story-forward household kanban board and issue tracker for humans and AI collaborators. The product is intended to be open source, self-hostable, and useful as a polished portfolio-quality project, while still solving a practical day-to-day household need.
 
-The first release targets a single household with two human admins and one non-admin AI service actor. Each deployed instance serves exactly one household in v1. The architecture must remain deployment-target agnostic so other users can fork the repository and deploy it on infrastructure other than exe.dev, even though exe.dev is the initial deployment and authentication target.
+The first release targets a single household with two human admins and one non-admin AI service actor. Each deployed instance serves exactly one household in v1. The architecture must remain deployment-target agnostic so other users can fork the repository and deploy it on infrastructure of their choice.
 
 ### Primary Goals
 
@@ -173,11 +173,8 @@ The initial implementation should use a small workspace-oriented monorepo:
 
 - Each deployment hosts exactly one household in v1.
 - Browser access may be public on the internet, but household access must remain private to approved actors.
-- The core application must not assume exe.dev-specific infrastructure outside a dedicated auth adapter and deployment configuration layer.
-- Initial deployment may use exe.dev for:
-  - HTTP hosting
-  - user login
-  - runtime environment for service actors
+- The core application must not assume provider-specific infrastructure outside a dedicated auth adapter and deployment configuration layer.
+- Initial deployments may use any compatible hosting, login, and runtime environment for browser users and service actors.
 - The official deployment may bootstrap only deployment-specific household admins and service actors through deployment secrets and CI configuration.
 - Unknown authenticated users must be denied until an admin explicitly adds them to the household.
 - V1 must not include self-service signup, invites, or multi-household tenant switching.
@@ -188,7 +185,7 @@ The initial implementation should use a small workspace-oriented monorepo:
   - default timezone
   - auth mode
   - done-task archive retention days
-- The first self-hosting guide should recommend `oauth2-proxy` behind Caddy `forward_auth` as the reference auth setup for non-exe.dev deployments.
+- The first self-hosting guide should recommend `oauth2-proxy` behind Caddy `forward_auth` as the reference auth setup.
 
 ### 3.2 Authentication and Authorization
 
@@ -201,8 +198,8 @@ Initial adapters and auth modes:
 - `trusted_header`
   - production-oriented mode for deployments behind a trusted auth proxy
   - may only be enabled when the upstream proxy strips user-supplied identity headers and injects canonical authenticated values
-  - the first implementation reads exe.dev-provided identity headers such as `X-ExeDev-UserID` and `X-ExeDev-Email`
-  - unauthenticated browser requests may be redirected to the provider login flow, such as `/__exe.dev/login`
+  - the implementation reads a configured authenticated email header, defaulting to `X-Forwarded-Email`
+  - unauthenticated browser requests may be redirected by the upstream auth layer before they reach the app
 - `service_token`
   - used by service actors and other programmatic clients
   - authenticates via bearer token tied to a service actor record
@@ -515,7 +512,7 @@ The visual direction should feel warm, slightly literary, and a little whimsical
 ## 5. Constraints & Assumptions
 
 - V1 is one household per deployment, but the schema and authorization model should not hard-code a permanent single-tenant assumption.
-- The initial deployment target is exe.dev, but application internals should remain portable.
+- Application internals should remain portable across deployment targets.
 - Both initial human users are admins.
 - Service actors are non-admin actors.
 - The official deployment should default to the `America/New_York` timezone.
@@ -537,7 +534,7 @@ The visual direction should feel warm, slightly literary, and a little whimsical
 ### 7.1 Interview Notes
 
 - Project origin: a shared household kanban board and issue tracker for two human admins and one service actor
-- Deployment posture: deployment-target agnostic, with exe.dev as the initial runtime and auth integration
+- Deployment posture: deployment-target agnostic across runtime and auth integrations
 - Deployment tenancy: one household per deployment in v1
 - Core statuses: `To Do`, `In Progress`, `Waiting`, `Done`
 - Task types: one-off errands, recurring chores, and checklist-style subtasks

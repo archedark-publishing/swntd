@@ -562,7 +562,7 @@ describe("Phase 3 API", () => {
       `/api/v1/users/${createdAssistant.item.id}/service-tokens`,
       jsonRequest({
         body: {
-          name: "Assistant exe.dev"
+          name: "Primary assistant"
         },
         headers: adminHeaders,
         method: "POST"

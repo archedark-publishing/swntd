@@ -176,6 +176,13 @@ const taskListQuerySchema = z.object({
   status: taskStatusSchema.optional()
 });
 
+function hasHeader(
+  headers: Record<string, string | undefined>,
+  name: string
+) {
+  return Object.keys(headers).some((headerName) => headerName.toLowerCase() === name.toLowerCase());
+}
+
 function getAuthFailureError(
   c: Context<{ Variables: AppVariables }>,
   headers: Record<string, string | undefined>
@@ -186,7 +193,7 @@ function getAuthFailureError(
     return new ApiError(401, "unauthorized", "Invalid or expired service token.");
   }
 
-  if (mode === "trusted_header" && headers["x-exedev-email"]) {
+  if (mode === "trusted_header" && hasHeader(headers, c.var.config.trustedEmailHeader)) {
     return new ApiError(
       403,
       "forbidden",

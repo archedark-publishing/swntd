@@ -359,7 +359,7 @@ Expose a bounded, policy-respecting tool surface for service actors.
 
 ### Goal
 
-Make the app straightforward to deploy on exe.dev and understandable to self-host elsewhere.
+Make the app straightforward to deploy on a hosted platform and understandable to self-host elsewhere.
 
 ### Status
 

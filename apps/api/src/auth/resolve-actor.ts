@@ -72,7 +72,7 @@ export async function resolveRequestActor(
         return null;
       }
 
-      const email = getHeader(headers, "x-exedev-email");
+      const email = getHeader(headers, config.trustedEmailHeader);
 
       if (!email) {
         return null;

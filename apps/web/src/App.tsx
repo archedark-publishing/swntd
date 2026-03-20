@@ -2064,7 +2064,7 @@ function SettingsView(props: {
                     <span>Token name</span>
                     <input
                       onChange={(event) => setServiceTokenName(event.target.value)}
-                      placeholder="Assistant exe.dev"
+                      placeholder="Primary assistant"
                       value={serviceTokenName}
                     />
                   </label>
