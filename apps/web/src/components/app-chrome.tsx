@@ -1,5 +1,5 @@
 import type { ComponentProps, ReactNode } from "react";
-import { RefreshCw, ScrollText } from "lucide-react";
+import { Menu, RefreshCw, ScrollText, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -12,6 +12,7 @@ export function AppChrome(props: {
   canAdmin: boolean;
   isManualRefreshPending: boolean;
   onCreateTask: () => void;
+  onOpenNavigation: () => void;
   onRefresh: () => void;
 }) {
   return (
@@ -25,6 +26,16 @@ export function AppChrome(props: {
         </p>
       </div>
       <div className="masthead-actions">
+        <Button
+          className="nav-drawer-trigger rounded-full bg-white/70 shadow-sm hover:bg-white"
+          onClick={props.onOpenNavigation}
+          size="icon"
+          type="button"
+          variant="outline"
+        >
+          <Menu className="size-4" />
+          <span className="sr-only">Open navigation</span>
+        </Button>
         <Button
           className="gap-2 rounded-full bg-white/70 shadow-sm hover:bg-white"
           onClick={props.onRefresh}
@@ -51,29 +62,71 @@ export function AppChrome(props: {
   );
 }
 
-export function ViewSwitcher<TView extends string>(props: {
-  items: Array<{ id: TView; label: string }>;
-  onSelect: (view: TView) => void;
-  selected: TView;
+export function AppNavigation(props: {
+  isOpen: boolean;
+  mainItems: Array<{ id: string; label: string; meta?: string }>;
+  onClose: () => void;
+  onSelectMain: (itemId: string) => void;
+  selectedMain: string;
 }) {
   return (
-    <nav aria-label="Primary views" className="view-nav">
-      {props.items.map((item) => (
-        <Button
-          className={cn(
-            "rounded-full border border-border/50 bg-white/60 text-foreground shadow-sm backdrop-blur-sm",
-            item.id === props.selected && "bg-primary text-primary-foreground"
-          )}
-          key={item.id}
-          onClick={() => props.onSelect(item.id)}
-          size="sm"
-          type="button"
-          variant={item.id === props.selected ? "default" : "ghost"}
-        >
-          {item.label}
-        </Button>
-      ))}
-    </nav>
+    <>
+      <div
+        aria-hidden={!props.isOpen}
+        className={cn("app-sidebar-backdrop", props.isOpen && "open")}
+        onClick={props.onClose}
+      />
+      <aside
+        aria-label="Primary navigation"
+        className={cn("app-sidebar", props.isOpen && "open")}
+      >
+        <div className="app-sidebar-header">
+          <div className="app-sidebar-title-row">
+            <div>
+              <p className="eyebrow">Navigate</p>
+              <strong className="app-sidebar-title">S#!% We Need To Do</strong>
+            </div>
+            <Button
+              className="nav-drawer-close rounded-full"
+              onClick={props.onClose}
+              size="icon"
+              type="button"
+              variant="ghost"
+            >
+              <X className="size-4" />
+              <span className="sr-only">Close navigation</span>
+            </Button>
+          </div>
+          <p className="sidebar-copy">
+            A shared board for chores, errands, recurring rituals, and the small
+            domestic plot twists that keep a household moving.
+          </p>
+        </div>
+
+        <nav className="app-sidebar-nav">
+          {props.mainItems.map((item) => (
+            <Button
+              className={cn(
+                "sidebar-nav-button h-auto w-full justify-start rounded-3xl px-4 py-3 text-left",
+                item.id === props.selectedMain && "sidebar-nav-button-active"
+              )}
+              key={item.id}
+              onClick={() => {
+                props.onSelectMain(item.id);
+                props.onClose();
+              }}
+              type="button"
+              variant={item.id === props.selectedMain ? "default" : "ghost"}
+            >
+              <span className="grid gap-1">
+                <strong>{item.label}</strong>
+                {item.meta ? <span className="text-xs opacity-80">{item.meta}</span> : null}
+              </span>
+            </Button>
+          ))}
+        </nav>
+      </aside>
+    </>
   );
 }
 

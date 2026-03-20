@@ -7,6 +7,7 @@ import {
   useState
 } from "react";
 import {
+  AppNavigation,
   AppChrome,
   EmptyStateCard,
   InfoRow,
@@ -15,7 +16,6 @@ import {
   SearchField,
   SelectionListButton,
   StatusMessageCard,
-  ViewSwitcher
 } from "@/components/app-chrome";
 import {
   ChoiceChip,
@@ -30,6 +30,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Toaster } from "@/components/ui/sonner";
+import { cn } from "@/lib/utils";
 import {
   api,
   downloadAttachment,
@@ -55,6 +56,7 @@ import { toast } from "sonner";
 import "./styles.css";
 
 type ViewName = "archive" | "board" | "my-tasks" | "settings";
+type SettingsPage = "general" | "household" | "labels" | "recurring";
 
 type ChecklistDraftItem = {
   body: string;
@@ -125,15 +127,33 @@ const navItems: Array<{ id: ViewName; label: string }> = [
   { id: "archive", label: "Archive" },
   { id: "settings", label: "Settings" }
 ];
+const settingsNavItems: Array<{ id: SettingsPage; label: string }> = [
+  { id: "general", label: "General" },
+  { id: "household", label: "Household" },
+  { id: "labels", label: "Labels" },
+  { id: "recurring", label: "Recurring" }
+];
 
-function readViewFromHash(): ViewName {
-  const hash = window.location.hash.replace("#", "");
+function isSettingsPage(value: string | undefined): value is SettingsPage {
+  return value === "general" || value === "household" || value === "labels" || value === "recurring";
+}
 
-  if (hash === "my-tasks" || hash === "archive" || hash === "settings") {
-    return hash;
+function readRouteFromHash(): { settingsPage: SettingsPage; view: ViewName } {
+  const hash = window.location.hash.replace(/^#/, "");
+  const [viewPart, subpagePart] = hash.split("/");
+
+  if (viewPart === "my-tasks" || viewPart === "archive") {
+    return { settingsPage: "general", view: viewPart };
   }
 
-  return "board";
+  if (viewPart === "settings") {
+    return {
+      settingsPage: isSettingsPage(subpagePart) ? subpagePart : "general",
+      view: "settings"
+    };
+  }
+
+  return { settingsPage: "general", view: "board" };
 }
 
 function createChecklistDraft(items: Array<{ body: string; isCompleted: boolean }>) {
@@ -343,10 +363,13 @@ function showErrorToast(message: string, toastId?: string) {
 }
 
 export function App() {
-  const [view, setView] = useState<ViewName>(() => readViewFromHash());
+  const initialRoute = readRouteFromHash();
+  const [view, setView] = useState<ViewName>(initialRoute.view);
+  const [settingsPage, setSettingsPage] = useState<SettingsPage>(initialRoute.settingsPage);
   const [snapshot, setSnapshot] = useState<AppSnapshot>(emptySnapshot);
   const [isBooting, setIsBooting] = useState(true);
   const [isManualRefreshPending, setIsManualRefreshPending] = useState(false);
+  const [isNavOpen, setIsNavOpen] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [selectedTask, setSelectedTask] = useState<TaskDetail | null>(null);
   const [isTaskSheetOpen, setIsTaskSheetOpen] = useState(false);
@@ -359,8 +382,40 @@ export function App() {
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
 
   useEffect(() => {
-    window.location.hash = view;
-  }, [view]);
+    const onHashChange = () => {
+      const nextRoute = readRouteFromHash();
+
+      setView(nextRoute.view);
+      setSettingsPage(nextRoute.settingsPage);
+    };
+
+    window.addEventListener("hashchange", onHashChange);
+
+    return () => {
+      window.removeEventListener("hashchange", onHashChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    const nextHash = view === "settings" ? `settings/${settingsPage}` : view;
+
+    if (window.location.hash !== `#${nextHash}`) {
+      window.location.hash = nextHash;
+    }
+  }, [settingsPage, view]);
+
+  useEffect(() => {
+    if (!isNavOpen) {
+      return;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isNavOpen]);
 
   const loadTaskDetail = useEffectEvent(async (taskId: string | null) => {
     if (!taskId) {
@@ -550,6 +605,17 @@ export function App() {
 
       return null;
     }
+  }
+
+  function handleViewChange(nextView: ViewName) {
+    setView(nextView);
+    setIsNavOpen(false);
+  }
+
+  function handleSettingsPageChange(nextPage: SettingsPage) {
+    setView("settings");
+    setSettingsPage(nextPage);
+    setIsNavOpen(false);
   }
 
   function openTask(taskId: string) {
@@ -840,104 +906,123 @@ export function App() {
   return (
     <main className="app-shell">
       <div className="grain" />
-      <AppChrome
-        actorDisplayName={snapshot.actor?.displayName ?? "Loading..."}
-        actorRoleLabel={snapshot.actor ? formatRoleLabel(snapshot.actor) : "guest"}
-        canAdmin={canAdmin}
-        isManualRefreshPending={isManualRefreshPending}
-        onCreateTask={openNewTask}
-        onRefresh={() => {
-          startTransition(() => {
-            void refreshApp({ background: true, showSpinner: true });
-          });
-        }}
-      />
-
-      <ViewSwitcher items={navItems} onSelect={setView} selected={view} />
-
-      {isBooting ? (
-        <StatusMessageCard
-          description="Fetching the latest board state, settings, and household cast."
-          title="Opening the ledger..."
+      <div className="app-frame">
+        <AppNavigation
+          isOpen={isNavOpen}
+          mainItems={navItems.map((item) => ({ id: item.id, label: item.label }))}
+          onClose={() => setIsNavOpen(false)}
+          onSelectMain={(itemId) => handleViewChange(itemId as ViewName)}
+          selectedMain={view}
         />
-      ) : null}
 
-      {!isBooting && view === "board" ? (
-        <BoardView
-          aiAssistanceLabel={getAiAssistanceLabel(snapshot.users)}
-          tasks={activeTasks}
-          onOpenTask={openTask}
-          onQuickMove={handleQuickMove}
-          onReorder={handleReorder}
-        />
-      ) : null}
+        <div className="app-content">
+          <AppChrome
+            actorDisplayName={snapshot.actor?.displayName ?? "Loading..."}
+            actorRoleLabel={snapshot.actor ? formatRoleLabel(snapshot.actor) : "guest"}
+            canAdmin={canAdmin}
+            isManualRefreshPending={isManualRefreshPending}
+            onCreateTask={openNewTask}
+            onOpenNavigation={() => setIsNavOpen(true)}
+            onRefresh={() => {
+              startTransition(() => {
+                void refreshApp({ background: true, showSpinner: true });
+              });
+            }}
+          />
 
-      {!isBooting && view === "my-tasks" ? (
-        <TaskListView
-          aiAssistanceLabel={getAiAssistanceLabel(snapshot.users)}
-          description="Work with your name on it, with quick status moves and a clean shortlist."
-          emptyMessage="Nothing is assigned to you right now."
-          onOpenTask={openTask}
-          onQuickMove={handleQuickMove}
-          onReorder={handleReorder}
-          tasks={myTasks}
-          title="My Tasks"
-        />
-      ) : null}
+          {isBooting ? (
+            <StatusMessageCard
+              description="Fetching the latest board state, settings, and household cast."
+              title="Opening the ledger..."
+            />
+          ) : null}
 
-      {!isBooting && view === "archive" ? (
-        <section className="panel-stack">
-          <SectionHeading
-            actions={
-              <SearchField
-                label="Search archive"
-                onChange={setArchiveSearch}
-                placeholder="Search titles or notes"
-                value={archiveSearch}
+          {!isBooting && view === "board" ? (
+            <BoardView
+              aiAssistanceLabel={getAiAssistanceLabel(snapshot.users)}
+              tasks={activeTasks}
+              onOpenTask={openTask}
+              onQuickMove={handleQuickMove}
+              onReorder={handleReorder}
+            />
+          ) : null}
+
+          {!isBooting && view === "my-tasks" ? (
+            <TaskListView
+              aiAssistanceLabel={getAiAssistanceLabel(snapshot.users)}
+              description="Work with your name on it, with quick status moves and a clean shortlist."
+              emptyMessage="Nothing is assigned to you right now."
+              onOpenTask={openTask}
+              onQuickMove={handleQuickMove}
+              onReorder={handleReorder}
+              tasks={myTasks}
+              title="My Tasks"
+            />
+          ) : null}
+
+          {!isBooting && view === "archive" ? (
+            <section className="panel-stack">
+              <SectionHeading
+                actions={
+                  <SearchField
+                    label="Search archive"
+                    onChange={setArchiveSearch}
+                    placeholder="Search titles or notes"
+                    value={archiveSearch}
+                  />
+                }
+                eyebrow="History"
+                title="Archive"
               />
-            }
-            eyebrow="History"
-            title="Archive"
-          />
-          <TaskListView
-            aiAssistanceLabel={getAiAssistanceLabel(snapshot.users)}
-            description="A place for finished errands, closed loops, and things you only need to remember once in a while."
-            emptyMessage="Nothing has been archived yet."
-            onOpenTask={openTask}
-            onQuickMove={() => Promise.resolve()}
-            onReorder={() => Promise.resolve()}
-            tasks={archivedTasks}
-            title="Archive"
-          />
-        </section>
-      ) : null}
+              <TaskListView
+                aiAssistanceLabel={getAiAssistanceLabel(snapshot.users)}
+                description="A place for finished errands, closed loops, and things you only need to remember once in a while."
+                emptyMessage="Nothing has been archived yet."
+                onOpenTask={openTask}
+                onQuickMove={() => Promise.resolve()}
+                onReorder={() => Promise.resolve()}
+                tasks={archivedTasks}
+                title="Archive"
+              />
+            </section>
+          ) : null}
 
-      {!isBooting && view === "settings" ? (
-        <SettingsView
-          canAdmin={canAdmin}
-          labels={snapshot.labels}
-          onCreateLabel={handleLabelCreate}
-          onIssueServiceToken={handleServiceTokenIssue}
-          onRemoveUser={handleHouseholdUserRemove}
-          onRevokeServiceToken={handleServiceTokenRevoke}
-          onSaveSettings={handleSettingsSave}
-          onSaveTemplate={handleTemplateSave}
-          onSaveUser={handleHouseholdUserSave}
-          onSelectTemplate={(templateId) => setEditingTemplateId(templateId)}
-          onSelectUser={setEditingUserKey}
-          recurringTemplates={snapshot.recurringTemplates}
-          selectedTemplate={
-            snapshot.recurringTemplates.find(
-              (template) => template.id === editingTemplateId
-            ) ?? null
-          }
-          selectedUser={selectedHouseholdUser}
-          serviceTokensByUserId={snapshot.serviceTokensByUserId}
-          settings={snapshot.settings}
-          userEditorMode={householdUserEditorMode}
-          users={snapshot.users}
-        />
-      ) : null}
+          {!isBooting && view === "settings" ? (
+            <SettingsView
+              activePage={settingsPage}
+              canAdmin={canAdmin}
+              labels={snapshot.labels}
+              onCreateLabel={handleLabelCreate}
+              onIssueServiceToken={handleServiceTokenIssue}
+              onRemoveUser={handleHouseholdUserRemove}
+              onRevokeServiceToken={handleServiceTokenRevoke}
+              onSaveSettings={handleSettingsSave}
+              onSaveTemplate={handleTemplateSave}
+              onSaveUser={handleHouseholdUserSave}
+              onSelectPage={handleSettingsPageChange}
+              onSelectTemplate={(templateId) => {
+                setEditingTemplateId(templateId);
+                setSettingsPage("recurring");
+              }}
+              onSelectUser={(userKey) => {
+                setEditingUserKey(userKey);
+                setSettingsPage("household");
+              }}
+              recurringTemplates={snapshot.recurringTemplates}
+              selectedTemplate={
+                snapshot.recurringTemplates.find(
+                  (template) => template.id === editingTemplateId
+                ) ?? null
+              }
+              selectedUser={selectedHouseholdUser}
+              serviceTokensByUserId={snapshot.serviceTokensByUserId}
+              settings={snapshot.settings}
+              userEditorMode={householdUserEditorMode}
+              users={snapshot.users}
+            />
+          ) : null}
+        </div>
+      </div>
 
       <TaskSheet
         aiAssistanceToggleLabel={getAiAssistanceToggleLabel(snapshot.users)}
@@ -1765,6 +1850,7 @@ function TaskForm(props: {
 }
 
 function SettingsView(props: {
+  activePage: SettingsPage;
   canAdmin: boolean;
   labels: Label[];
   onCreateLabel: (input: { color: string; name: string }) => Promise<void>;
@@ -1777,6 +1863,7 @@ function SettingsView(props: {
   onSaveSettings: (settings: Settings) => Promise<void>;
   onSaveTemplate: (draft: TemplateDraft) => Promise<void>;
   onSaveUser: (userId: string | null, draft: HouseholdUserDraft) => Promise<boolean>;
+  onSelectPage: (page: SettingsPage) => void;
   onSelectTemplate: (templateId: string | null) => void;
   onSelectUser: (userKey: string | "new-admin" | "new-service" | null) => void;
   recurringTemplates: RecurringTemplate[];
@@ -1834,397 +1921,435 @@ function SettingsView(props: {
       : [];
 
   return (
-    <section className="settings-grid">
-      <SurfaceCard className="settings-card gap-0 py-0">
-        <SectionHeading
-          description="Tune the default timezone, archive cadence, and calendar preference."
-          eyebrow="House Rules"
-          title="Settings"
-        />
-        <div className="form-grid">
-          <FormField label="Timezone">
-            <FormInput
-              onChange={(event) =>
-                setSettingsDraft({
-                  ...settingsDraft,
-                  defaultTimezone: event.target.value
-                })
-              }
-              value={settingsDraft.defaultTimezone}
-            />
-          </FormField>
-          <FormField label="Done retention (days)">
-            <FormInput
-              min={1}
-              onChange={(event) =>
-                setSettingsDraft({
-                  ...settingsDraft,
-                  doneArchiveAfterDays: Number(event.target.value)
-                })
-              }
-              type="number"
-              value={settingsDraft.doneArchiveAfterDays}
-            />
-          </FormField>
-          <FormSelect
-            label="Default calendar export"
-            onValueChange={(value) =>
-              setSettingsDraft({
-                ...settingsDraft,
-                defaultCalendarExportKind: value as "google" | "ics"
-              })
-            }
-            options={[
-              { label: "Google Calendar", value: "google" },
-              { label: "ICS download", value: "ics" }
-            ]}
-            value={settingsDraft.defaultCalendarExportKind}
-          />
-        </div>
-        <div className="sheet-actions">
+    <section className="settings-shell">
+      <div className="settings-page-nav">
+        {settingsNavItems.map((item) => (
           <Button
-            onClick={() => {
-              void props.onSaveSettings(settingsDraft);
-            }}
+            className={cn(
+              "settings-page-button rounded-full border border-border/50 bg-white/62 text-foreground shadow-sm backdrop-blur-sm",
+              props.activePage === item.id && "bg-primary text-primary-foreground"
+            )}
+            key={item.id}
+            onClick={() => props.onSelectPage(item.id)}
+            size="sm"
             type="button"
+            variant={props.activePage === item.id ? "default" : "ghost"}
           >
-            Save Settings
+            {item.label}
           </Button>
-        </div>
-      </SurfaceCard>
+        ))}
+      </div>
 
-      <SurfaceCard className="settings-card gap-0 py-0">
-        <SectionHeading
-          actions={
-            <div className="header-action-row">
-              <Button
-                onClick={() => props.onSelectUser("new-admin")}
-                size="sm"
-                type="button"
-                variant="outline"
-              >
-                New Person
-              </Button>
-              <Button
-                onClick={() => props.onSelectUser("new-service")}
-                size="sm"
-                type="button"
-                variant="outline"
-              >
-                New Assistant
-              </Button>
-            </div>
-          }
-          eyebrow="Household Cast"
-          title="People and Assistants"
-        />
-        <div className="template-grid">
-          <div className="template-list">
-            {props.users.length === 0 ? (
-              <EmptyStateCard message="No household actors yet." />
-            ) : null}
-            {props.users.map((user) => (
-              <SelectionListButton
-                active={props.selectedUser?.id === user.id}
-                key={user.id}
-                label={user.displayName}
-                meta={formatRoleLabel(user)}
-                onClick={() => props.onSelectUser(user.id)}
-              />
-            ))}
-          </div>
-          <div className="template-editor">
+      <div className="settings-page-stack">
+        {props.activePage === "general" ? (
+          <SurfaceCard className="settings-card gap-0 py-0">
+            <SectionHeading
+              description="Tune the default timezone, archive cadence, and calendar preference."
+              eyebrow="House Rules"
+              title="General Settings"
+            />
             <div className="form-grid">
-              <FormField label="Type">
-                <FormInput
-                  disabled
-                  value={userDraft.mode === "admin" ? "Person" : "Assistant"}
-                />
-              </FormField>
-              <FormField label="Display name">
+              <FormField label="Timezone">
                 <FormInput
                   onChange={(event) =>
-                    setUserDraft({
-                      ...userDraft,
-                      displayName: event.target.value
+                    setSettingsDraft({
+                      ...settingsDraft,
+                      defaultTimezone: event.target.value
                     })
                   }
-                  value={userDraft.displayName}
+                  value={settingsDraft.defaultTimezone}
                 />
               </FormField>
-              {userDraft.mode === "admin" ? (
-                <FormField className="wide" label="Email">
-                  <FormInput
-                    onChange={(event) =>
-                      setUserDraft({
-                        ...userDraft,
-                        email: event.target.value
-                      })
-                    }
-                    placeholder="person@example.com"
-                    type="email"
-                    value={userDraft.email}
-                  />
-                </FormField>
-              ) : (
-                <FormField className="wide" label="Service kind">
-                  <FormInput
-                    onChange={(event) =>
-                      setUserDraft({
-                        ...userDraft,
-                        serviceKind: event.target.value
-                      })
-                    }
-                    placeholder="assistant"
-                    value={userDraft.serviceKind}
-                  />
-                </FormField>
-              )}
+              <FormField label="Done retention (days)">
+                <FormInput
+                  min={1}
+                  onChange={(event) =>
+                    setSettingsDraft({
+                      ...settingsDraft,
+                      doneArchiveAfterDays: Number(event.target.value)
+                    })
+                  }
+                  type="number"
+                  value={settingsDraft.doneArchiveAfterDays}
+                />
+              </FormField>
+              <FormSelect
+                label="Default calendar export"
+                onValueChange={(value) =>
+                  setSettingsDraft({
+                    ...settingsDraft,
+                    defaultCalendarExportKind: value as "google" | "ics"
+                  })
+                }
+                options={[
+                  { label: "Google Calendar", value: "google" },
+                  { label: "ICS download", value: "ics" }
+                ]}
+                value={settingsDraft.defaultCalendarExportKind}
+              />
             </div>
             <div className="sheet-actions">
               <Button
-                disabled={
-                  isUserRemovePending ||
-                  isUserSavePending ||
-                  !userDraft.displayName.trim() ||
-                  (userDraft.mode === "admin"
-                    ? !userDraft.email.trim()
-                    : !userDraft.serviceKind.trim())
-                }
-                onClick={async () => {
-                  setIsUserSavePending(true);
-                  setUserActionMessage(null);
-                  const saved = await props.onSaveUser(props.selectedUser?.id ?? null, userDraft);
-
-                  setIsUserSavePending(false);
-
-                  if (saved) {
-                    setUserActionMessage(
-                      props.selectedUser ? "Actor saved." : "Actor created."
-                    );
-                  }
+                onClick={() => {
+                  void props.onSaveSettings(settingsDraft);
                 }}
                 type="button"
               >
-                {isUserSavePending
-                  ? props.selectedUser
-                    ? "Saving..."
-                    : "Creating..."
-                  : props.selectedUser
-                    ? "Save Actor"
-                    : "Create Actor"}
+                Save Settings
               </Button>
-              {props.selectedUser ? (
-                <Button
-                  disabled={isUserRemovePending || isUserSavePending}
-                  onClick={async () => {
-                    const selectedUserId = props.selectedUser?.id;
-
-                    if (!selectedUserId) {
-                      return;
-                    }
-
-                    if (
-                      !window.confirm(
-                        "Remove this household actor permanently from the active cast? They will stay in task history, lose open assignments, and any assistant tokens will be revoked."
-                      )
-                    ) {
-                      return;
-                    }
-
-                    setIsUserRemovePending(true);
-                    setUserActionMessage(null);
-                    await props.onRemoveUser(selectedUserId);
-                    setIsUserRemovePending(false);
-                  }}
-                  size="sm"
-                  type="button"
-                  variant="ghost"
-                >
-                  {isUserRemovePending ? "Removing..." : "Remove Actor"}
-                </Button>
-              ) : null}
             </div>
-            {userActionMessage ? <EmptyStateCard message={userActionMessage} /> : null}
-            {props.selectedUser ? (
-              <EmptyStateCard
-                message="Removing an actor is permanent. They stay attached to past comments and history, but disappear from the household cast, cannot be assigned to anything new, and assistants lose any active tokens."
-              />
-            ) : null}
+          </SurfaceCard>
+        ) : null}
 
-            {props.selectedUser?.role === "service" ? (
-              <section className="sheet-section">
-                <SectionHeading
-                  compact
-                  eyebrow="Assistant Access"
-                  title="Service Tokens"
-                  titleAs="h3"
-                />
-                <div className="sheet-actions">
-                  <FormField className="compact-field" label="Token name">
-                    <FormInput
-                      onChange={(event) => setServiceTokenName(event.target.value)}
-                      placeholder="Primary assistant"
-                      value={serviceTokenName}
-                    />
-                  </FormField>
+        {props.activePage === "household" ? (
+          <SurfaceCard className="settings-card gap-0 py-0">
+            <SectionHeading
+              actions={
+                <div className="header-action-row">
                   <Button
-                    disabled={
-                      !serviceTokenName.trim() || isUserRemovePending || isUserSavePending
-                    }
-                    onClick={async () => {
-                      const issued = await props.onIssueServiceToken(
-                        props.selectedUser!.id,
-                        serviceTokenName
-                      );
-
-                      if (issued) {
-                        setIssuedServiceToken(issued.plainTextToken);
-                        setServiceTokenName("");
-                      }
-                    }}
+                    onClick={() => props.onSelectUser("new-admin")}
                     size="sm"
                     type="button"
                     variant="outline"
                   >
-                    Issue Token
+                    New Person
+                  </Button>
+                  <Button
+                    onClick={() => props.onSelectUser("new-service")}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    New Assistant
                   </Button>
                 </div>
-                {issuedServiceToken ? (
+              }
+              eyebrow="Household Cast"
+              title="People and Assistants"
+            />
+            <div className="template-grid">
+              <div className="template-list">
+                {props.users.length === 0 ? (
+                  <EmptyStateCard message="No household actors yet." />
+                ) : null}
+                {props.users.map((user) => (
+                  <SelectionListButton
+                    active={props.selectedUser?.id === user.id}
+                    key={user.id}
+                    label={user.displayName}
+                    meta={formatRoleLabel(user)}
+                    onClick={() => props.onSelectUser(user.id)}
+                  />
+                ))}
+              </div>
+              <div className="template-editor">
+                <div className="form-grid">
+                  <FormField label="Type">
+                    <FormInput
+                      disabled
+                      value={userDraft.mode === "admin" ? "Person" : "Assistant"}
+                    />
+                  </FormField>
+                  <FormField label="Display name">
+                    <FormInput
+                      onChange={(event) =>
+                        setUserDraft({
+                          ...userDraft,
+                          displayName: event.target.value
+                        })
+                      }
+                      value={userDraft.displayName}
+                    />
+                  </FormField>
+                  {userDraft.mode === "admin" ? (
+                    <FormField className="wide" label="Email">
+                      <FormInput
+                        onChange={(event) =>
+                          setUserDraft({
+                            ...userDraft,
+                            email: event.target.value
+                          })
+                        }
+                        placeholder="person@example.com"
+                        type="email"
+                        value={userDraft.email}
+                      />
+                    </FormField>
+                  ) : (
+                    <FormField className="wide" label="Service kind">
+                      <FormInput
+                        onChange={(event) =>
+                          setUserDraft({
+                            ...userDraft,
+                            serviceKind: event.target.value
+                          })
+                        }
+                        placeholder="assistant"
+                        value={userDraft.serviceKind}
+                      />
+                    </FormField>
+                  )}
+                </div>
+                <div className="sheet-actions">
+                  <Button
+                    disabled={
+                      isUserRemovePending ||
+                      isUserSavePending ||
+                      !userDraft.displayName.trim() ||
+                      (userDraft.mode === "admin"
+                        ? !userDraft.email.trim()
+                        : !userDraft.serviceKind.trim())
+                    }
+                    onClick={async () => {
+                      setIsUserSavePending(true);
+                      setUserActionMessage(null);
+                      const saved = await props.onSaveUser(props.selectedUser?.id ?? null, userDraft);
+
+                      setIsUserSavePending(false);
+
+                      if (saved) {
+                        setUserActionMessage(
+                          props.selectedUser ? "Actor saved." : "Actor created."
+                        );
+                      }
+                    }}
+                    type="button"
+                  >
+                    {isUserSavePending
+                      ? props.selectedUser
+                        ? "Saving..."
+                        : "Creating..."
+                      : props.selectedUser
+                        ? "Save Actor"
+                        : "Create Actor"}
+                  </Button>
+                  {props.selectedUser ? (
+                    <Button
+                      disabled={isUserRemovePending || isUserSavePending}
+                      onClick={async () => {
+                        const selectedUserId = props.selectedUser?.id;
+
+                        if (!selectedUserId) {
+                          return;
+                        }
+
+                        if (
+                          !window.confirm(
+                            "Remove this household actor permanently from the active cast? They will stay in task history, lose open assignments, and any assistant tokens will be revoked."
+                          )
+                        ) {
+                          return;
+                        }
+
+                        setIsUserRemovePending(true);
+                        setUserActionMessage(null);
+                        await props.onRemoveUser(selectedUserId);
+                        setIsUserRemovePending(false);
+                      }}
+                      size="sm"
+                      type="button"
+                      variant="ghost"
+                    >
+                      {isUserRemovePending ? "Removing..." : "Remove Actor"}
+                    </Button>
+                  ) : null}
+                </div>
+                {userActionMessage ? <EmptyStateCard message={userActionMessage} /> : null}
+                {props.selectedUser ? (
                   <EmptyStateCard
-                    message={issuedServiceToken}
-                    title="Copy this token now:"
+                    message="Removing an actor is permanent. They stay attached to past comments and history, but disappear from the household cast, cannot be assigned to anything new, and assistants lose any active tokens."
                   />
                 ) : null}
-                <div className="cast-list">
-                  {selectedServiceTokens.length === 0 ? (
-                    <EmptyStateCard message="No service tokens issued yet." />
-                  ) : null}
-                  {selectedServiceTokens.map((token) => (
-                    <InfoRow
-                      action={
-                        <Button
-                          disabled={Boolean(token.revokedAt)}
-                          onClick={() => {
-                            void props.onRevokeServiceToken(token.id);
-                          }}
-                          size="sm"
-                          type="button"
-                          variant="ghost"
+
+                {props.selectedUser?.role === "service" ? (
+                  <section className="sheet-section">
+                    <SectionHeading
+                      compact
+                      eyebrow="Assistant Access"
+                      title="Service Tokens"
+                      titleAs="h3"
+                    />
+                    <div className="sheet-actions">
+                      <FormField className="compact-field" label="Token name">
+                        <FormInput
+                          onChange={(event) => setServiceTokenName(event.target.value)}
+                          placeholder="Primary assistant"
+                          value={serviceTokenName}
+                        />
+                      </FormField>
+                      <Button
+                        disabled={
+                          !serviceTokenName.trim() || isUserRemovePending || isUserSavePending
+                        }
+                        onClick={async () => {
+                          const issued = await props.onIssueServiceToken(
+                            props.selectedUser!.id,
+                            serviceTokenName
+                          );
+
+                          if (issued) {
+                            setIssuedServiceToken(issued.plainTextToken);
+                            setServiceTokenName("");
+                          }
+                        }}
+                        size="sm"
+                        type="button"
+                        variant="outline"
+                      >
+                        Issue Token
+                      </Button>
+                    </div>
+                    {issuedServiceToken ? (
+                      <EmptyStateCard
+                        message={issuedServiceToken}
+                        title="Copy this token now:"
+                      />
+                    ) : null}
+                    <div className="cast-list">
+                      {selectedServiceTokens.length === 0 ? (
+                        <EmptyStateCard message="No service tokens issued yet." />
+                      ) : null}
+                      {selectedServiceTokens.map((token) => (
+                        <InfoRow
+                          action={
+                            <Button
+                              disabled={Boolean(token.revokedAt)}
+                              onClick={() => {
+                                void props.onRevokeServiceToken(token.id);
+                              }}
+                              size="sm"
+                              type="button"
+                              variant="ghost"
+                            >
+                              {token.revokedAt ? "Revoked" : "Revoke"}
+                            </Button>
+                          }
+                          key={token.id}
                         >
-                          {token.revokedAt ? "Revoked" : "Revoke"}
-                        </Button>
-                      }
-                      key={token.id}
-                    >
-                      <div>
-                        <strong>{token.name}</strong>
-                        <span>
-                          Created {formatTimestamp(token.createdAt)}
-                          {token.lastUsedAt
-                            ? ` · Last used ${formatTimestamp(token.lastUsedAt)}`
-                            : " · Never used"}
-                          {token.revokedAt
-                            ? ` · Revoked ${formatTimestamp(token.revokedAt)}`
-                            : ""}
-                        </span>
-                      </div>
-                    </InfoRow>
-                  ))}
-                </div>
-              </section>
-            ) : null}
-          </div>
-        </div>
+                          <div>
+                            <strong>{token.name}</strong>
+                            <span>
+                              Created {formatTimestamp(token.createdAt)}
+                              {token.lastUsedAt
+                                ? ` · Last used ${formatTimestamp(token.lastUsedAt)}`
+                                : " · Never used"}
+                              {token.revokedAt
+                                ? ` · Revoked ${formatTimestamp(token.revokedAt)}`
+                                : ""}
+                            </span>
+                          </div>
+                        </InfoRow>
+                      ))}
+                    </div>
+                  </section>
+                ) : null}
+              </div>
+            </div>
+          </SurfaceCard>
+        ) : null}
 
-        <SectionHeading compact eyebrow="Labels" title="Quick Add" titleAs="h3" />
-        <div className="sheet-actions">
-          <FormField className="compact-field" label="Name">
-            <FormInput
-              onChange={(event) => setLabelName(event.target.value)}
-              placeholder="Errand"
-              value={labelName}
+        {props.activePage === "labels" ? (
+          <SurfaceCard className="settings-card gap-0 py-0">
+            <SectionHeading
+              description="Create short labels for things like errands, bills, cleaning, shopping, or anything else you want to scan quickly on the board."
+              eyebrow="Labels"
+              title="Tag Library"
             />
-          </FormField>
-          <FormField className="compact-field" label="Color note">
-            <FormInput
-              onChange={(event) => setLabelColor(event.target.value)}
-              placeholder="#c96 or brass"
-              value={labelColor}
-            />
-          </FormField>
-          <Button
-            onClick={() => {
-              if (!labelName.trim()) {
-                return;
+            <div className="sheet-actions">
+              <FormField className="compact-field" label="Name">
+                <FormInput
+                  onChange={(event) => setLabelName(event.target.value)}
+                  placeholder="Errand"
+                  value={labelName}
+                />
+              </FormField>
+              <FormField className="compact-field" label="Color note">
+                <FormInput
+                  onChange={(event) => setLabelColor(event.target.value)}
+                  placeholder="#c96 or brass"
+                  value={labelColor}
+                />
+              </FormField>
+              <Button
+                onClick={() => {
+                  if (!labelName.trim()) {
+                    return;
+                  }
+
+                  void props.onCreateLabel({
+                    color: labelColor,
+                    name: labelName
+                  });
+                  setLabelName("");
+                  setLabelColor("");
+                }}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                Add Label
+              </Button>
+            </div>
+            {props.labels.length > 0 ? (
+              <div className="label-row roomy">
+                {props.labels.map((label) => (
+                  <Badge className="label-pill" key={label.id} variant="outline">
+                    {label.name}
+                  </Badge>
+                ))}
+              </div>
+            ) : (
+              <EmptyStateCard message="No labels yet. Add a few tags to make the board easier to scan." />
+            )}
+          </SurfaceCard>
+        ) : null}
+
+        {props.activePage === "recurring" ? (
+          <SurfaceCard className="settings-card gap-0 py-0">
+            <SectionHeading
+              actions={
+                <Button
+                  onClick={() => props.onSelectTemplate(null)}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  New Template
+                </Button>
               }
-
-              void props.onCreateLabel({
-                color: labelColor,
-                name: labelName
-              });
-              setLabelName("");
-              setLabelColor("");
-            }}
-            size="sm"
-            type="button"
-            variant="outline"
-          >
-            Add Label
-          </Button>
-        </div>
-        <div className="label-row roomy">
-          {props.labels.map((label) => (
-            <Badge className="label-pill" key={label.id} variant="outline">
-              {label.name}
-            </Badge>
-          ))}
-        </div>
-      </SurfaceCard>
-
-      <SurfaceCard className="settings-card settings-card-wide gap-0 py-0">
-        <SectionHeading
-          actions={
-            <Button
-              onClick={() => props.onSelectTemplate(null)}
-              size="sm"
-              type="button"
-              variant="outline"
-            >
-              New Template
-            </Button>
-          }
-          eyebrow="Recurring Work"
-          title="Templates"
-        />
-        <div className="template-grid">
-          <div className="template-list">
-            {props.recurringTemplates.length === 0 ? (
-              <EmptyStateCard message="No recurring templates yet." />
-            ) : null}
-            {props.recurringTemplates.map((template) => (
-              <SelectionListButton
-                active={props.selectedTemplate?.id === template.id}
-                key={template.id}
-                label={template.title}
-                meta={`${template.recurrenceCadence} every ${template.recurrenceInterval}`}
-                onClick={() => props.onSelectTemplate(template.id)}
-              />
-            ))}
-          </div>
-          <div className="template-editor">
-            <RecurringTemplateForm
-              draft={templateDraft}
-              labels={props.labels}
-              onChange={setTemplateDraft}
-              onSubmit={() => {
-                void props.onSaveTemplate(templateDraft);
-              }}
-              users={props.users}
+              eyebrow="Recurring Work"
+              title="Templates"
             />
-          </div>
-        </div>
-      </SurfaceCard>
+            <div className="template-grid">
+              <div className="template-list">
+                {props.recurringTemplates.length === 0 ? (
+                  <EmptyStateCard message="No recurring templates yet." />
+                ) : null}
+                {props.recurringTemplates.map((template) => (
+                  <SelectionListButton
+                    active={props.selectedTemplate?.id === template.id}
+                    key={template.id}
+                    label={template.title}
+                    meta={`${template.recurrenceCadence} every ${template.recurrenceInterval}`}
+                    onClick={() => props.onSelectTemplate(template.id)}
+                  />
+                ))}
+              </div>
+              <div className="template-editor">
+                <RecurringTemplateForm
+                  draft={templateDraft}
+                  labels={props.labels}
+                  onChange={setTemplateDraft}
+                  onSubmit={() => {
+                    void props.onSaveTemplate(templateDraft);
+                  }}
+                  users={props.users}
+                />
+              </div>
+            </div>
+          </SurfaceCard>
+        ) : null}
+      </div>
     </section>
   );
 }
