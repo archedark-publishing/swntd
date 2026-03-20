@@ -15,6 +15,7 @@ import {
   type Attachment,
   type Label,
   type RecurringTemplate,
+  type ServiceToken,
   type Settings,
   type SwntdApiError,
   type TaskDetail,
@@ -64,6 +65,14 @@ type TemplateDraft = {
   title: string;
 };
 
+type HouseholdUserDraft = {
+  deactivated: boolean;
+  displayName: string;
+  email: string;
+  mode: "admin" | "service";
+  serviceKind: string;
+};
+
 type AppSnapshot = {
   activeTasks: TaskListItem[];
   actor: Actor | null;
@@ -71,6 +80,7 @@ type AppSnapshot = {
   labels: Label[];
   recurringTemplates: RecurringTemplate[];
   settings: Settings | null;
+  serviceTokensByUserId: Record<string, ServiceToken[]>;
   users: UserRef[];
 };
 
@@ -81,6 +91,7 @@ const emptySnapshot: AppSnapshot = {
   labels: [],
   recurringTemplates: [],
   settings: null,
+  serviceTokensByUserId: {},
   users: []
 };
 
@@ -170,6 +181,29 @@ function createTemplateDraft(template?: RecurringTemplate | null): TemplateDraft
   };
 }
 
+function createHouseholdUserDraft(
+  user?: UserRef | null,
+  mode: "admin" | "service" = "admin"
+): HouseholdUserDraft {
+  if (!user) {
+    return {
+      deactivated: false,
+      displayName: "",
+      email: "",
+      mode,
+      serviceKind: mode === "service" ? "assistant" : ""
+    };
+  }
+
+  return {
+    deactivated: Boolean(user.deactivatedAt),
+    displayName: user.displayName,
+    email: user.email ?? "",
+    mode: user.role,
+    serviceKind: user.serviceKind ?? "assistant"
+  };
+}
+
 function getTaskColumnOrder(tasks: TaskListItem[], status: TaskStatus) {
   return tasks
     .filter((task) => task.status === status)
@@ -221,6 +255,47 @@ function getStatusStep(status: TaskStatus, direction: -1 | 1) {
   return taskStatuses[nextIndex];
 }
 
+function formatRoleLabel(user: Pick<UserRef, "role" | "serviceKind">) {
+  if (user.role === "admin") {
+    return "Admin";
+  }
+
+  if (user.serviceKind === "assistant") {
+    return "Household Assistant";
+  }
+
+  if (!user.serviceKind) {
+    return "Service Actor";
+  }
+
+  return user.serviceKind
+    .split(/[_-]+/)
+    .filter(Boolean)
+    .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
+    .join(" ");
+}
+
+function getPrimaryServiceActorName(users: UserRef[]) {
+  return (
+    users.find((user) => user.role === "service" && !user.deactivatedAt)?.displayName ??
+    null
+  );
+}
+
+function getAiAssistanceLabel(users: UserRef[]) {
+  const serviceActorName = getPrimaryServiceActorName(users);
+
+  return serviceActorName ? `${serviceActorName} can help` : "AI help enabled";
+}
+
+function getAiAssistanceToggleLabel(users: UserRef[]) {
+  const serviceActorName = getPrimaryServiceActorName(users);
+
+  return serviceActorName
+    ? `Allow ${serviceActorName} to pick this up when assigned`
+    : "Allow the household assistant to pick this up when assigned";
+}
+
 function buildFlashMessage(error: unknown) {
   if (isConflictError(error)) {
     return "This task changed somewhere else. The board has been refreshed so you can try again.";
@@ -251,6 +326,7 @@ export function App() {
   const [isTaskSheetOpen, setIsTaskSheetOpen] = useState(false);
   const [isCreatingTask, setIsCreatingTask] = useState(false);
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
+  const [editingUserKey, setEditingUserKey] = useState<string | "new-admin" | "new-service" | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [archiveSearch, setArchiveSearch] = useState("");
@@ -312,6 +388,14 @@ export function App() {
               api.getSettings(),
               api.listRecurringTemplates()
             ]);
+            const serviceTokensEntries = await Promise.all(
+              users.items
+                .filter((user) => user.role === "service")
+                .map(async (user) => [
+                  user.id,
+                  (await api.listServiceTokens(user.id)).items
+                ] as const)
+            );
 
             setSnapshot({
               activeTasks: activeTasks.items,
@@ -320,6 +404,7 @@ export function App() {
               labels: labels.items,
               recurringTemplates: recurringTemplates.items,
               settings: settings.settings,
+              serviceTokensByUserId: Object.fromEntries(serviceTokensEntries),
               users: users.items
             });
           } else {
@@ -330,6 +415,7 @@ export function App() {
               labels: [],
               recurringTemplates: [],
               settings: null,
+              serviceTokensByUserId: {},
               users: []
             });
           }
@@ -414,7 +500,7 @@ export function App() {
     options?: { closeTaskSheet?: boolean }
   ) {
     try {
-      await action();
+      const result = await action();
       setNotice(successMessage);
       setErrorMessage(null);
 
@@ -424,12 +510,15 @@ export function App() {
       }
 
       await refreshApp({ background: true });
+      return result;
     } catch (error) {
       setErrorMessage(buildFlashMessage(error));
 
       if (isConflictError(error)) {
         await refreshApp({ background: true });
       }
+
+      return null;
     }
   }
 
@@ -623,7 +712,89 @@ export function App() {
     }
   }
 
+  async function handleHouseholdUserSave(
+    userId: string | null,
+    draft: HouseholdUserDraft
+  ) {
+    if (userId) {
+      const updateInput =
+        draft.mode === "admin"
+          ? {
+              deactivated: draft.deactivated,
+              displayName: draft.displayName.trim(),
+              email: draft.email.trim()
+            }
+          : {
+              deactivated: draft.deactivated,
+              displayName: draft.displayName.trim(),
+              serviceKind: draft.serviceKind.trim()
+            };
+
+      const updated = await runMutation(
+        () => api.updateUser(userId, updateInput),
+        "Household actor updated."
+      );
+
+      if (updated) {
+        setEditingUserKey(updated.item.id);
+      }
+
+      return Boolean(updated);
+    }
+
+    const created =
+      draft.mode === "admin"
+        ? await runMutation(
+            () =>
+              api.createUser({
+                displayName: draft.displayName.trim(),
+                email: draft.email.trim(),
+                role: "admin"
+              }),
+            "Household person added."
+          )
+        : await runMutation(
+            () =>
+              api.createUser({
+                displayName: draft.displayName.trim(),
+                role: "service",
+                serviceKind: draft.serviceKind.trim()
+              }),
+            "Assistant added."
+          );
+
+    if (created) {
+      setEditingUserKey(created.item.id);
+    }
+
+    return Boolean(created);
+  }
+
+  async function handleServiceTokenIssue(userId: string, name: string) {
+    return runMutation(
+      () => api.issueServiceToken(userId, { name: name.trim() }),
+      "Service token issued."
+    );
+  }
+
+  async function handleServiceTokenRevoke(tokenId: string) {
+    await runMutation(
+      () => api.revokeServiceToken(tokenId),
+      "Service token revoked."
+    );
+  }
+
   const canAdmin = snapshot.actor?.role === "admin";
+  const selectedHouseholdUser =
+    editingUserKey && editingUserKey !== "new-admin" && editingUserKey !== "new-service"
+      ? snapshot.users.find((user) => user.id === editingUserKey) ?? null
+      : null;
+  const householdUserEditorMode =
+    editingUserKey === "new-service"
+      ? "service"
+      : editingUserKey === "new-admin"
+        ? "admin"
+        : selectedHouseholdUser?.role ?? "admin";
 
   return (
     <main className="app-shell">
@@ -656,7 +827,7 @@ export function App() {
           ) : null}
           <div className="actor-chip">
             <strong>{snapshot.actor?.displayName ?? "Loading..."}</strong>
-            <span>{snapshot.actor?.role ?? "guest"}</span>
+            <span>{snapshot.actor ? formatRoleLabel(snapshot.actor) : "guest"}</span>
           </div>
         </div>
       </header>
@@ -701,6 +872,7 @@ export function App() {
 
       {!isBooting && view === "board" ? (
         <BoardView
+          aiAssistanceLabel={getAiAssistanceLabel(snapshot.users)}
           tasks={activeTasks}
           onOpenTask={openTask}
           onQuickMove={handleQuickMove}
@@ -710,6 +882,7 @@ export function App() {
 
       {!isBooting && view === "my-tasks" ? (
         <TaskListView
+          aiAssistanceLabel={getAiAssistanceLabel(snapshot.users)}
           description="Work with your name on it, with quick status moves and a clean shortlist."
           emptyMessage="Nothing is assigned to you right now."
           onOpenTask={openTask}
@@ -738,6 +911,7 @@ export function App() {
             </label>
           </div>
           <TaskListView
+            aiAssistanceLabel={getAiAssistanceLabel(snapshot.users)}
             description="A place for finished errands, closed loops, and things you only need to remember once in a while."
             emptyMessage="Nothing has been archived yet."
             onOpenTask={openTask}
@@ -754,21 +928,29 @@ export function App() {
           canAdmin={canAdmin}
           labels={snapshot.labels}
           onCreateLabel={handleLabelCreate}
+          onIssueServiceToken={handleServiceTokenIssue}
+          onRevokeServiceToken={handleServiceTokenRevoke}
           onSaveSettings={handleSettingsSave}
           onSaveTemplate={handleTemplateSave}
+          onSaveUser={handleHouseholdUserSave}
           onSelectTemplate={(templateId) => setEditingTemplateId(templateId)}
+          onSelectUser={setEditingUserKey}
           recurringTemplates={snapshot.recurringTemplates}
           selectedTemplate={
             snapshot.recurringTemplates.find(
               (template) => template.id === editingTemplateId
             ) ?? null
           }
+          selectedUser={selectedHouseholdUser}
+          serviceTokensByUserId={snapshot.serviceTokensByUserId}
           settings={snapshot.settings}
+          userEditorMode={householdUserEditorMode}
           users={snapshot.users}
         />
       ) : null}
 
       <TaskSheet
+        aiAssistanceToggleLabel={getAiAssistanceToggleLabel(snapshot.users)}
         actor={snapshot.actor}
         isOpen={isTaskSheetOpen}
         isSavingDisabled={!canAdmin}
@@ -822,6 +1004,7 @@ export function App() {
 }
 
 function BoardView(props: {
+  aiAssistanceLabel: string;
   onOpenTask: (taskId: string) => void;
   onQuickMove: (task: TaskListItem, direction: -1 | 1) => Promise<void>;
   onReorder: (task: TaskListItem, direction: -1 | 1) => Promise<void>;
@@ -847,6 +1030,7 @@ function BoardView(props: {
               ) : null}
               {tasks.map((task, index) => (
                 <TaskCard
+                  aiAssistanceLabel={props.aiAssistanceLabel}
                   index={index}
                   key={task.id}
                   onOpen={props.onOpenTask}
@@ -865,6 +1049,7 @@ function BoardView(props: {
 }
 
 function TaskListView(props: {
+  aiAssistanceLabel: string;
   description: string;
   emptyMessage: string;
   onOpenTask: (taskId: string) => void;
@@ -888,6 +1073,7 @@ function TaskListView(props: {
         ) : null}
         {props.tasks.map((task, index) => (
           <TaskCard
+            aiAssistanceLabel={props.aiAssistanceLabel}
             index={index}
             key={task.id}
             onOpen={props.onOpenTask}
@@ -903,6 +1089,7 @@ function TaskListView(props: {
 }
 
 function TaskCard(props: {
+  aiAssistanceLabel: string;
   index: number;
   onOpen: (taskId: string) => void;
   onQuickMove: (task: TaskListItem, direction: -1 | 1) => Promise<void>;
@@ -919,7 +1106,7 @@ function TaskCard(props: {
         <div className="task-card-header">
           <h3>{props.task.title}</h3>
           <span className={props.task.aiAssistanceEnabled ? "assist-badge assist-on" : "assist-badge"}>
-            {props.task.aiAssistanceEnabled ? "Ada can help" : "Human only"}
+            {props.task.aiAssistanceEnabled ? props.aiAssistanceLabel : "Human only"}
           </span>
         </div>
         <p>{props.task.description || "No notes yet."}</p>
@@ -985,6 +1172,7 @@ function TaskCard(props: {
 }
 
 function TaskSheet(props: {
+  aiAssistanceToggleLabel: string;
   actor: Actor | null;
   isOpen: boolean;
   isSavingDisabled: boolean;
@@ -1035,6 +1223,7 @@ function TaskSheet(props: {
 
         <div className="sheet-body">
           <TaskForm
+            aiAssistanceToggleLabel={props.aiAssistanceToggleLabel}
             canEdit={!props.isSavingDisabled}
             draft={draft}
             labels={props.labels}
@@ -1306,6 +1495,7 @@ function CalendarActions(props: {
 }
 
 function TaskForm(props: {
+  aiAssistanceToggleLabel: string;
   canEdit: boolean;
   draft: TaskDraft;
   labels: Label[];
@@ -1361,11 +1551,13 @@ function TaskForm(props: {
             value={props.draft.assigneeUserId}
           >
             <option value="">Unassigned</option>
-            {props.users.map((user) => (
+            {props.users
+              .filter((user) => !user.deactivatedAt)
+              .map((user) => (
               <option key={user.id} value={user.id}>
                 {user.displayName}
               </option>
-            ))}
+              ))}
           </select>
         </label>
 
@@ -1411,7 +1603,7 @@ function TaskForm(props: {
             }
             type="checkbox"
           />
-          <span>Allow Ada to pick this up when assigned</span>
+          <span>{props.aiAssistanceToggleLabel}</span>
         </label>
       </div>
 
@@ -1548,12 +1740,22 @@ function SettingsView(props: {
   canAdmin: boolean;
   labels: Label[];
   onCreateLabel: (input: { color: string; name: string }) => Promise<void>;
+  onIssueServiceToken: (
+    userId: string,
+    name: string
+  ) => Promise<{ item: ServiceToken; plainTextToken: string } | null>;
+  onRevokeServiceToken: (tokenId: string) => Promise<void>;
   onSaveSettings: (settings: Settings) => Promise<void>;
   onSaveTemplate: (draft: TemplateDraft) => Promise<void>;
+  onSaveUser: (userId: string | null, draft: HouseholdUserDraft) => Promise<boolean>;
   onSelectTemplate: (templateId: string | null) => void;
+  onSelectUser: (userKey: string | "new-admin" | "new-service" | null) => void;
   recurringTemplates: RecurringTemplate[];
   selectedTemplate: RecurringTemplate | null;
+  selectedUser: UserRef | null;
+  serviceTokensByUserId: Record<string, ServiceToken[]>;
   settings: Settings | null;
+  userEditorMode: "admin" | "service";
   users: UserRef[];
 }) {
   const [labelName, setLabelName] = useState("");
@@ -1562,6 +1764,13 @@ function SettingsView(props: {
   const [templateDraft, setTemplateDraft] = useState<TemplateDraft>(
     createTemplateDraft(props.selectedTemplate)
   );
+  const [userDraft, setUserDraft] = useState<HouseholdUserDraft>(
+    createHouseholdUserDraft(props.selectedUser, props.userEditorMode)
+  );
+  const [serviceTokenName, setServiceTokenName] = useState("");
+  const [issuedServiceToken, setIssuedServiceToken] = useState<string | null>(null);
+  const [userActionMessage, setUserActionMessage] = useState<string | null>(null);
+  const [isUserSavePending, setIsUserSavePending] = useState(false);
 
   useEffect(() => {
     setSettingsDraft(props.settings);
@@ -1571,6 +1780,14 @@ function SettingsView(props: {
     setTemplateDraft(createTemplateDraft(props.selectedTemplate));
   }, [props.selectedTemplate]);
 
+  useEffect(() => {
+    setUserDraft(createHouseholdUserDraft(props.selectedUser, props.userEditorMode));
+    setServiceTokenName("");
+    setIssuedServiceToken(null);
+    setUserActionMessage(null);
+    setIsUserSavePending(false);
+  }, [props.selectedUser, props.userEditorMode]);
+
   if (!props.canAdmin || !settingsDraft) {
     return (
       <section className="status-panel">
@@ -1579,6 +1796,11 @@ function SettingsView(props: {
       </section>
     );
   }
+
+  const selectedServiceTokens =
+    props.selectedUser?.role === "service"
+      ? props.serviceTokensByUserId[props.selectedUser.id] ?? []
+      : [];
 
   return (
     <section className="settings-grid">
@@ -1652,17 +1874,231 @@ function SettingsView(props: {
         <div className="section-header">
           <div>
             <p className="eyebrow">Household Cast</p>
-            <h2>Labels and Assignees</h2>
+            <h2>People and Assistants</h2>
+          </div>
+          <div className="sheet-actions">
+            <button
+              className="secondary-button"
+              onClick={() => props.onSelectUser("new-admin")}
+              type="button"
+            >
+              New Person
+            </button>
+            <button
+              className="secondary-button"
+              onClick={() => props.onSelectUser("new-service")}
+              type="button"
+            >
+              New Assistant
+            </button>
           </div>
         </div>
-        <div className="cast-list">
-          {props.users.map((user) => (
-            <div className="cast-row" key={user.id}>
-              <strong>{user.displayName}</strong>
-              <span>{user.role === "service" ? "Assistant" : "Admin"}</span>
+        <div className="template-grid">
+          <div className="template-list">
+            {props.users.length === 0 ? (
+              <div className="empty-card">No household actors yet.</div>
+            ) : null}
+            {props.users.map((user) => (
+              <button
+                className={
+                  props.selectedUser?.id === user.id
+                    ? "template-row template-row-active"
+                    : "template-row"
+                }
+                key={user.id}
+                onClick={() => props.onSelectUser(user.id)}
+                type="button"
+              >
+                <strong>{user.displayName}</strong>
+                <span>
+                  {user.deactivatedAt
+                    ? `${formatRoleLabel(user)} · Deactivated`
+                    : formatRoleLabel(user)}
+                </span>
+              </button>
+            ))}
+          </div>
+          <div className="template-editor">
+            <div className="form-grid">
+              <label className="stack-field">
+                <span>Type</span>
+                <input
+                  disabled
+                  value={userDraft.mode === "admin" ? "Person" : "Assistant"}
+                />
+              </label>
+              <label className="stack-field">
+                <span>Display name</span>
+                <input
+                  onChange={(event) =>
+                    setUserDraft({
+                      ...userDraft,
+                      displayName: event.target.value
+                    })
+                  }
+                  value={userDraft.displayName}
+                />
+              </label>
+              {userDraft.mode === "admin" ? (
+                <label className="stack-field wide">
+                  <span>Email</span>
+                  <input
+                    onChange={(event) =>
+                      setUserDraft({
+                        ...userDraft,
+                        email: event.target.value
+                      })
+                    }
+                    placeholder="person@example.com"
+                    type="email"
+                    value={userDraft.email}
+                  />
+                </label>
+              ) : (
+                <label className="stack-field wide">
+                  <span>Service kind</span>
+                  <input
+                    onChange={(event) =>
+                      setUserDraft({
+                        ...userDraft,
+                        serviceKind: event.target.value
+                      })
+                    }
+                    placeholder="assistant"
+                    value={userDraft.serviceKind}
+                  />
+                </label>
+              )}
+              {props.selectedUser ? (
+                <label className="toggle-field">
+                  <input
+                    checked={userDraft.deactivated}
+                    onChange={(event) =>
+                      setUserDraft({
+                        ...userDraft,
+                        deactivated: event.target.checked
+                      })
+                    }
+                    type="checkbox"
+                  />
+                  <span>Deactivate this household actor</span>
+                </label>
+              ) : null}
             </div>
-          ))}
+            <div className="sheet-actions">
+              <button
+                className="primary-button"
+                disabled={
+                  isUserSavePending ||
+                  !userDraft.displayName.trim() ||
+                  (userDraft.mode === "admin"
+                    ? !userDraft.email.trim()
+                    : !userDraft.serviceKind.trim())
+                }
+                onClick={async () => {
+                  setIsUserSavePending(true);
+                  setUserActionMessage(null);
+                  const saved = await props.onSaveUser(props.selectedUser?.id ?? null, userDraft);
+
+                  setIsUserSavePending(false);
+
+                  if (saved) {
+                    setUserActionMessage(
+                      props.selectedUser ? "Actor saved." : "Actor created."
+                    );
+                  }
+                }}
+                type="button"
+              >
+                {isUserSavePending
+                  ? props.selectedUser
+                    ? "Saving..."
+                    : "Creating..."
+                  : props.selectedUser
+                    ? "Save Actor"
+                    : "Create Actor"}
+              </button>
+            </div>
+            {userActionMessage ? <div className="empty-card">{userActionMessage}</div> : null}
+
+            {props.selectedUser?.role === "service" ? (
+              <section className="sheet-section">
+                <div className="section-header compact">
+                  <div>
+                    <p className="eyebrow">Assistant Access</p>
+                    <h3>Service Tokens</h3>
+                  </div>
+                </div>
+                <div className="sheet-actions">
+                  <label className="stack-field compact-field">
+                    <span>Token name</span>
+                    <input
+                      onChange={(event) => setServiceTokenName(event.target.value)}
+                      placeholder="Ada exe.dev"
+                      value={serviceTokenName}
+                    />
+                  </label>
+                  <button
+                    className="secondary-button"
+                    disabled={!serviceTokenName.trim() || userDraft.deactivated}
+                    onClick={async () => {
+                      const issued = await props.onIssueServiceToken(
+                        props.selectedUser!.id,
+                        serviceTokenName
+                      );
+
+                      if (issued) {
+                        setIssuedServiceToken(issued.plainTextToken);
+                        setServiceTokenName("");
+                      }
+                    }}
+                    type="button"
+                  >
+                    Issue Token
+                  </button>
+                </div>
+                {issuedServiceToken ? (
+                  <div className="empty-card">
+                    <strong>Copy this token now:</strong>
+                    <p>{issuedServiceToken}</p>
+                  </div>
+                ) : null}
+                <div className="cast-list">
+                  {selectedServiceTokens.length === 0 ? (
+                    <div className="empty-card">No service tokens issued yet.</div>
+                  ) : null}
+                  {selectedServiceTokens.map((token) => (
+                    <div className="cast-row" key={token.id}>
+                      <div>
+                        <strong>{token.name}</strong>
+                        <span>
+                          Created {formatTimestamp(token.createdAt)}
+                          {token.lastUsedAt
+                            ? ` · Last used ${formatTimestamp(token.lastUsedAt)}`
+                            : " · Never used"}
+                          {token.revokedAt
+                            ? ` · Revoked ${formatTimestamp(token.revokedAt)}`
+                            : ""}
+                        </span>
+                      </div>
+                      <button
+                        className="ghost-button"
+                        disabled={Boolean(token.revokedAt)}
+                        onClick={() => {
+                          void props.onRevokeServiceToken(token.id);
+                        }}
+                        type="button"
+                      >
+                        {token.revokedAt ? "Revoked" : "Revoke"}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+          </div>
         </div>
+
         <div className="section-header compact">
           <div>
             <p className="eyebrow">Labels</p>
@@ -1814,11 +2250,13 @@ function RecurringTemplateForm(props: {
           value={props.draft.defaultAssigneeUserId}
         >
           <option value="">Unassigned</option>
-          {props.users.map((user) => (
+          {props.users
+            .filter((user) => !user.deactivatedAt)
+            .map((user) => (
             <option key={user.id} value={user.id}>
               {user.displayName}
             </option>
-          ))}
+            ))}
         </select>
       </label>
       <label className="stack-field">

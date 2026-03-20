@@ -18,11 +18,22 @@ export type Actor = {
 };
 
 export type UserRef = {
+  deactivatedAt: string | null;
   displayName: string;
   email: string | null;
   id: string;
   role: "admin" | "service";
   serviceKind: string | null;
+};
+
+export type ServiceToken = {
+  createdAt: string;
+  expiresAt: string | null;
+  id: string;
+  lastUsedAt: string | null;
+  name: string;
+  revokedAt: string | null;
+  userId: string;
 };
 
 export type Label = {
@@ -298,6 +309,27 @@ export const api = {
       method: "POST"
     });
   },
+  createUser(
+    input:
+      | {
+          displayName: string;
+          email: string;
+          role: "admin";
+        }
+      | {
+          displayName: string;
+          role: "service";
+          serviceKind: string;
+        }
+  ) {
+    return request<{ item: UserRef }>("/api/v1/users", {
+      body: JSON.stringify(input),
+      headers: {
+        "content-type": "application/json"
+      },
+      method: "POST"
+    });
+  },
   getMe() {
     return request<{ actor: Actor }>("/api/v1/me");
   },
@@ -346,6 +378,26 @@ export const api = {
   },
   listUsers() {
     return request<{ items: UserRef[] }>("/api/v1/users");
+  },
+  listServiceTokens(userId: string) {
+    return request<{ items: ServiceToken[] }>(`/api/v1/users/${userId}/service-tokens`);
+  },
+  issueServiceToken(userId: string, input: { name: string }) {
+    return request<{ item: ServiceToken; plainTextToken: string }>(
+      `/api/v1/users/${userId}/service-tokens`,
+      {
+        body: JSON.stringify(input),
+        headers: {
+          "content-type": "application/json"
+        },
+        method: "POST"
+      }
+    );
+  },
+  revokeServiceToken(tokenId: string) {
+    return request<{ item: ServiceToken }>(`/api/v1/service-tokens/${tokenId}/revoke`, {
+      method: "POST"
+    });
   },
   reorderTask(taskId: string, input: { expectedRevision: number; targetIndex: number }) {
     return request<{ item: TaskDetail }>(`/api/v1/tasks/${taskId}/reorder`, {
@@ -407,6 +459,23 @@ export const api = {
     doneArchiveAfterDays?: number;
   }) {
     return request<{ settings: Settings }>("/api/v1/settings", {
+      body: JSON.stringify(input),
+      headers: {
+        "content-type": "application/json"
+      },
+      method: "PATCH"
+    });
+  },
+  updateUser(
+    userId: string,
+    input: {
+      deactivated?: boolean;
+      displayName?: string;
+      email?: string | null;
+      serviceKind?: string;
+    }
+  ) {
+    return request<{ item: UserRef }>(`/api/v1/users/${userId}`, {
       body: JSON.stringify(input),
       headers: {
         "content-type": "application/json"

@@ -25,9 +25,42 @@ type MeResponse = {
 
 type UsersResponse = {
   items: Array<{
+    deactivatedAt?: string | null;
+    displayName?: string;
+    email?: string | null;
     id: string;
     role: "admin" | "service";
     serviceKind: string | null;
+  }>;
+};
+
+type UserResponse = {
+  item: {
+    deactivatedAt: string | null;
+    displayName: string;
+    email: string | null;
+    id: string;
+    role: "admin" | "service";
+    serviceKind: string | null;
+  };
+};
+
+type ServiceTokenResponse = {
+  item: {
+    id: string;
+    name: string;
+    revokedAt: string | null;
+    userId: string;
+  };
+  plainTextToken?: string;
+};
+
+type ServiceTokenListResponse = {
+  items: Array<{
+    id: string;
+    name: string;
+    revokedAt: string | null;
+    userId: string;
   }>;
 };
 
@@ -45,6 +78,9 @@ type SettingsResponse = {
 type TaskItemResponse = {
   item: {
     archivedAt: string | null;
+    assignee?: {
+      id: string;
+    } | null;
     attachmentCount: number;
     attachments: Array<{
       downloadUrl: string | null;
@@ -484,6 +520,140 @@ describe("Phase 3 API", () => {
     expect(openApiResponse.status).toBe(200);
     const openApi = await parseJson<OpenApiResponse>(openApiResponse);
     expect(openApi.paths["/api/v1/tasks/{taskId}/status"]).toContain("post");
+    expect(openApi.paths["/api/v1/users/{userId}/service-tokens"]).toContain("post");
+  });
+
+  it("supports managing household actors and assistant tokens", async () => {
+    const adminHeaders = trustedHeader("admin1@example.com");
+
+    const createAdminUserResponse = await app.request(
+      "/api/v1/users",
+      jsonRequest({
+        body: {
+          displayName: "Rachel",
+          email: "rachel@example.com",
+          role: "admin"
+        },
+        headers: adminHeaders,
+        method: "POST"
+      })
+    );
+    expect(createAdminUserResponse.status).toBe(201);
+    const createdAdminUser = await parseJson<UserResponse>(createAdminUserResponse);
+    expect(createdAdminUser.item.email).toBe("rachel@example.com");
+
+    const createAssistantResponse = await app.request(
+      "/api/v1/users",
+      jsonRequest({
+        body: {
+          displayName: "Ada",
+          role: "service",
+          serviceKind: "assistant"
+        },
+        headers: adminHeaders,
+        method: "POST"
+      })
+    );
+    expect(createAssistantResponse.status).toBe(201);
+    const createdAssistant = await parseJson<UserResponse>(createAssistantResponse);
+
+    const issueTokenResponse = await app.request(
+      `/api/v1/users/${createdAssistant.item.id}/service-tokens`,
+      jsonRequest({
+        body: {
+          name: "Ada exe.dev"
+        },
+        headers: adminHeaders,
+        method: "POST"
+      })
+    );
+    expect(issueTokenResponse.status).toBe(201);
+    const issuedToken = await parseJson<ServiceTokenResponse>(issueTokenResponse);
+    expect(issuedToken.plainTextToken).toContain("swntd_st_");
+
+    const createTaskResponse = await app.request(
+      "/api/v1/tasks",
+      jsonRequest({
+        body: {
+          aiAssistanceEnabled: true,
+          assigneeUserId: createdAssistant.item.id,
+          title: "Ada-owned task"
+        },
+        headers: adminHeaders,
+        method: "POST"
+      })
+    );
+    expect(createTaskResponse.status).toBe(201);
+    const createdTask = await parseJson<TaskItemResponse>(createTaskResponse);
+
+    const deactivateAssistantResponse = await app.request(
+      `/api/v1/users/${createdAssistant.item.id}`,
+      jsonRequest({
+        body: {
+          deactivated: true
+        },
+        headers: adminHeaders,
+        method: "PATCH"
+      })
+    );
+    expect(deactivateAssistantResponse.status).toBe(200);
+    const deactivatedAssistant = await parseJson<UserResponse>(
+      deactivateAssistantResponse
+    );
+    expect(deactivatedAssistant.item.deactivatedAt).toBeTruthy();
+
+    const taskDetailAfterDeactivation = await app.request(
+      `/api/v1/tasks/${createdTask.item.id}`,
+      {
+        headers: adminHeaders
+      }
+    );
+    expect(taskDetailAfterDeactivation.status).toBe(200);
+    const taskAfterDeactivation = await parseJson<TaskItemResponse>(
+      taskDetailAfterDeactivation
+    );
+    expect(taskAfterDeactivation.item.assignee).toBeNull();
+
+    const serviceTokensResponse = await app.request(
+      `/api/v1/users/${createdAssistant.item.id}/service-tokens`,
+      {
+        headers: adminHeaders
+      }
+    );
+    expect(serviceTokensResponse.status).toBe(200);
+    const serviceTokens = await parseJson<ServiceTokenListResponse>(
+      serviceTokensResponse
+    );
+    expect(serviceTokens.items).toHaveLength(1);
+    expect(serviceTokens.items[0]?.revokedAt).toBeTruthy();
+
+    const reactivateAssistantResponse = await app.request(
+      `/api/v1/users/${createdAssistant.item.id}`,
+      jsonRequest({
+        body: {
+          deactivated: false,
+          displayName: "Ada Lovelace",
+          serviceKind: "assistant"
+        },
+        headers: adminHeaders,
+        method: "PATCH"
+      })
+    );
+    expect(reactivateAssistantResponse.status).toBe(200);
+    const reactivatedAssistant = await parseJson<UserResponse>(
+      reactivateAssistantResponse
+    );
+    expect(reactivatedAssistant.item.deactivatedAt).toBeNull();
+    expect(reactivatedAssistant.item.displayName).toBe("Ada Lovelace");
+
+    const revokeTokenResponse = await app.request(
+      `/api/v1/service-tokens/${issuedToken.item.id}/revoke`,
+      {
+        headers: adminHeaders,
+        method: "POST"
+      }
+    );
+    expect(revokeTokenResponse.status).toBe(200);
   });
 
   it("enforces service-actor permissions through the HTTP API", async () => {

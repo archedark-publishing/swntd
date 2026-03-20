@@ -38,6 +38,7 @@ export const users = sqliteTable(
     displayName: text("display_name").notNull(),
     role: text("role", { enum: ["admin", "service"] }).notNull(),
     serviceKind: text("service_kind"),
+    deactivatedAt: integer("deactivated_at", { mode: "timestamp_ms" }),
     createdAt: integer("created_at", { mode: "timestamp_ms" })
       .notNull()
       .$defaultFn(now),
@@ -48,7 +49,11 @@ export const users = sqliteTable(
   (table) => [
     uniqueIndex("users_external_auth_id_idx").on(table.externalAuthId),
     uniqueIndex("users_email_idx").on(table.email),
-    index("users_household_id_idx").on(table.householdId)
+    index("users_household_id_idx").on(table.householdId),
+    index("users_household_deactivated_at_idx").on(
+      table.householdId,
+      table.deactivatedAt
+    )
   ]
 );
 

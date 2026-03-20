@@ -20,6 +20,7 @@ import {
   addCommentToTask,
   addUploadToTask,
   archiveTask,
+  createHouseholdUser,
   createLabel,
   createRecurringTemplate,
   createTask,
@@ -28,13 +29,17 @@ import {
   getSettings,
   getTaskAttachmentDownload,
   getTaskDetail,
+  issueServiceTokenForUser,
   listHouseholdUsers,
   listLabels,
   listRecurringTemplates,
+  listServiceTokensForUser,
   listTasks,
   reorderTask,
+  revokeServiceToken,
   transitionTask,
   unarchiveTask,
+  updateHouseholdUser,
   updateRecurringTemplate,
   updateSettings,
   updateTask
@@ -95,6 +100,34 @@ const attachmentLinkSchema = z.object({
 
 const labelSchema = z.object({
   color: z.string().trim().min(1).nullable().optional(),
+  name: z.string().trim().min(1)
+});
+
+const createHouseholdUserSchema = z.discriminatedUnion("role", [
+  z.object({
+    displayName: z.string().trim().min(1),
+    email: z.email(),
+    role: z.literal("admin")
+  }),
+  z.object({
+    displayName: z.string().trim().min(1),
+    role: z.literal("service"),
+    serviceKind: z.string().trim().min(1)
+  })
+]);
+
+const updateHouseholdUserSchema = z
+  .object({
+    deactivated: z.boolean().optional(),
+    displayName: z.string().trim().min(1).optional(),
+    email: z.email().nullable().optional(),
+    serviceKind: z.string().trim().min(1).optional()
+  })
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "At least one user field must be updated."
+  });
+
+const issueServiceTokenSchema = z.object({
   name: z.string().trim().min(1)
 });
 
@@ -248,6 +281,50 @@ export function createApp() {
 
   app.get("/api/v1/users", async (c) =>
     jsonOk(c, await listHouseholdUsers(c.var.db, c.var.actor))
+  );
+
+  app.post("/api/v1/users", async (c) => {
+    const input = await parseJsonBody(c, createHouseholdUserSchema);
+
+    return jsonOk(c, await createHouseholdUser(c.var.db, c.var.actor, input), 201);
+  });
+
+  app.patch("/api/v1/users/:userId", async (c) => {
+    const input = await parseJsonBody(c, updateHouseholdUserSchema);
+
+    return jsonOk(
+      c,
+      await updateHouseholdUser(c.var.db, c.var.actor, c.req.param("userId"), input)
+    );
+  });
+
+  app.get("/api/v1/users/:userId/service-tokens", async (c) =>
+    jsonOk(
+      c,
+      await listServiceTokensForUser(c.var.db, c.var.actor, c.req.param("userId"))
+    )
+  );
+
+  app.post("/api/v1/users/:userId/service-tokens", async (c) => {
+    const input = await parseJsonBody(c, issueServiceTokenSchema);
+
+    return jsonOk(
+      c,
+      await issueServiceTokenForUser(
+        c.var.db,
+        c.var.actor,
+        c.req.param("userId"),
+        input
+      ),
+      201
+    );
+  });
+
+  app.post("/api/v1/service-tokens/:tokenId/revoke", async (c) =>
+    jsonOk(
+      c,
+      await revokeServiceToken(c.var.db, c.var.actor, c.req.param("tokenId"))
+    )
   );
 
   app.get("/api/v1/settings", async (c) =>
@@ -466,7 +543,10 @@ export function createApp() {
         "/api/v1/tasks/{taskId}/status": ["post"],
         "/api/v1/tasks/{taskId}/unarchive": ["post"],
         "/api/v1/tasks/{taskId}/uploads": ["post"],
-        "/api/v1/users": ["get"]
+        "/api/v1/users": ["get", "post"],
+        "/api/v1/users/{userId}": ["patch"],
+        "/api/v1/users/{userId}/service-tokens": ["get", "post"],
+        "/api/v1/service-tokens/{tokenId}/revoke": ["post"]
       }
     })
   );

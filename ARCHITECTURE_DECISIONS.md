@@ -185,3 +185,24 @@ Service actors may add external-link attachments in v1, but binary file uploads 
 
 - Binary service uploads become a roadmap item, not a launch requirement.
 - If demand emerges later, we can add them behind tighter limits and audit rules.
+
+## AD-010: Bootstrap Seeds Initial Actors, but In-App Management Owns Them Thereafter
+
+- Date: 2026-03-20
+- Status: Accepted
+
+### Decision
+
+Bootstrap configuration creates missing initial admins and the initial service actor, but it does not keep overwriting household actor display names or roles once the app is running. Admins manage people, assistants, and assistant tokens through the app.
+
+### Rationale
+
+- Bootstrap is a good first-run safety net, but it is a poor long-term source of truth for names and assistant lifecycle.
+- In-app management is necessary if the project is going to feel like a real multi-actor household tool rather than a config file with a UI attached.
+- It avoids a frustrating class of bugs where a restart silently resets edited display names.
+
+### Consequences
+
+- `SWNTD_BOOTSTRAP_ADMIN_EMAILS` and `SWNTD_SERVICE_ACTOR_NAME` remain useful for fresh deployments, but they no longer dictate ongoing actor state.
+- The settings UI and API now own household actor creation, updates, deactivation, and assistant token lifecycle.
+- Deactivating a service actor revokes their active tokens and clears them from open assignments and recurring defaults.

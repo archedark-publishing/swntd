@@ -6,9 +6,9 @@ The project is being built as a polished, general-purpose open source web app th
 
 ## Status
 
-Phase 6 complete: the bounded MCP surface is live for service actors alongside the web app, API, and lifecycle jobs.
+Phase 6 complete, with household actor management now live in Settings alongside the MCP surface, web app, API, and lifecycle jobs.
 
-The current implementation baseline includes the `/api/v1` HTTP surface, upload/download handling, task event recording, recurring/archive cleanup jobs, a stdio MCP server with the approved v1 tool surface, and a responsive board-oriented web app with board, my tasks, archive, and settings views. Product details still follow [docs/product-spec.md](docs/product-spec.md), with execution tracking in [docs/implementation-plan.md](docs/implementation-plan.md).
+The current implementation baseline includes the `/api/v1` HTTP surface, upload/download handling, task event recording, recurring/archive cleanup jobs, admin-managed household people and assistants, assistant service-token issuance and revocation, a stdio MCP server with the approved v1 tool surface, and a responsive board-oriented web app with board, my tasks, archive, and settings views. Product details still follow [docs/product-spec.md](docs/product-spec.md), with execution tracking in [docs/implementation-plan.md](docs/implementation-plan.md).
 
 Key architectural choices and their rationale are tracked in [ARCHITECTURE_DECISIONS.md](ARCHITECTURE_DECISIONS.md).
 The API also exposes a lightweight machine-readable contract at `/api/v1/openapi.json`.
@@ -51,7 +51,7 @@ For browser development, `apps/web` proxies `/api` requests to `SWNTD_API_PROXY_
 
 The MCP server reads `SWNTD_MCP_SERVICE_TOKEN` from the environment and authenticates as a service actor on each tool call. In local development, point that env var at an issued SWNTD service token before running `pnpm --filter @swntd/mcp dev`.
 
-The bootstrap configuration is intentionally generic. Household-specific admin emails, service actor names, and deployment secrets should live in local `.env` files or GitHub Actions secrets, not in committed repository data.
+The bootstrap configuration is intentionally generic. Household-specific admin emails, service actor names, and deployment secrets should live in local `.env` files or GitHub Actions secrets, not in committed repository data. Bootstrap now seeds missing initial users, but in-app household actor management becomes the source of truth for display names and assistant tokens after setup.
 
 ## Product Goals
 

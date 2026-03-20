@@ -15,6 +15,13 @@
       "when": 1773766168315,
       "tag": "0001_new_umar",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1774026453242,
+      "tag": "0002_amusing_firelord",
+      "breakpoints": true
     }
   ]
 }

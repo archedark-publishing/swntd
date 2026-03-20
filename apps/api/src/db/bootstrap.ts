@@ -59,6 +59,7 @@ export async function bootstrapDatabase() {
         await tx
           .insert(users)
           .values({
+            deactivatedAt: null,
             householdId: DEFAULT_HOUSEHOLD_ID,
             email,
             displayName: toDisplayName(email),
@@ -66,14 +67,8 @@ export async function bootstrapDatabase() {
             serviceKind: null,
             externalAuthId: null
           })
-          .onConflictDoUpdate({
-            target: users.email,
-            set: {
-              householdId: DEFAULT_HOUSEHOLD_ID,
-              displayName: toDisplayName(email),
-              role: "admin",
-              updatedAt: new Date()
-            }
+          .onConflictDoNothing({
+            target: users.email
           });
       }
 
@@ -82,6 +77,7 @@ export async function bootstrapDatabase() {
       await tx
         .insert(users)
         .values({
+          deactivatedAt: null,
           householdId: DEFAULT_HOUSEHOLD_ID,
           email: null,
           displayName: config.serviceActorName,
@@ -89,15 +85,8 @@ export async function bootstrapDatabase() {
           serviceKind: config.serviceActorKind,
           externalAuthId: serviceExternalAuthId
         })
-        .onConflictDoUpdate({
-          target: users.externalAuthId,
-          set: {
-            householdId: DEFAULT_HOUSEHOLD_ID,
-            displayName: config.serviceActorName,
-            role: "service",
-            serviceKind: config.serviceActorKind,
-            updatedAt: new Date()
-          }
+        .onConflictDoNothing({
+          target: users.externalAuthId
         });
     });
 

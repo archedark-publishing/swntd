@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import type { AuthenticatedActor } from "@swntd/shared/server/domain/authorization";
 import { users } from "@swntd/shared/server/db/schema";
 import { getApiConfig } from "../config";
@@ -88,7 +88,7 @@ export async function resolveRequestActor(
           serviceKind: users.serviceKind
         })
         .from(users)
-        .where(eq(users.email, email.toLowerCase()));
+        .where(and(eq(users.email, email.toLowerCase()), isNull(users.deactivatedAt)));
 
       return user
         ? {
@@ -118,7 +118,9 @@ export async function resolveRequestActor(
           serviceKind: users.serviceKind
         })
         .from(users)
-        .where(eq(users.email, devEmail.toLowerCase()));
+        .where(
+          and(eq(users.email, devEmail.toLowerCase()), isNull(users.deactivatedAt))
+        );
 
       return user
         ? {

@@ -29,6 +29,7 @@ import {
   recurringTaskTemplateChecklistItems,
   recurringTaskTemplateLabels,
   recurringTaskTemplates,
+  serviceTokens,
   taskEvents,
   taskLabels,
   tasks,
@@ -44,15 +45,27 @@ import {
   type TaskStatus,
   transitionTaskStatus
 } from "@swntd/shared/server/domain/tasks";
+import { issueServiceToken } from "../auth/service-tokens";
 import type { DatabaseClient } from "../db/client";
 import { ApiError } from "../http/errors";
 
 export type UserRef = {
+  deactivatedAt: Date | null;
   displayName: string;
   email: string | null;
   id: string;
   role: "admin" | "service";
   serviceKind: string | null;
+};
+
+export type ServiceTokenDto = {
+  createdAt: Date;
+  expiresAt: Date | null;
+  id: string;
+  lastUsedAt: Date | null;
+  name: string;
+  revokedAt: Date | null;
+  userId: string;
 };
 
 export type LabelDto = {
@@ -216,6 +229,29 @@ export type CreateUploadAttachmentInput = {
   storagePath: string;
 };
 
+export type CreateHouseholdUserInput =
+  | {
+      displayName: string;
+      email: string;
+      role: "admin";
+    }
+  | {
+      displayName: string;
+      role: "service";
+      serviceKind: string;
+    };
+
+export type UpdateHouseholdUserInput = {
+  deactivated?: boolean | undefined;
+  displayName?: string | undefined;
+  email?: string | null | undefined;
+  serviceKind?: string | undefined;
+};
+
+export type IssueServiceTokenInput = {
+  name: string;
+};
+
 export type TaskEventSource = "api" | "mcp";
 
 type MutationAuditOptions = {
@@ -241,6 +277,7 @@ function assertAdmin(actor: AuthenticatedActor) {
 }
 
 function mapUserRef(row: {
+  deactivatedAt: Date | null;
   displayName: string;
   email: string | null;
   id: string;
@@ -248,6 +285,7 @@ function mapUserRef(row: {
   serviceKind: string | null;
 }) {
   const userRef: UserRef = {
+    deactivatedAt: row.deactivatedAt,
     displayName: row.displayName,
     email: row.email,
     id: row.id,
@@ -265,6 +303,7 @@ async function getUserRefsById(db: DatabaseClient, userIds: string[]) {
 
   const rows = await db
     .select({
+      deactivatedAt: users.deactivatedAt,
       displayName: users.displayName,
       email: users.email,
       id: users.id,
@@ -291,13 +330,36 @@ async function assertAssigneeInHousehold(
       id: users.id
     })
     .from(users)
-    .where(and(eq(users.id, assigneeUserId), eq(users.householdId, householdId)));
+    .where(
+      and(
+        eq(users.id, assigneeUserId),
+        eq(users.householdId, householdId),
+        isNull(users.deactivatedAt)
+      )
+    );
 
   if (!row) {
     throw new ApiError(400, "invalid_assignee", "Assignee must belong to the household.");
   }
 
   return row.id;
+}
+
+async function getHouseholdUserOrThrow(
+  db: DatabaseClient,
+  householdId: string,
+  userId: string
+) {
+  const [row] = await db
+    .select()
+    .from(users)
+    .where(and(eq(users.id, userId), eq(users.householdId, householdId)));
+
+  if (!row) {
+    throw new ApiError(404, "user_not_found", "Household user not found.");
+  }
+
+  return row;
 }
 
 async function assertLabelIdsInHousehold(
@@ -616,6 +678,7 @@ export async function listHouseholdUsers(
 
   const rows = await db
     .select({
+      deactivatedAt: users.deactivatedAt,
       displayName: users.displayName,
       email: users.email,
       id: users.id,
@@ -625,10 +688,372 @@ export async function listHouseholdUsers(
     .from(users)
     .where(eq(users.householdId, actor.householdId));
 
-  rows.sort((left, right) => left.displayName.localeCompare(right.displayName));
+  rows.sort((left, right) => {
+    if (left.deactivatedAt && !right.deactivatedAt) {
+      return 1;
+    }
+
+    if (!left.deactivatedAt && right.deactivatedAt) {
+      return -1;
+    }
+
+    return left.displayName.localeCompare(right.displayName);
+  });
 
   return {
     items: rows.map((row) => mapUserRef(row))
+  };
+}
+
+function mapServiceTokenDto(row: {
+  createdAt: Date;
+  expiresAt: Date | null;
+  id: string;
+  lastUsedAt: Date | null;
+  name: string;
+  revokedAt: Date | null;
+  userId: string;
+}) {
+  const token: ServiceTokenDto = {
+    createdAt: row.createdAt,
+    expiresAt: row.expiresAt,
+    id: row.id,
+    lastUsedAt: row.lastUsedAt,
+    name: row.name,
+    revokedAt: row.revokedAt,
+    userId: row.userId
+  };
+
+  return token;
+}
+
+export async function createHouseholdUser(
+  db: DatabaseClient,
+  actor: AuthenticatedActor,
+  input: CreateHouseholdUserInput
+) {
+  assertAdmin(actor);
+
+  if (input.role === "admin") {
+    const normalizedEmail = input.email.trim().toLowerCase();
+
+    const [existingAdmin] = await db
+      .select({
+        id: users.id
+      })
+      .from(users)
+      .where(eq(users.email, normalizedEmail));
+
+    if (existingAdmin) {
+      throw new ApiError(409, "user_exists", "A household user with that email already exists.");
+    }
+
+    const [createdAdmin] = await db
+      .insert(users)
+      .values({
+        deactivatedAt: null,
+        displayName: input.displayName.trim(),
+        email: normalizedEmail,
+        externalAuthId: null,
+        householdId: actor.householdId,
+        role: "admin",
+        serviceKind: null
+      })
+      .returning({
+        deactivatedAt: users.deactivatedAt,
+        displayName: users.displayName,
+        email: users.email,
+        id: users.id,
+        role: users.role,
+        serviceKind: users.serviceKind
+      });
+
+    return {
+      item: mapUserRef(
+        getRequiredRow(createdAdmin, "user_create_failed", "Household user creation failed.")
+      )
+    };
+  }
+
+  const [createdService] = await db
+    .insert(users)
+    .values({
+      deactivatedAt: null,
+      displayName: input.displayName.trim(),
+      email: null,
+      externalAuthId: null,
+      householdId: actor.householdId,
+      role: "service",
+      serviceKind: input.serviceKind.trim()
+    })
+    .returning({
+      deactivatedAt: users.deactivatedAt,
+      displayName: users.displayName,
+      email: users.email,
+      id: users.id,
+      role: users.role,
+      serviceKind: users.serviceKind
+    });
+
+  return {
+    item: mapUserRef(
+      getRequiredRow(createdService, "user_create_failed", "Household user creation failed.")
+    )
+  };
+}
+
+export async function updateHouseholdUser(
+  db: DatabaseClient,
+  actor: AuthenticatedActor,
+  userId: string,
+  input: UpdateHouseholdUserInput
+) {
+  assertAdmin(actor);
+
+  const current = await getHouseholdUserOrThrow(db, actor.householdId, userId);
+
+  if (current.id === actor.id && input.deactivated === true) {
+    throw new ApiError(
+      400,
+      "cannot_deactivate_current_actor",
+      "You cannot deactivate the currently authenticated admin."
+    );
+  }
+
+  if (current.role === "admin" && input.serviceKind) {
+    throw new ApiError(
+      400,
+      "invalid_user_update",
+      "Admin users cannot have a service kind."
+    );
+  }
+
+  if (current.role === "service" && input.email !== undefined) {
+    throw new ApiError(
+      400,
+      "invalid_user_update",
+      "Service actors cannot be updated with an email address."
+    );
+  }
+
+  let normalizedEmail = current.email;
+
+  if (current.role === "admin" && input.email !== undefined) {
+    normalizedEmail = input.email === null ? null : input.email.trim().toLowerCase();
+
+    if (!normalizedEmail) {
+      throw new ApiError(400, "invalid_email", "Admin users require an email address.");
+    }
+
+    const [existingAdmin] = await db
+      .select({
+        id: users.id
+      })
+      .from(users)
+      .where(and(eq(users.email, normalizedEmail), isNull(users.deactivatedAt)));
+
+    if (existingAdmin && existingAdmin.id !== current.id) {
+      throw new ApiError(409, "user_exists", "A household user with that email already exists.");
+    }
+  }
+
+  const nextDeactivatedAt =
+    input.deactivated === undefined
+      ? current.deactivatedAt
+      : input.deactivated
+        ? new Date()
+        : null;
+
+  await db
+    .update(users)
+    .set({
+      deactivatedAt: nextDeactivatedAt,
+      displayName: input.displayName?.trim() || current.displayName,
+      email: current.role === "admin" ? normalizedEmail : null,
+      serviceKind:
+        current.role === "service"
+          ? input.serviceKind?.trim() || current.serviceKind
+          : null,
+      updatedAt: new Date()
+    })
+    .where(eq(users.id, current.id));
+
+  if (input.deactivated === true) {
+    await db
+      .update(tasks)
+      .set({
+        assigneeUserId: null,
+        updatedAt: new Date(),
+        updatedByUserId: actor.id
+      })
+      .where(and(eq(tasks.assigneeUserId, current.id), isNull(tasks.archivedAt)));
+
+    await db
+      .update(recurringTaskTemplates)
+      .set({
+        defaultAssigneeUserId: null,
+        updatedAt: new Date(),
+        updatedByUserId: actor.id
+      })
+      .where(eq(recurringTaskTemplates.defaultAssigneeUserId, current.id));
+
+    if (current.role === "service") {
+      await db
+        .update(serviceTokens)
+        .set({
+          revokedAt: new Date()
+        })
+        .where(and(eq(serviceTokens.userId, current.id), isNull(serviceTokens.revokedAt)));
+    }
+  }
+
+  const updated = await getHouseholdUserOrThrow(db, actor.householdId, current.id);
+
+  return {
+    item: mapUserRef(updated)
+  };
+}
+
+export async function listServiceTokensForUser(
+  db: DatabaseClient,
+  actor: AuthenticatedActor,
+  userId: string
+) {
+  assertAdmin(actor);
+
+  const user = await getHouseholdUserOrThrow(db, actor.householdId, userId);
+
+  if (user.role !== "service") {
+    throw new ApiError(
+      400,
+      "invalid_service_actor",
+      "Service tokens can only be managed for service actors."
+    );
+  }
+
+  const rows = await db
+    .select({
+      createdAt: serviceTokens.createdAt,
+      expiresAt: serviceTokens.expiresAt,
+      id: serviceTokens.id,
+      lastUsedAt: serviceTokens.lastUsedAt,
+      name: serviceTokens.name,
+      revokedAt: serviceTokens.revokedAt,
+      userId: serviceTokens.userId
+    })
+    .from(serviceTokens)
+    .where(eq(serviceTokens.userId, user.id));
+
+  rows.sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime());
+
+  return {
+    items: rows.map((row) => mapServiceTokenDto(row))
+  };
+}
+
+export async function issueServiceTokenForUser(
+  db: DatabaseClient,
+  actor: AuthenticatedActor,
+  userId: string,
+  input: IssueServiceTokenInput
+) {
+  assertAdmin(actor);
+
+  const user = await getHouseholdUserOrThrow(db, actor.householdId, userId);
+
+  if (user.role !== "service" || user.deactivatedAt) {
+    throw new ApiError(
+      400,
+      "invalid_service_actor",
+      "Only active service actors can receive service tokens."
+    );
+  }
+
+  const issued = await issueServiceToken({
+    db,
+    name: input.name.trim(),
+    userId: user.id
+  });
+  const issuedRecord = getRequiredRow(
+    issued.record,
+    "service_token_create_failed",
+    "Service token creation failed."
+  );
+
+  const record = getRequiredRow(
+    await db
+      .select({
+        createdAt: serviceTokens.createdAt,
+        expiresAt: serviceTokens.expiresAt,
+        id: serviceTokens.id,
+        lastUsedAt: serviceTokens.lastUsedAt,
+        name: serviceTokens.name,
+        revokedAt: serviceTokens.revokedAt,
+        userId: serviceTokens.userId
+      })
+      .from(serviceTokens)
+      .where(eq(serviceTokens.id, issuedRecord.id))
+      .then((rows) => rows[0]),
+    "service_token_create_failed",
+    "Service token creation failed."
+  );
+
+  return {
+    item: mapServiceTokenDto(record),
+    plainTextToken: issued.token
+  };
+}
+
+export async function revokeServiceToken(
+  db: DatabaseClient,
+  actor: AuthenticatedActor,
+  tokenId: string
+) {
+  assertAdmin(actor);
+
+  const [token] = await db
+    .select({
+      createdAt: serviceTokens.createdAt,
+      expiresAt: serviceTokens.expiresAt,
+      householdId: users.householdId,
+      id: serviceTokens.id,
+      lastUsedAt: serviceTokens.lastUsedAt,
+      name: serviceTokens.name,
+      revokedAt: serviceTokens.revokedAt,
+      userId: serviceTokens.userId
+    })
+    .from(serviceTokens)
+    .innerJoin(users, eq(serviceTokens.userId, users.id))
+    .where(eq(serviceTokens.id, tokenId));
+
+  if (!token || token.householdId !== actor.householdId) {
+    throw new ApiError(404, "service_token_not_found", "Service token not found.");
+  }
+
+  await db
+    .update(serviceTokens)
+    .set({
+      revokedAt: token.revokedAt ?? new Date()
+    })
+    .where(eq(serviceTokens.id, token.id));
+
+  const [updated] = await db
+    .select({
+      createdAt: serviceTokens.createdAt,
+      expiresAt: serviceTokens.expiresAt,
+      id: serviceTokens.id,
+      lastUsedAt: serviceTokens.lastUsedAt,
+      name: serviceTokens.name,
+      revokedAt: serviceTokens.revokedAt,
+      userId: serviceTokens.userId
+    })
+    .from(serviceTokens)
+    .where(eq(serviceTokens.id, token.id));
+
+  return {
+    item: mapServiceTokenDto(
+      getRequiredRow(updated, "service_token_revoke_failed", "Service token revocation failed.")
+    )
   };
 }
 

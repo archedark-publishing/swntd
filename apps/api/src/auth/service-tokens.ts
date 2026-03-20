@@ -94,6 +94,7 @@ export async function resolveServiceActorFromBearerToken(
         and(
           eq(serviceTokens.tokenHash, tokenHash),
           isNull(serviceTokens.revokedAt),
+          isNull(users.deactivatedAt),
           isNull(users.email),
           or(isNull(serviceTokens.expiresAt), gt(serviceTokens.expiresAt, now))
         )
