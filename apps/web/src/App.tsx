@@ -1006,16 +1006,12 @@ function BoardView(props: {
 
         return (
           <SurfaceCard className="board-column gap-0 py-0" key={status}>
-            <SectionHeading
-              actions={
-                <Badge className="count-pill" variant="secondary">
-                  {tasks.length}
-                </Badge>
-              }
-              className="column-header"
-              eyebrow="Status"
-              title={status}
-            />
+            <header className="column-header">
+              <p className="column-label">{status}</p>
+              <Badge className="count-pill" variant="secondary">
+                {tasks.length}
+              </Badge>
+            </header>
             <div className="column-stack">
               {tasks.length === 0 ? (
                 <EmptyStateCard message="Nothing resting here." />
@@ -1089,46 +1085,61 @@ function TaskCard(props: {
 }) {
   const previousStatus = getStatusStep(props.task.status, -1);
   const nextStatus = getStatusStep(props.task.status, 1);
+  const taskDescription = props.task.description.trim();
+  const hasChecklist = props.task.checklistProgress.total > 0;
+  const hasComments = props.task.commentCount > 0;
+  const hasAttachments = props.task.attachmentCount > 0;
 
   return (
     <SurfaceCard className="task-card gap-0 py-0">
       <button className="task-card-main" onClick={() => props.onOpen(props.task.id)} type="button">
         <div className="task-card-header">
           <h3>{props.task.title}</h3>
-          <Badge
-            className={props.task.aiAssistanceEnabled ? "assist-badge assist-on" : "assist-badge"}
-            variant={props.task.aiAssistanceEnabled ? "secondary" : "outline"}
-          >
-            {props.task.aiAssistanceEnabled ? props.aiAssistanceLabel : "Human only"}
-          </Badge>
+          {props.task.aiAssistanceEnabled ? (
+            <Badge className="assist-badge assist-on" variant="secondary">
+              {props.aiAssistanceLabel}
+            </Badge>
+          ) : null}
         </div>
-        <p>{props.task.description || "No notes yet."}</p>
+        {taskDescription ? <p>{taskDescription}</p> : null}
         <div className="task-meta">
           <Badge className="task-meta-pill" variant="outline">
             {props.task.assignee?.displayName ?? "Unassigned"}
           </Badge>
-          <Badge className="task-meta-pill" variant="outline">
-            {formatDate(props.task.dueOn, props.task.dueTime)}
-          </Badge>
-        </div>
-        <div className="task-indicators">
-          <Badge className="task-indicator-pill" variant="secondary">
-            {props.task.checklistProgress.completed}/{props.task.checklistProgress.total} checklist
-          </Badge>
-          <Badge className="task-indicator-pill" variant="secondary">
-            {props.task.commentCount} comments
-          </Badge>
-          <Badge className="task-indicator-pill" variant="secondary">
-            {props.task.attachmentCount} attachments
-          </Badge>
-        </div>
-        <div className="label-row">
-          {props.task.labels.map((label) => (
-            <Badge className="label-pill" key={label.id} variant="outline">
-              {label.name}
+          {props.task.dueOn ? (
+            <Badge className="task-meta-pill" variant="outline">
+              {formatDate(props.task.dueOn, props.task.dueTime)}
             </Badge>
-          ))}
+          ) : null}
         </div>
+        {hasChecklist || hasComments || hasAttachments ? (
+          <div className="task-indicators">
+            {hasChecklist ? (
+              <Badge className="task-indicator-pill" variant="secondary">
+                {props.task.checklistProgress.completed}/{props.task.checklistProgress.total} checklist
+              </Badge>
+            ) : null}
+            {hasComments ? (
+              <Badge className="task-indicator-pill" variant="secondary">
+                {props.task.commentCount} comments
+              </Badge>
+            ) : null}
+            {hasAttachments ? (
+              <Badge className="task-indicator-pill" variant="secondary">
+                {props.task.attachmentCount} attachments
+              </Badge>
+            ) : null}
+          </div>
+        ) : null}
+        {props.task.labels.length > 0 ? (
+          <div className="label-row">
+            {props.task.labels.map((label) => (
+              <Badge className="label-pill" key={label.id} variant="outline">
+                {label.name}
+              </Badge>
+            ))}
+          </div>
+        ) : null}
       </button>
       {!props.task.archivedAt ? (
         <div className="card-actions">
@@ -1234,9 +1245,11 @@ function TaskSheet(props: {
                 <Badge className="sheet-summary-badge" variant="outline">
                   {currentTask.assignee?.displayName ?? "Unassigned"}
                 </Badge>
-                <Badge className="sheet-summary-badge" variant="outline">
-                  {formatDate(currentTask.dueOn, currentTask.dueTime)}
-                </Badge>
+                {currentTask.dueOn ? (
+                  <Badge className="sheet-summary-badge" variant="outline">
+                    {formatDate(currentTask.dueOn, currentTask.dueTime)}
+                  </Badge>
+                ) : null}
               </div>
             ) : (
               <p className="section-copy">

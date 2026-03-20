@@ -335,6 +335,20 @@ a {
   align-items: flex-start;
 }
 
+.column-header {
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.column-label {
+  margin: 0;
+  color: rgb(47 33 22 / 0.82);
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+
 .section-heading-copy {
   display: grid;
   gap: 0.45rem;
@@ -368,10 +382,10 @@ a {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 2.2rem;
-  padding: 0.35rem 0.75rem;
+  min-width: 2rem;
+  padding: 0.25rem 0.65rem;
   border-radius: 999px;
-  background: rgb(41 77 67 / 0.12);
+  background: rgb(41 77 67 / 0.09);
   color: var(--accent-green);
 }
 
