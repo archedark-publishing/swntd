@@ -7,6 +7,12 @@
 
 :root {
   color-scheme: light;
+  --font-display:
+    "Iowan Old Style",
+    "Palatino Linotype",
+    "Book Antiqua",
+    Georgia,
+    serif;
   --bg-cream: #f4eddc;
   --bg-paper: rgb(255 249 239 / 0.88);
   --bg-ink: #20170f;
@@ -17,12 +23,6 @@
   --accent-gold: #d6b06b;
   --border-soft: rgb(83 54 27 / 0.14);
   --shadow-soft: 0 1.25rem 3rem rgb(58 34 16 / 0.12);
-  font-family:
-    "Iowan Old Style",
-    "Palatino Linotype",
-    "Book Antiqua",
-    Georgia,
-    serif;
   background:
     radial-gradient(circle at top, rgb(255 255 255 / 0.34), transparent 38%),
     linear-gradient(180deg, #f7f0df 0%, #ebdec0 52%, #e2d0aa 100%);
@@ -141,11 +141,29 @@ a {
 }
 
 .masthead h1,
+.status-panel h2,
 .section-header h2,
-.sheet-header h2 {
+.section-header h3,
+.sheet-header h2,
+.sheet-section h3,
+.task-card h3 {
   margin: 0.18rem 0 0.5rem;
   line-height: 0.95;
+  font-family: var(--font-display);
+  letter-spacing: -0.02em;
+}
+
+.masthead h1,
+.status-panel h2,
+.section-header h2,
+.sheet-header h2 {
   font-size: clamp(2.25rem, 4vw, 4.6rem);
+}
+
+.section-header h3,
+.sheet-section h3,
+.task-card h3 {
+  font-size: 1.2rem;
 }
 
 .subtitle,
@@ -317,6 +335,19 @@ a {
   align-items: flex-start;
 }
 
+.section-heading-copy {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.section-heading-actions,
+.header-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.6rem;
+}
+
 .section-header.compact,
 .sheet-header {
   margin-bottom: 1rem;
@@ -374,6 +405,18 @@ a {
   border: 0;
   background: transparent;
   text-align: left;
+  transition:
+    background-color 180ms ease,
+    transform 180ms ease;
+}
+
+.task-card-main:hover {
+  background: rgb(255 255 255 / 0.32);
+}
+
+.task-card-main:focus-visible {
+  outline: none;
+  background: rgb(255 255 255 / 0.42);
 }
 
 .task-card-header {
@@ -382,12 +425,6 @@ a {
   justify-content: space-between;
   gap: 0.75rem;
   margin-bottom: 0.75rem;
-}
-
-.task-card h3,
-.sheet-section h3 {
-  margin: 0;
-  font-size: 1.15rem;
 }
 
 .assist-badge {
@@ -416,6 +453,19 @@ a {
 .task-meta,
 .task-indicators {
   margin-top: 0.8rem;
+}
+
+.task-meta-pill,
+.task-indicator-pill {
+  border-color: rgb(86 58 30 / 0.12);
+  background: rgb(255 255 255 / 0.62);
+  color: rgb(47 33 22 / 0.8);
+  font-weight: 500;
+}
+
+.task-indicator-pill {
+  background: rgb(41 77 67 / 0.09);
+  color: rgb(32 23 15 / 0.84);
 }
 
 .label-row {
@@ -585,6 +635,10 @@ a {
   grid-template-columns: auto 1fr auto;
   gap: 0.6rem;
   align-items: center;
+  padding: 0.75rem 0.85rem;
+  border-radius: 1rem;
+  border: 1px solid rgb(86 58 30 / 0.1);
+  background: rgb(255 255 255 / 0.44);
 }
 
 .checkbox-grid {
@@ -648,6 +702,10 @@ a {
 
   .template-grid {
     grid-template-columns: minmax(14rem, 18rem) minmax(0, 1fr);
+  }
+
+  .section-heading-actions {
+    justify-content: flex-end;
   }
 }
 

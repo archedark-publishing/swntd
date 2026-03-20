@@ -8,13 +8,18 @@ import {
 } from "react";
 import {
   AppChrome,
+  EmptyStateCard,
   FlashBanner,
+  InfoRow,
+  SectionHeading,
   SurfaceCard,
   SearchField,
+  SelectionListButton,
   StatusMessageCard,
   ViewSwitcher
 } from "@/components/app-chrome";
 import {
+  ChoiceChip,
   FormField,
   FormInput,
   FormSelect,
@@ -881,18 +886,18 @@ export function App() {
 
       {!isBooting && view === "archive" ? (
         <section className="panel-stack">
-          <div className="section-header">
-            <div>
-              <p className="eyebrow">History</p>
-              <h2>Archive</h2>
-            </div>
-            <SearchField
-              label="Search archive"
-              onChange={setArchiveSearch}
-              placeholder="Search titles or notes"
-              value={archiveSearch}
-            />
-          </div>
+          <SectionHeading
+            actions={
+              <SearchField
+                label="Search archive"
+                onChange={setArchiveSearch}
+                placeholder="Search titles or notes"
+                value={archiveSearch}
+              />
+            }
+            eyebrow="History"
+            title="Archive"
+          />
           <TaskListView
             aiAssistanceLabel={getAiAssistanceLabel(snapshot.users)}
             description="A place for finished errands, closed loops, and things you only need to remember once in a while."
@@ -1001,18 +1006,19 @@ function BoardView(props: {
 
         return (
           <SurfaceCard className="board-column gap-0 py-0" key={status}>
-            <header className="column-header">
-              <div>
-                <p className="eyebrow">Status</p>
-                <h2>{status}</h2>
-              </div>
-              <Badge className="count-pill" variant="secondary">
-                {tasks.length}
-              </Badge>
-            </header>
+            <SectionHeading
+              actions={
+                <Badge className="count-pill" variant="secondary">
+                  {tasks.length}
+                </Badge>
+              }
+              className="column-header"
+              eyebrow="Status"
+              title={status}
+            />
             <div className="column-stack">
               {tasks.length === 0 ? (
-                <div className="empty-card">Nothing resting here.</div>
+                <EmptyStateCard message="Nothing resting here." />
               ) : null}
               {tasks.map((task, index) => (
                 <TaskCard
@@ -1046,16 +1052,14 @@ function TaskListView(props: {
 }) {
   return (
     <section className="panel-stack">
-      <div className="section-header">
-        <div>
-          <p className="eyebrow">Focused View</p>
-          <h2>{props.title}</h2>
-        </div>
-        <p className="section-copy">{props.description}</p>
-      </div>
+      <SectionHeading
+        description={props.description}
+        eyebrow="Focused View"
+        title={props.title}
+      />
       <SurfaceCard className="list-surface gap-0 py-0">
         {props.tasks.length === 0 ? (
-          <div className="empty-card">{props.emptyMessage}</div>
+          <EmptyStateCard message={props.emptyMessage} />
         ) : null}
         {props.tasks.map((task, index) => (
           <TaskCard
@@ -1100,13 +1104,23 @@ function TaskCard(props: {
         </div>
         <p>{props.task.description || "No notes yet."}</p>
         <div className="task-meta">
-          <span>{props.task.assignee?.displayName ?? "Unassigned"}</span>
-          <span>{formatDate(props.task.dueOn, props.task.dueTime)}</span>
+          <Badge className="task-meta-pill" variant="outline">
+            {props.task.assignee?.displayName ?? "Unassigned"}
+          </Badge>
+          <Badge className="task-meta-pill" variant="outline">
+            {formatDate(props.task.dueOn, props.task.dueTime)}
+          </Badge>
         </div>
         <div className="task-indicators">
-          <span>{props.task.checklistProgress.completed}/{props.task.checklistProgress.total} checklist</span>
-          <span>{props.task.commentCount} comments</span>
-          <span>{props.task.attachmentCount} attachments</span>
+          <Badge className="task-indicator-pill" variant="secondary">
+            {props.task.checklistProgress.completed}/{props.task.checklistProgress.total} checklist
+          </Badge>
+          <Badge className="task-indicator-pill" variant="secondary">
+            {props.task.commentCount} comments
+          </Badge>
+          <Badge className="task-indicator-pill" variant="secondary">
+            {props.task.attachmentCount} attachments
+          </Badge>
         </div>
         <div className="label-row">
           {props.task.labels.map((label) => (
@@ -1236,28 +1250,30 @@ function TaskSheet(props: {
 
           {currentTask ? (
             <section className="sheet-section">
-              <div className="section-header compact">
-                <div>
-                  <p className="eyebrow">Status</p>
-                  <h3>Move the card</h3>
-                </div>
-                <div className="status-row">
-                  {taskStatuses.map((status) => (
-                    <Button
-                      className="rounded-full"
-                      key={status}
-                      onClick={() => {
-                        void props.onStatusChange(currentTask, status);
-                      }}
-                      size="sm"
-                      type="button"
-                      variant={currentTask.status === status ? "default" : "outline"}
-                    >
-                      {status}
-                    </Button>
-                  ))}
-                </div>
-              </div>
+              <SectionHeading
+                actions={
+                  <div className="status-row">
+                    {taskStatuses.map((status) => (
+                      <Button
+                        className="rounded-full"
+                        key={status}
+                        onClick={() => {
+                          void props.onStatusChange(currentTask, status);
+                        }}
+                        size="sm"
+                        type="button"
+                        variant={currentTask.status === status ? "default" : "outline"}
+                      >
+                        {status}
+                      </Button>
+                    ))}
+                  </div>
+                }
+                compact
+                eyebrow="Status"
+                title="Move the card"
+                titleAs="h3"
+              />
               <div className="sheet-actions">
                 {currentTask.archivedAt ? (
                   <Button
@@ -1296,24 +1312,19 @@ function TaskSheet(props: {
           {currentTask ? (
             <>
               <section className="sheet-section">
-                <div className="section-header compact">
-                  <div>
-                    <p className="eyebrow">Comments</p>
-                    <h3>Conversation</h3>
-                  </div>
-                </div>
+                <SectionHeading compact eyebrow="Comments" title="Conversation" titleAs="h3" />
                 <div className="timeline">
                   {currentTask.comments.length === 0 ? (
-                    <div className="empty-card">No comments yet.</div>
+                    <EmptyStateCard message="No comments yet." />
                   ) : null}
                   {currentTask.comments.map((comment) => (
-                    <article className="timeline-entry" key={comment.id}>
+                    <SurfaceCard className="timeline-entry gap-2 py-4" key={comment.id}>
                       <div className="timeline-meta">
                         <strong>{comment.author.displayName}</strong>
                         <span>{formatTimestamp(comment.createdAt)}</span>
                       </div>
                       <p>{comment.body}</p>
-                    </article>
+                    </SurfaceCard>
                   ))}
                 </div>
                 <FormField label="Add a comment">
@@ -1342,18 +1353,39 @@ function TaskSheet(props: {
               </section>
 
               <section className="sheet-section">
-                <div className="section-header compact">
-                  <div>
-                    <p className="eyebrow">Attachments</p>
-                    <h3>Files and links</h3>
-                  </div>
-                </div>
+                <SectionHeading compact eyebrow="Attachments" title="Files and links" titleAs="h3" />
                 <div className="attachment-list">
                   {currentTask.attachments.length === 0 ? (
-                    <div className="empty-card">No attachments yet.</div>
+                    <EmptyStateCard message="No attachments yet." />
                   ) : null}
                   {currentTask.attachments.map((attachment) => (
-                    <article className="attachment-row" key={attachment.id}>
+                    <InfoRow
+                      action={
+                        attachment.storageKind === "upload" ? (
+                          <Button
+                            onClick={() => {
+                              void props.onDownloadAttachment(attachment);
+                            }}
+                            size="sm"
+                            type="button"
+                            variant="outline"
+                          >
+                            Download
+                          </Button>
+                        ) : (
+                          <Button asChild size="sm" variant="outline">
+                            <a
+                              href={attachment.externalUrl ?? "#"}
+                              rel="noreferrer"
+                              target="_blank"
+                            >
+                              Open Link
+                            </a>
+                          </Button>
+                        )
+                      }
+                      key={attachment.id}
+                    >
                       <div>
                         <strong>{attachment.originalName}</strong>
                         <p>
@@ -1361,34 +1393,12 @@ function TaskSheet(props: {
                           {formatTimestamp(attachment.createdAt)}
                         </p>
                       </div>
-                      {attachment.storageKind === "upload" ? (
-                        <Button
-                          onClick={() => {
-                            void props.onDownloadAttachment(attachment);
-                          }}
-                          size="sm"
-                          type="button"
-                          variant="outline"
-                        >
-                          Download
-                        </Button>
-                      ) : (
-                        <Button asChild size="sm" variant="outline">
-                          <a
-                            href={attachment.externalUrl ?? "#"}
-                            rel="noreferrer"
-                            target="_blank"
-                          >
-                            Open Link
-                          </a>
-                        </Button>
-                      )}
-                    </article>
+                    </InfoRow>
                   ))}
                 </div>
                 <div className="sheet-actions">
                   <FormField className="file-input" label="Upload file">
-                    <input
+                    <FormInput
                       accept=".csv,.heic,.jpeg,.jpg,.json,.md,.pdf,.png,.txt,.webp"
                       onChange={(event) => {
                         const file = event.target.files?.[0];
@@ -1599,33 +1609,35 @@ function TaskForm(props: {
       </div>
 
       <div className="sheet-section">
-        <div className="section-header compact">
-          <div>
-            <p className="eyebrow">Checklist</p>
-            <h3>Subtasks</h3>
-          </div>
-          <Button
-            disabled={!props.canEdit}
-            onClick={() =>
-              props.onChange({
-                ...props.draft,
-                checklistItems: [
-                  ...props.draft.checklistItems,
-                  {
-                    body: "",
-                    clientId: crypto.randomUUID(),
-                    isCompleted: false
-                  }
-                ]
-              })
-            }
-            size="sm"
-            type="button"
-            variant="outline"
-          >
-            Add Item
-          </Button>
-        </div>
+        <SectionHeading
+          actions={
+            <Button
+              disabled={!props.canEdit}
+              onClick={() =>
+                props.onChange({
+                  ...props.draft,
+                  checklistItems: [
+                    ...props.draft.checklistItems,
+                    {
+                      body: "",
+                      clientId: crypto.randomUUID(),
+                      isCompleted: false
+                    }
+                  ]
+                })
+              }
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              Add Item
+            </Button>
+          }
+          compact
+          eyebrow="Checklist"
+          title="Subtasks"
+          titleAs="h3"
+        />
         <div className="checklist-editor">
           {props.draft.checklistItems.map((item, index) => (
             <div className="checklist-row" key={item.clientId}>
@@ -1677,38 +1689,32 @@ function TaskForm(props: {
             </div>
           ))}
           {props.draft.checklistItems.length === 0 ? (
-            <div className="empty-card">No checklist items yet.</div>
+            <EmptyStateCard message="No checklist items yet." />
           ) : null}
         </div>
       </div>
 
       <div className="sheet-section">
-        <div className="section-header compact">
-          <div>
-            <p className="eyebrow">Labels</p>
-            <h3>Categories</h3>
-          </div>
-        </div>
+        <SectionHeading compact eyebrow="Labels" title="Categories" titleAs="h3" />
         <div className="checkbox-grid">
           {props.labels.map((label) => (
-            <label className="choice-pill" key={label.id}>
-              <Checkbox
-                checked={props.draft.labelIds.includes(label.id)}
-                disabled={!props.canEdit}
-                onCheckedChange={(checked) =>
-                  props.onChange({
-                    ...props.draft,
-                    labelIds: checked === true
-                      ? [...props.draft.labelIds, label.id]
-                      : props.draft.labelIds.filter((entry) => entry !== label.id)
-                  })
-                }
-              />
-              <span>{label.name}</span>
-            </label>
+            <ChoiceChip
+              checked={props.draft.labelIds.includes(label.id)}
+              disabled={!props.canEdit}
+              key={label.id}
+              label={label.name}
+              onCheckedChange={(checked) =>
+                props.onChange({
+                  ...props.draft,
+                  labelIds: checked === true
+                    ? [...props.draft.labelIds, label.id]
+                    : props.draft.labelIds.filter((entry) => entry !== label.id)
+                })
+              }
+            />
           ))}
           {props.labels.length === 0 ? (
-            <div className="empty-card">Create labels in Settings to use them here.</div>
+            <EmptyStateCard message="Create labels in Settings to use them here." />
           ) : null}
         </div>
       </div>
@@ -1798,15 +1804,11 @@ function SettingsView(props: {
   return (
     <section className="settings-grid">
       <SurfaceCard className="settings-card gap-0 py-0">
-        <div className="section-header">
-          <div>
-            <p className="eyebrow">House Rules</p>
-            <h2>Settings</h2>
-          </div>
-          <p className="section-copy">
-            Tune the default timezone, archive cadence, and calendar preference.
-          </p>
-        </div>
+        <SectionHeading
+          description="Tune the default timezone, archive cadence, and calendar preference."
+          eyebrow="House Rules"
+          title="Settings"
+        />
         <div className="form-grid">
           <FormField label="Timezone">
             <FormInput
@@ -1860,49 +1862,43 @@ function SettingsView(props: {
       </SurfaceCard>
 
       <SurfaceCard className="settings-card gap-0 py-0">
-        <div className="section-header">
-          <div>
-            <p className="eyebrow">Household Cast</p>
-            <h2>People and Assistants</h2>
-          </div>
-          <div className="sheet-actions">
-            <Button
-              onClick={() => props.onSelectUser("new-admin")}
-              size="sm"
-              type="button"
-              variant="outline"
-            >
-              New Person
-            </Button>
-            <Button
-              onClick={() => props.onSelectUser("new-service")}
-              size="sm"
-              type="button"
-              variant="outline"
-            >
-              New Assistant
-            </Button>
-          </div>
-        </div>
+        <SectionHeading
+          actions={
+            <div className="header-action-row">
+              <Button
+                onClick={() => props.onSelectUser("new-admin")}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                New Person
+              </Button>
+              <Button
+                onClick={() => props.onSelectUser("new-service")}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                New Assistant
+              </Button>
+            </div>
+          }
+          eyebrow="Household Cast"
+          title="People and Assistants"
+        />
         <div className="template-grid">
           <div className="template-list">
             {props.users.length === 0 ? (
-              <div className="empty-card">No household actors yet.</div>
+              <EmptyStateCard message="No household actors yet." />
             ) : null}
             {props.users.map((user) => (
-              <button
-                className={
-                  props.selectedUser?.id === user.id
-                    ? "template-row template-row-active"
-                    : "template-row"
-                }
+              <SelectionListButton
+                active={props.selectedUser?.id === user.id}
                 key={user.id}
+                label={user.displayName}
+                meta={formatRoleLabel(user)}
                 onClick={() => props.onSelectUser(user.id)}
-                type="button"
-              >
-                <strong>{user.displayName}</strong>
-                <span>{formatRoleLabel(user)}</span>
-              </button>
+              />
             ))}
           </div>
           <div className="template-editor">
@@ -2017,23 +2013,21 @@ function SettingsView(props: {
                 </Button>
               ) : null}
             </div>
-            {userActionMessage ? <div className="empty-card">{userActionMessage}</div> : null}
+            {userActionMessage ? <EmptyStateCard message={userActionMessage} /> : null}
             {props.selectedUser ? (
-              <div className="empty-card">
-                Removing an actor is permanent. They stay attached to past comments and
-                history, but disappear from the household cast, cannot be assigned to
-                anything new, and assistants lose any active tokens.
-              </div>
+              <EmptyStateCard
+                message="Removing an actor is permanent. They stay attached to past comments and history, but disappear from the household cast, cannot be assigned to anything new, and assistants lose any active tokens."
+              />
             ) : null}
 
             {props.selectedUser?.role === "service" ? (
               <section className="sheet-section">
-                <div className="section-header compact">
-                  <div>
-                    <p className="eyebrow">Assistant Access</p>
-                    <h3>Service Tokens</h3>
-                  </div>
-                </div>
+                <SectionHeading
+                  compact
+                  eyebrow="Assistant Access"
+                  title="Service Tokens"
+                  titleAs="h3"
+                />
                 <div className="sheet-actions">
                   <FormField className="compact-field" label="Token name">
                     <FormInput
@@ -2065,17 +2059,32 @@ function SettingsView(props: {
                   </Button>
                 </div>
                 {issuedServiceToken ? (
-                  <div className="empty-card">
-                    <strong>Copy this token now:</strong>
-                    <p>{issuedServiceToken}</p>
-                  </div>
+                  <EmptyStateCard
+                    message={issuedServiceToken}
+                    title="Copy this token now:"
+                  />
                 ) : null}
                 <div className="cast-list">
                   {selectedServiceTokens.length === 0 ? (
-                    <div className="empty-card">No service tokens issued yet.</div>
+                    <EmptyStateCard message="No service tokens issued yet." />
                   ) : null}
                   {selectedServiceTokens.map((token) => (
-                    <div className="cast-row" key={token.id}>
+                    <InfoRow
+                      action={
+                        <Button
+                          disabled={Boolean(token.revokedAt)}
+                          onClick={() => {
+                            void props.onRevokeServiceToken(token.id);
+                          }}
+                          size="sm"
+                          type="button"
+                          variant="ghost"
+                        >
+                          {token.revokedAt ? "Revoked" : "Revoke"}
+                        </Button>
+                      }
+                      key={token.id}
+                    >
                       <div>
                         <strong>{token.name}</strong>
                         <span>
@@ -2088,18 +2097,7 @@ function SettingsView(props: {
                             : ""}
                         </span>
                       </div>
-                      <Button
-                        disabled={Boolean(token.revokedAt)}
-                        onClick={() => {
-                          void props.onRevokeServiceToken(token.id);
-                        }}
-                        size="sm"
-                        type="button"
-                        variant="ghost"
-                      >
-                        {token.revokedAt ? "Revoked" : "Revoke"}
-                      </Button>
-                    </div>
+                    </InfoRow>
                   ))}
                 </div>
               </section>
@@ -2107,12 +2105,7 @@ function SettingsView(props: {
           </div>
         </div>
 
-        <div className="section-header compact">
-          <div>
-            <p className="eyebrow">Labels</p>
-            <h3>Quick Add</h3>
-          </div>
-        </div>
+        <SectionHeading compact eyebrow="Labels" title="Quick Add" titleAs="h3" />
         <div className="sheet-actions">
           <FormField className="compact-field" label="Name">
             <FormInput
@@ -2158,41 +2151,33 @@ function SettingsView(props: {
       </SurfaceCard>
 
       <SurfaceCard className="settings-card settings-card-wide gap-0 py-0">
-        <div className="section-header">
-          <div>
-            <p className="eyebrow">Recurring Work</p>
-            <h2>Templates</h2>
-          </div>
-          <Button
-            onClick={() => props.onSelectTemplate(null)}
-            size="sm"
-            type="button"
-            variant="outline"
-          >
-            New Template
-          </Button>
-        </div>
+        <SectionHeading
+          actions={
+            <Button
+              onClick={() => props.onSelectTemplate(null)}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              New Template
+            </Button>
+          }
+          eyebrow="Recurring Work"
+          title="Templates"
+        />
         <div className="template-grid">
           <div className="template-list">
             {props.recurringTemplates.length === 0 ? (
-              <div className="empty-card">No recurring templates yet.</div>
+              <EmptyStateCard message="No recurring templates yet." />
             ) : null}
             {props.recurringTemplates.map((template) => (
-              <button
-                className={
-                  props.selectedTemplate?.id === template.id
-                    ? "template-row template-row-active"
-                    : "template-row"
-                }
+              <SelectionListButton
+                active={props.selectedTemplate?.id === template.id}
                 key={template.id}
+                label={template.title}
+                meta={`${template.recurrenceCadence} every ${template.recurrenceInterval}`}
                 onClick={() => props.onSelectTemplate(template.id)}
-                type="button"
-              >
-                <strong>{template.title}</strong>
-                <span>
-                  {template.recurrenceCadence} every {template.recurrenceInterval}
-                </span>
-              </button>
+              />
             ))}
           </div>
           <div className="template-editor">
@@ -2335,31 +2320,33 @@ function RecurringTemplateForm(props: {
       />
 
       <div className="sheet-section wide">
-        <div className="section-header compact">
-          <div>
-            <p className="eyebrow">Template Checklist</p>
-            <h3>Recurring subtasks</h3>
-          </div>
-          <Button
-            onClick={() =>
-              props.onChange({
-                ...props.draft,
-                checklistItems: [
-                  ...props.draft.checklistItems,
-                  {
-                    body: "",
-                    clientId: crypto.randomUUID()
-                  }
-                ]
-              })
-            }
-            size="sm"
-            type="button"
-            variant="outline"
-          >
-            Add Item
-          </Button>
-        </div>
+        <SectionHeading
+          actions={
+            <Button
+              onClick={() =>
+                props.onChange({
+                  ...props.draft,
+                  checklistItems: [
+                    ...props.draft.checklistItems,
+                    {
+                      body: "",
+                      clientId: crypto.randomUUID()
+                    }
+                  ]
+                })
+              }
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              Add Item
+            </Button>
+          }
+          compact
+          eyebrow="Template Checklist"
+          title="Recurring subtasks"
+          titleAs="h3"
+        />
         <div className="checklist-editor">
           {props.draft.checklistItems.map((item, index) => (
             <div className="checklist-row" key={item.clientId}>
@@ -2394,32 +2381,29 @@ function RecurringTemplateForm(props: {
               </Button>
             </div>
           ))}
+          {props.draft.checklistItems.length === 0 ? (
+            <EmptyStateCard message="No recurring checklist items yet." />
+          ) : null}
         </div>
       </div>
 
       <div className="sheet-section wide">
-        <div className="section-header compact">
-          <div>
-            <p className="eyebrow">Labels</p>
-            <h3>Template tags</h3>
-          </div>
-        </div>
+        <SectionHeading compact eyebrow="Labels" title="Template tags" titleAs="h3" />
         <div className="checkbox-grid">
           {props.labels.map((label) => (
-            <label className="choice-pill" key={label.id}>
-              <Checkbox
-                checked={props.draft.labelIds.includes(label.id)}
-                onCheckedChange={(checked) =>
-                  props.onChange({
-                    ...props.draft,
-                    labelIds: checked === true
-                      ? [...props.draft.labelIds, label.id]
-                      : props.draft.labelIds.filter((entry) => entry !== label.id)
-                  })
-                }
-              />
-              <span>{label.name}</span>
-            </label>
+            <ChoiceChip
+              checked={props.draft.labelIds.includes(label.id)}
+              key={label.id}
+              label={label.name}
+              onCheckedChange={(checked) =>
+                props.onChange({
+                  ...props.draft,
+                  labelIds: checked === true
+                    ? [...props.draft.labelIds, label.id]
+                    : props.draft.labelIds.filter((entry) => entry !== label.id)
+                })
+              }
+            />
           ))}
         </div>
       </div>

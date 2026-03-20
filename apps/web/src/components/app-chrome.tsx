@@ -1,4 +1,4 @@
-import type { ComponentProps } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { AlertCircle, RefreshCw, ScrollText } from "lucide-react";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -152,5 +152,76 @@ export function SurfaceCard(props: ComponentProps<typeof Card>) {
       )}
       {...rest}
     />
+  );
+}
+
+export function SectionHeading(props: {
+  actions?: ReactNode;
+  className?: string;
+  compact?: boolean;
+  description?: string;
+  eyebrow: string;
+  title: string;
+  titleAs?: "h2" | "h3";
+}) {
+  const TitleTag = props.titleAs ?? "h2";
+
+  return (
+    <div className={cn("section-header", props.compact && "compact", props.className)}>
+      <div className="section-heading-copy">
+        <p className="eyebrow">{props.eyebrow}</p>
+        <TitleTag>{props.title}</TitleTag>
+        {props.description ? <p className="section-copy">{props.description}</p> : null}
+      </div>
+      {props.actions ? <div className="section-heading-actions">{props.actions}</div> : null}
+    </div>
+  );
+}
+
+export function EmptyStateCard(props: {
+  message: string;
+  title?: string;
+}) {
+  return (
+    <SurfaceCard className="empty-card gap-2 py-4">
+      {props.title ? <strong>{props.title}</strong> : null}
+      <p className="m-0 text-sm leading-6 text-[rgb(47_33_22_/_0.66)]">{props.message}</p>
+    </SurfaceCard>
+  );
+}
+
+export function SelectionListButton(props: {
+  active?: boolean;
+  label: string;
+  meta?: string;
+  onClick: () => void;
+}) {
+  return (
+    <Button
+      className={cn(
+        "template-row h-auto w-full items-start justify-start rounded-3xl border border-border/50 bg-white/68 px-4 py-3 text-left shadow-sm backdrop-blur-sm",
+        props.active && "bg-primary text-primary-foreground hover:bg-primary/90"
+      )}
+      onClick={props.onClick}
+      type="button"
+      variant={props.active ? "default" : "ghost"}
+    >
+      <span className="grid gap-1">
+        <strong>{props.label}</strong>
+        {props.meta ? <span className="text-xs opacity-80">{props.meta}</span> : null}
+      </span>
+    </Button>
+  );
+}
+
+export function InfoRow(props: {
+  action?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <SurfaceCard className="cast-row gap-4 py-4">
+      {props.children}
+      {props.action}
+    </SurfaceCard>
   );
 }

@@ -110,3 +110,31 @@ export function ToggleField(props: {
     </div>
   );
 }
+
+export function ChoiceChip(props: {
+  checked: boolean;
+  disabled?: boolean;
+  label: string;
+  onCheckedChange: (value: boolean) => void;
+}) {
+  const id = useId();
+
+  return (
+    <Label
+      className={cn(
+        "choice-pill cursor-pointer rounded-full border border-border/50 bg-white/72 px-4 py-2 shadow-sm transition-colors hover:bg-white",
+        props.checked && "border-primary/35 bg-primary/12 text-primary",
+        props.disabled && "cursor-not-allowed opacity-60"
+      )}
+      htmlFor={id}
+    >
+      <Checkbox
+        checked={props.checked}
+        disabled={props.disabled}
+        id={id}
+        onCheckedChange={(checked) => props.onCheckedChange(checked === true)}
+      />
+      <span>{props.label}</span>
+    </Label>
+  );
+}
