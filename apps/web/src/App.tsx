@@ -1094,45 +1094,48 @@ function BoardView(props: {
   tasks: TaskListItem[];
 }) {
   return (
-    <section className="board-grid">
-      {taskStatuses.map((status) => {
-        const tasks = getTaskColumnOrder(props.tasks, status);
+    <section className="panel-stack">
+      <SectionHeading eyebrow="Chore Board" title="The S#!% List" />
+      <div className="board-grid">
+        {taskStatuses.map((status) => {
+          const tasks = getTaskColumnOrder(props.tasks, status);
 
-        return (
-          <SurfaceCard className="board-column gap-0 py-0" key={status}>
-            <header className="column-header">
-              <div className="column-header-main">
-                <p className="column-label">{status}</p>
-                <Badge className="count-pill" variant="secondary">
-                  {tasks.length}
-                </Badge>
+          return (
+            <SurfaceCard className="board-column gap-0 py-0" key={status}>
+              <header className="column-header">
+                <div className="column-header-main">
+                  <p className="column-label">{status}</p>
+                  <Badge className="count-pill" variant="secondary">
+                    {tasks.length}
+                  </Badge>
+                </div>
+                {props.canAdmin && status === "To Do" ? (
+                  <Button onClick={props.onCreateTask} size="sm" type="button" variant="outline">
+                    New Task
+                  </Button>
+                ) : null}
+              </header>
+              <div className="column-stack">
+                {tasks.length === 0 ? (
+                  <EmptyStateCard message="Nothing resting here." />
+                ) : null}
+                {tasks.map((task, index) => (
+                  <TaskCard
+                    aiAssistanceLabel={props.aiAssistanceLabel}
+                    index={index}
+                    key={task.id}
+                    onOpen={props.onOpenTask}
+                    onQuickMove={props.onQuickMove}
+                    onReorder={props.onReorder}
+                    task={task}
+                    total={tasks.length}
+                  />
+                ))}
               </div>
-              {props.canAdmin && status === "To Do" ? (
-                <Button onClick={props.onCreateTask} size="sm" type="button" variant="outline">
-                  New Task
-                </Button>
-              ) : null}
-            </header>
-            <div className="column-stack">
-              {tasks.length === 0 ? (
-                <EmptyStateCard message="Nothing resting here." />
-              ) : null}
-              {tasks.map((task, index) => (
-                <TaskCard
-                  aiAssistanceLabel={props.aiAssistanceLabel}
-                  index={index}
-                  key={task.id}
-                  onOpen={props.onOpenTask}
-                  onQuickMove={props.onQuickMove}
-                  onReorder={props.onReorder}
-                  task={task}
-                  total={tasks.length}
-                />
-              ))}
-            </div>
-          </SurfaceCard>
-        );
-      })}
+            </SurfaceCard>
+          );
+        })}
+      </div>
     </section>
   );
 }
