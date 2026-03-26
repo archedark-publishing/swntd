@@ -32,7 +32,9 @@ import {
   CalendarDays,
   CalendarPlus2,
   Menu,
+  Plus,
   Tag,
+  Trash2,
   UserRound
 } from "lucide-react";
 import {
@@ -2683,36 +2685,33 @@ function TaskForm(props: {
 
       {props.variant === "detail" ? (
         <>
-          <div className="sheet-section">
-            <SectionHeading
-              actions={
-                <Button
-                  disabled={!props.canEdit}
-                  onClick={() =>
-                    props.onChange({
-                      ...props.draft,
-                      checklistItems: [
-                        ...props.draft.checklistItems,
-                        {
-                          body: "",
-                          clientId: crypto.randomUUID(),
-                          isCompleted: false
-                        }
-                      ]
-                    })
-                  }
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                >
-                  Add Item
-                </Button>
-              }
-              compact
-              eyebrow="Checklist"
-              title="Subtasks"
-              titleAs="h3"
-            />
+          <div className="checklist-stack wide">
+            <div className="checklist-stack-header">
+              <span className="checklist-stack-label">Checklist</span>
+              <Button
+                className="checklist-add-button"
+                disabled={!props.canEdit}
+                onClick={() =>
+                  props.onChange({
+                    ...props.draft,
+                    checklistItems: [
+                      ...props.draft.checklistItems,
+                      {
+                        body: "",
+                        clientId: crypto.randomUUID(),
+                        isCompleted: false
+                      }
+                    ]
+                  })
+                }
+                size="icon"
+                type="button"
+                variant="outline"
+              >
+                <Plus className="size-4" />
+                <span className="sr-only">Add checklist item</span>
+              </Button>
+            </div>
             <div className="checklist-editor">
               {props.draft.checklistItems.map((item, index) => (
                 <div className="checklist-row" key={item.clientId}>
@@ -2746,6 +2745,7 @@ function TaskForm(props: {
                     value={item.body}
                   />
                   <Button
+                    className="checklist-remove-button"
                     disabled={!props.canEdit}
                     onClick={() =>
                       props.onChange({
@@ -2755,17 +2755,15 @@ function TaskForm(props: {
                         )
                       })
                     }
-                    size="sm"
+                    size="icon"
                     type="button"
                     variant="ghost"
                   >
-                    Remove
+                    <Trash2 className="size-4" />
+                    <span className="sr-only">Remove checklist item</span>
                   </Button>
                 </div>
               ))}
-              {props.draft.checklistItems.length === 0 ? (
-                <EmptyStateCard message="No checklist items yet." />
-              ) : null}
             </div>
           </div>
 
