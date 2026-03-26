@@ -206,6 +206,18 @@ a {
   gap: 0.2rem;
 }
 
+.actor-chip-wrap {
+  position: relative;
+}
+
+.settings-gear-button {
+  position: absolute;
+  top: 0.7rem;
+  right: 0.7rem;
+  background: rgb(255 255 255 / 0.7);
+  box-shadow: 0 0.5rem 1.2rem rgb(80 50 24 / 0.06);
+}
+
 .sidebar-nav-button {
   border: 1px solid rgb(86 58 30 / 0.12);
   background: rgb(255 255 255 / 0.58);
@@ -339,8 +351,9 @@ a {
 }
 
 .actor-chip {
-  display: inline-flex;
+  display: flex;
   flex-direction: column;
+  width: 100%;
   padding: 0.6rem 0.9rem;
   border-radius: 1rem;
   background: rgb(255 255 255 / 0.56);

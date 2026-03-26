@@ -124,8 +124,7 @@ const emptySnapshot: AppSnapshot = {
 const navItems: Array<{ id: ViewName; label: string }> = [
   { id: "board", label: "Board" },
   { id: "my-tasks", label: "My Tasks" },
-  { id: "archive", label: "Archive" },
-  { id: "settings", label: "Settings" }
+  { id: "archive", label: "Archive" }
 ];
 const settingsNavItems: Array<{ id: SettingsPage; label: string }> = [
   { id: "general", label: "General" },

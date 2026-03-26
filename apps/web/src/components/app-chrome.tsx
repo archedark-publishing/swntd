@@ -1,5 +1,5 @@
 import type { ComponentProps, ReactNode } from "react";
-import { ScrollText, X } from "lucide-react";
+import { ScrollText, Settings, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -29,7 +29,6 @@ export function AppNavigation(props: {
         <div className="app-sidebar-header">
           <div className="app-sidebar-title-row">
             <div>
-              <p className="eyebrow">Navigate</p>
               <strong className="app-sidebar-title">S#!% We Need To Do</strong>
             </div>
             <Button
@@ -43,10 +42,6 @@ export function AppNavigation(props: {
               <span className="sr-only">Close navigation</span>
             </Button>
           </div>
-          <p className="sidebar-copy">
-            A shared board for chores, errands, recurring rituals, and the small
-            domestic plot twists that keep a household moving.
-          </p>
         </div>
 
         <nav className="app-sidebar-nav">
@@ -76,11 +71,26 @@ export function AppNavigation(props: {
           <div className="app-sidebar-footer-copy">
             <p className="eyebrow">Signed In As</p>
           </div>
-          <div className="actor-chip border border-border/50 bg-white/70 shadow-sm backdrop-blur-sm">
-            <strong>{props.actorDisplayName}</strong>
-            <Badge className="w-fit" variant="outline">
-              {props.actorRoleLabel}
-            </Badge>
+          <div className="actor-chip-wrap">
+            <div className="actor-chip border border-border/50 bg-white/70 shadow-sm backdrop-blur-sm">
+              <strong>{props.actorDisplayName}</strong>
+              <Badge className="w-fit" variant="outline">
+                {props.actorRoleLabel}
+              </Badge>
+            </div>
+            <Button
+              className="settings-gear-button rounded-full"
+              onClick={() => {
+                props.onSelectMain("settings");
+                props.onClose();
+              }}
+              size="icon"
+              type="button"
+              variant={props.selectedMain === "settings" ? "default" : "outline"}
+            >
+              <Settings className="size-4" />
+              <span className="sr-only">Open settings</span>
+            </Button>
           </div>
         </div>
       </aside>
