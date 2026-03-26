@@ -1882,6 +1882,17 @@ function TaskSheet(props: {
   const lastServerDraftKeyRef = useRef(serializeTaskDraft(createTaskDraft(null)));
   const currentTaskIdRef = useRef<string | null>(null);
   const autosaveResetRef = useRef<number | null>(null);
+  const titleInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const resizeTitleInput = useEffectEvent(() => {
+    const node = titleInputRef.current;
+
+    if (!node) {
+      return;
+    }
+
+    node.style.height = "0px";
+    node.style.height = `${node.scrollHeight}px`;
+  });
   const submitAutosave = useEffectEvent(async (nextDraft: TaskDraft) => {
     setAutosaveState("saving");
 
@@ -1945,6 +1956,14 @@ function TaskSheet(props: {
   }, [autosaveState]);
 
   useEffect(() => {
+    if (props.variant !== "detail") {
+      return;
+    }
+
+    resizeTitleInput();
+  }, [draft.title, props.variant, resizeTitleInput]);
+
+  useEffect(() => {
     if (props.variant !== "detail" || !props.task || props.isSavingDisabled) {
       return;
     }
@@ -1993,7 +2012,7 @@ function TaskSheet(props: {
             {props.variant === "create" ? (
               <h2>Add Something to the Board</h2>
             ) : (
-              <input
+              <textarea
                 className="sheet-title-input"
                 disabled={props.isSavingDisabled}
                 onChange={(event) =>
@@ -2002,7 +2021,15 @@ function TaskSheet(props: {
                     title: event.target.value
                   }))
                 }
+                onInput={() => resizeTitleInput()}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                  }
+                }}
                 placeholder="What needs doing?"
+                ref={titleInputRef}
+                rows={1}
                 value={draft.title}
               />
             )}

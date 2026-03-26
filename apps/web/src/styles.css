@@ -475,11 +475,14 @@ a {
   background: transparent;
   color: var(--bg-ink);
   font-family: var(--font-display);
-  font-size: clamp(2.25rem, 4vw, 4.6rem);
+  font-size: clamp(1.65rem, 3vw, 2.6rem);
   font-weight: 700;
   letter-spacing: -0.02em;
-  line-height: 0.95;
+  line-height: 1.05;
   outline: none;
+  resize: none;
+  overflow: hidden;
+  overflow-wrap: anywhere;
 }
 
 .sheet-title-input::placeholder {
