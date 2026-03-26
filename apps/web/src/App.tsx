@@ -1,4 +1,24 @@
 import {
+  DndContext,
+  DragOverlay,
+  KeyboardSensor,
+  PointerSensor,
+  closestCorners,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type UniqueIdentifier,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import {
   startTransition,
   useDeferredValue,
   useEffect,
@@ -6,7 +26,7 @@ import {
   useRef,
   useState
 } from "react";
-import { Menu } from "lucide-react";
+import { GripVertical, Menu } from "lucide-react";
 import {
   AppNavigation,
   EmptyStateCard,
@@ -302,6 +322,10 @@ function getStatusStep(status: TaskStatus, direction: -1 | 1) {
   }
 
   return taskStatuses[nextIndex];
+}
+
+function isTaskStatus(value: string): value is TaskStatus {
+  return taskStatuses.includes(value as TaskStatus);
 }
 
 function formatRoleLabel(user: Pick<UserRef, "role" | "serviceKind">) {
@@ -713,6 +737,71 @@ export function App() {
     );
   }
 
+  async function handleTaskDrop(input: {
+    overTaskId: string | null;
+    taskId: string;
+    targetStatus: TaskStatus;
+  }) {
+    const task = activeTasks.find((entry) => entry.id === input.taskId);
+
+    if (!task) {
+      return;
+    }
+
+    const destinationTasks = getTaskColumnOrder(activeTasks, input.targetStatus);
+    const overIndex =
+      input.overTaskId === null
+        ? destinationTasks.length
+        : destinationTasks.findIndex((entry) => entry.id === input.overTaskId);
+    const safeTargetIndex = overIndex < 0 ? destinationTasks.length : overIndex;
+
+    if (task.status === input.targetStatus) {
+      const currentIndex = destinationTasks.findIndex((entry) => entry.id === task.id);
+
+      if (currentIndex < 0) {
+        return;
+      }
+
+      const reorderedIds = arrayMove(
+        destinationTasks.map((entry) => entry.id),
+        currentIndex,
+        safeTargetIndex
+      );
+      const targetIndex = reorderedIds.indexOf(task.id);
+
+      if (targetIndex === currentIndex) {
+        return;
+      }
+
+      await runMutation(
+        () =>
+          api.reorderTask(task.id, {
+            expectedRevision: task.revision,
+            targetIndex
+          }),
+        "Task order updated."
+      );
+
+      return;
+    }
+
+    await runMutation(async () => {
+      const transitioned = await api.transitionTask(task.id, {
+        expectedRevision: task.revision,
+        status: input.targetStatus
+      });
+
+      if (safeTargetIndex === 0 || destinationTasks.length === 0) {
+        return transitioned;
+      }
+
+      return api.reorderTask(task.id, {
+        expectedRevision: transitioned.item.revision,
+        targetIndex: safeTargetIndex
+      });
+    }, `Moved "${task.title}" to ${input.targetStatus}.`);
+  }
+
   async function handleStatusChange(task: TaskDetail, status: TaskStatus) {
     await runMutation(
       () =>
@@ -950,10 +1039,11 @@ export function App() {
           {!isBooting && view === "board" ? (
             <BoardView
               aiAssistanceLabel={getAiAssistanceLabel(snapshot.users)}
+              allTasks={activeTasks}
               canAdmin={canAdmin}
               isFilteredToActor={onlyMyTasks}
               onCreateTask={openNewTask}
-              tasks={activeTasks}
+              onDropTask={handleTaskDrop}
               onOpenTask={openTask}
               onQuickMove={handleQuickMove}
               onReorder={handleReorder}
@@ -1088,15 +1178,37 @@ export function App() {
 
 function BoardView(props: {
   aiAssistanceLabel: string;
+  allTasks: TaskListItem[];
   canAdmin: boolean;
   isFilteredToActor: boolean;
   onCreateTask: () => void;
+  onDropTask: (input: {
+    overTaskId: string | null;
+    targetStatus: TaskStatus;
+    taskId: string;
+  }) => Promise<void>;
   onOpenTask: (taskId: string) => void;
   onQuickMove: (task: TaskListItem, direction: -1 | 1) => Promise<void>;
   onReorder: (task: TaskListItem, direction: -1 | 1) => Promise<void>;
   onToggleActorFilter: () => void;
   visibleTasks: TaskListItem[];
 }) {
+  const [activeTaskId, setActiveTaskId] = useState<UniqueIdentifier | null>(null);
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8
+      }
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates
+    })
+  );
+  const activeTask =
+    activeTaskId === null
+      ? null
+      : props.allTasks.find((task) => task.id === activeTaskId) ?? null;
+
   return (
     <section className="panel-stack">
       <SectionHeading
@@ -1113,49 +1225,166 @@ function BoardView(props: {
         eyebrow="Chore Board"
         title="The S#!% List"
       />
-      <div className="board-scroll">
-        <div className="board-grid">
-          {taskStatuses.map((status) => {
-            const tasks = getTaskColumnOrder(props.visibleTasks, status);
+      <DndContext
+        collisionDetection={closestCorners}
+        onDragCancel={() => setActiveTaskId(null)}
+        onDragEnd={(event: DragEndEvent) => {
+          setActiveTaskId(null);
 
-            return (
-              <SurfaceCard className="board-column gap-0 py-0" key={status}>
-                <header className="column-header">
-                  <div className="column-header-main">
-                    <p className="column-label">{status}</p>
-                    <Badge className="count-pill" variant="secondary">
-                      {tasks.length}
-                    </Badge>
-                  </div>
-                  {props.canAdmin && status === "To Do" ? (
-                    <Button onClick={props.onCreateTask} size="sm" type="button" variant="outline">
-                      New Task
-                    </Button>
-                  ) : null}
-                </header>
-                <div className="column-stack">
-                  {tasks.length === 0 ? (
-                    <EmptyStateCard message="Nothing resting here." />
-                  ) : null}
-                  {tasks.map((task, index) => (
-                    <TaskCard
-                      aiAssistanceLabel={props.aiAssistanceLabel}
-                      index={index}
-                      key={task.id}
-                      onOpen={props.onOpenTask}
-                      onQuickMove={props.onQuickMove}
-                      onReorder={props.onReorder}
-                      task={task}
-                      total={tasks.length}
-                    />
-                  ))}
-                </div>
-              </SurfaceCard>
-            );
-          })}
+          if (!props.canAdmin || !event.over) {
+            return;
+          }
+
+          const taskId = String(event.active.id);
+          const overId = String(event.over.id);
+          let targetStatus: TaskStatus | null = null;
+          let overTaskId: string | null = null;
+
+          if (overId.startsWith("column:")) {
+            const status = overId.replace("column:", "");
+
+            targetStatus = isTaskStatus(status) ? status : null;
+          } else {
+            const overTask = props.allTasks.find((task) => task.id === overId);
+
+            if (overTask) {
+              targetStatus = overTask.status;
+              overTaskId = overTask.id;
+            }
+          }
+
+          if (!targetStatus) {
+            return;
+          }
+
+          void props.onDropTask({
+            overTaskId,
+            targetStatus,
+            taskId
+          });
+        }}
+        onDragStart={(event) => setActiveTaskId(event.active.id)}
+        sensors={sensors}
+      >
+        <div className="board-scroll">
+          <div className="board-grid">
+            {taskStatuses.map((status) => (
+              <BoardColumn
+                aiAssistanceLabel={props.aiAssistanceLabel}
+                canAdmin={props.canAdmin}
+                key={status}
+                onCreateTask={props.onCreateTask}
+                onOpenTask={props.onOpenTask}
+                onQuickMove={props.onQuickMove}
+                onReorder={props.onReorder}
+                status={status}
+                tasks={getTaskColumnOrder(props.visibleTasks, status)}
+              />
+            ))}
+          </div>
         </div>
-      </div>
+        <DragOverlay>
+          {activeTask ? (
+            <div className="task-drag-overlay">
+              <TaskCard
+                aiAssistanceLabel={props.aiAssistanceLabel}
+                allowManualReorder={false}
+                hideActions
+                index={0}
+                isDragging
+                onOpen={() => undefined}
+                onQuickMove={() => Promise.resolve()}
+                onReorder={() => Promise.resolve()}
+                task={activeTask}
+                total={1}
+              />
+            </div>
+          ) : null}
+        </DragOverlay>
+      </DndContext>
     </section>
+  );
+}
+
+function BoardColumn(props: {
+  aiAssistanceLabel: string;
+  canAdmin: boolean;
+  onCreateTask: () => void;
+  onOpenTask: (taskId: string) => void;
+  onQuickMove: (task: TaskListItem, direction: -1 | 1) => Promise<void>;
+  onReorder: (task: TaskListItem, direction: -1 | 1) => Promise<void>;
+  status: TaskStatus;
+  tasks: TaskListItem[];
+}) {
+  const { isOver, setNodeRef } = useDroppable({
+    id: `column:${props.status}`
+  });
+
+  return (
+    <SurfaceCard className="board-column gap-0 py-0" key={props.status}>
+      <header className="column-header">
+        <div className="column-header-main">
+          <p className="column-label">{props.status}</p>
+          <Badge className="count-pill" variant="secondary">
+            {props.tasks.length}
+          </Badge>
+        </div>
+        {props.canAdmin && props.status === "To Do" ? (
+          <Button onClick={props.onCreateTask} size="sm" type="button" variant="outline">
+            New Task
+          </Button>
+        ) : null}
+      </header>
+      <SortableContext
+        items={props.tasks.map((task) => task.id)}
+        strategy={verticalListSortingStrategy}
+      >
+        <div className={cn("column-stack", isOver && "column-stack-over")} ref={setNodeRef}>
+          {props.tasks.length === 0 ? (
+            <EmptyStateCard message="Nothing resting here." />
+          ) : null}
+          {props.tasks.map((task, index) => (
+            <SortableTaskCard
+              aiAssistanceLabel={props.aiAssistanceLabel}
+              canDrag={props.canAdmin}
+              index={index}
+              key={task.id}
+              onOpen={props.onOpenTask}
+              onQuickMove={props.onQuickMove}
+              onReorder={props.onReorder}
+              task={task}
+              total={props.tasks.length}
+            />
+          ))}
+        </div>
+      </SortableContext>
+    </SurfaceCard>
+  );
+}
+
+function SortableTaskCard(
+  props: {
+    canDrag: boolean;
+  } & Omit<TaskCardProps, "allowManualReorder">
+) {
+  const { attributes, isDragging, listeners, setNodeRef, transform, transition } = useSortable({
+    disabled: !props.canDrag,
+    id: props.task.id
+  });
+
+  return (
+    <div
+      className={cn("task-sortable-shell", isDragging && "task-sortable-shell-dragging")}
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition
+      }}
+      {...attributes}
+      {...listeners}
+    >
+      <TaskCard {...props} allowManualReorder={false} isDragging={isDragging} />
+    </div>
   );
 }
 
@@ -1200,24 +1429,31 @@ function TaskListView(props: {
   );
 }
 
-function TaskCard(props: {
+type TaskCardProps = {
   aiAssistanceLabel: string;
+  allowManualReorder?: boolean;
+  hideActions?: boolean;
   index: number;
+  isDragging?: boolean;
   onOpen: (taskId: string) => void;
   onQuickMove: (task: TaskListItem, direction: -1 | 1) => Promise<void>;
   onReorder: (task: TaskListItem, direction: -1 | 1) => Promise<void>;
   task: TaskListItem;
   total: number;
-}) {
+};
+
+function TaskCard(props: TaskCardProps) {
   const previousStatus = getStatusStep(props.task.status, -1);
   const nextStatus = getStatusStep(props.task.status, 1);
   const taskDescription = props.task.description.trim();
   const hasChecklist = props.task.checklistProgress.total > 0;
   const hasComments = props.task.commentCount > 0;
   const hasAttachments = props.task.attachmentCount > 0;
+  const allowManualReorder = props.allowManualReorder ?? true;
+  const hideActions = props.hideActions ?? false;
 
   return (
-    <SurfaceCard className="task-card gap-0 py-0">
+    <SurfaceCard className={cn("task-card gap-0 py-0", props.isDragging && "task-card-dragging")}>
       <button className="task-card-main" onClick={() => props.onOpen(props.task.id)} type="button">
         <div className="task-card-header">
           <h3>{props.task.title}</h3>
@@ -1267,30 +1503,39 @@ function TaskCard(props: {
           </div>
         ) : null}
       </button>
-      {!props.task.archivedAt ? (
+      {!props.task.archivedAt && !hideActions ? (
         <div className="card-actions">
-          <Button
-            disabled={props.index === 0}
-            onClick={() => {
-              void props.onReorder(props.task, -1);
-            }}
-            size="sm"
-            type="button"
-            variant="ghost"
-          >
-            Move Up
-          </Button>
-          <Button
-            disabled={props.index === props.total - 1}
-            onClick={() => {
-              void props.onReorder(props.task, 1);
-            }}
-            size="sm"
-            type="button"
-            variant="ghost"
-          >
-            Move Down
-          </Button>
+          {allowManualReorder ? (
+            <>
+              <Button
+                disabled={props.index === 0}
+                onClick={() => {
+                  void props.onReorder(props.task, -1);
+                }}
+                size="sm"
+                type="button"
+                variant="ghost"
+              >
+                Move Up
+              </Button>
+              <Button
+                disabled={props.index === props.total - 1}
+                onClick={() => {
+                  void props.onReorder(props.task, 1);
+                }}
+                size="sm"
+                type="button"
+                variant="ghost"
+              >
+                Move Down
+              </Button>
+            </>
+          ) : (
+            <div className="drag-chip">
+              <GripVertical className="size-4" />
+              Drag to reorder
+            </div>
+          )}
           <Button
             disabled={!previousStatus}
             onClick={() => {
