@@ -55,7 +55,7 @@ import {
 import { toast } from "sonner";
 import "./styles.css";
 
-type ViewName = "archive" | "board" | "my-tasks" | "settings";
+type ViewName = "archive" | "board" | "settings";
 type SettingsPage = "general" | "household" | "labels" | "recurring";
 
 type ChecklistDraftItem = {
@@ -123,7 +123,6 @@ const emptySnapshot: AppSnapshot = {
 
 const navItems: Array<{ id: ViewName; label: string }> = [
   { id: "board", label: "Board" },
-  { id: "my-tasks", label: "My Tasks" },
   { id: "archive", label: "Archive" }
 ];
 const settingsNavItems: Array<{ id: SettingsPage; label: string }> = [
@@ -137,22 +136,31 @@ function isSettingsPage(value: string | undefined): value is SettingsPage {
   return value === "general" || value === "household" || value === "labels" || value === "recurring";
 }
 
-function readRouteFromHash(): { settingsPage: SettingsPage; view: ViewName } {
+function readRouteFromHash(): {
+  onlyMyTasks: boolean;
+  settingsPage: SettingsPage;
+  view: ViewName;
+} {
   const hash = window.location.hash.replace(/^#/, "");
   const [viewPart, subpagePart] = hash.split("/");
 
-  if (viewPart === "my-tasks" || viewPart === "archive") {
-    return { settingsPage: "general", view: viewPart };
+  if (viewPart === "my-tasks") {
+    return { onlyMyTasks: true, settingsPage: "general", view: "board" };
+  }
+
+  if (viewPart === "archive") {
+    return { onlyMyTasks: false, settingsPage: "general", view: "archive" };
   }
 
   if (viewPart === "settings") {
     return {
+      onlyMyTasks: false,
       settingsPage: isSettingsPage(subpagePart) ? subpagePart : "general",
       view: "settings"
     };
   }
 
-  return { settingsPage: "general", view: "board" };
+  return { onlyMyTasks: false, settingsPage: "general", view: "board" };
 }
 
 function createChecklistDraft(items: Array<{ body: string; isCompleted: boolean }>) {
@@ -364,6 +372,7 @@ function showErrorToast(message: string, toastId?: string) {
 export function App() {
   const initialRoute = readRouteFromHash();
   const [view, setView] = useState<ViewName>(initialRoute.view);
+  const [onlyMyTasks, setOnlyMyTasks] = useState(initialRoute.onlyMyTasks);
   const [settingsPage, setSettingsPage] = useState<SettingsPage>(initialRoute.settingsPage);
   const [snapshot, setSnapshot] = useState<AppSnapshot>(emptySnapshot);
   const [isBooting, setIsBooting] = useState(true);
@@ -384,6 +393,7 @@ export function App() {
       const nextRoute = readRouteFromHash();
 
       setView(nextRoute.view);
+      setOnlyMyTasks(nextRoute.onlyMyTasks);
       setSettingsPage(nextRoute.settingsPage);
     };
 
@@ -602,6 +612,8 @@ export function App() {
 
   function handleViewChange(nextView: ViewName) {
     setView(nextView);
+    setOnlyMyTasks(false);
+
     setIsNavOpen(false);
   }
 
@@ -939,24 +951,14 @@ export function App() {
             <BoardView
               aiAssistanceLabel={getAiAssistanceLabel(snapshot.users)}
               canAdmin={canAdmin}
+              isFilteredToActor={onlyMyTasks}
               onCreateTask={openNewTask}
               tasks={activeTasks}
               onOpenTask={openTask}
               onQuickMove={handleQuickMove}
               onReorder={handleReorder}
-            />
-          ) : null}
-
-          {!isBooting && view === "my-tasks" ? (
-            <TaskListView
-              aiAssistanceLabel={getAiAssistanceLabel(snapshot.users)}
-              description="Work with your name on it, with quick status moves and a clean shortlist."
-              emptyMessage="Nothing is assigned to you right now."
-              onOpenTask={openTask}
-              onQuickMove={handleQuickMove}
-              onReorder={handleReorder}
-              tasks={myTasks}
-              title="My Tasks"
+              onToggleActorFilter={() => setOnlyMyTasks((current) => !current)}
+              visibleTasks={onlyMyTasks ? myTasks : activeTasks}
             />
           ) : null}
 
@@ -1087,19 +1089,34 @@ export function App() {
 function BoardView(props: {
   aiAssistanceLabel: string;
   canAdmin: boolean;
+  isFilteredToActor: boolean;
   onCreateTask: () => void;
   onOpenTask: (taskId: string) => void;
   onQuickMove: (task: TaskListItem, direction: -1 | 1) => Promise<void>;
   onReorder: (task: TaskListItem, direction: -1 | 1) => Promise<void>;
-  tasks: TaskListItem[];
+  onToggleActorFilter: () => void;
+  visibleTasks: TaskListItem[];
 }) {
   return (
     <section className="panel-stack">
-      <SectionHeading eyebrow="Chore Board" title="The S#!% List" />
+      <SectionHeading
+        actions={
+          <Button
+            onClick={props.onToggleActorFilter}
+            size="sm"
+            type="button"
+            variant={props.isFilteredToActor ? "default" : "outline"}
+          >
+            Only My Tasks
+          </Button>
+        }
+        eyebrow="Chore Board"
+        title="The S#!% List"
+      />
       <div className="board-scroll">
         <div className="board-grid">
           {taskStatuses.map((status) => {
-            const tasks = getTaskColumnOrder(props.tasks, status);
+            const tasks = getTaskColumnOrder(props.visibleTasks, status);
 
             return (
               <SurfaceCard className="board-column gap-0 py-0" key={status}>
