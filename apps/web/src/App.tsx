@@ -31,6 +31,7 @@ import {
 import {
   CalendarDays,
   CalendarPlus2,
+  X,
   Menu,
   Plus,
   Tag,
@@ -1631,8 +1632,9 @@ function BoardColumn(props: {
           </Badge>
         </div>
         {props.canAdmin && props.status === "To Do" ? (
-          <Button onClick={props.onCreateTask} size="sm" type="button" variant="outline">
-            New Task
+          <Button onClick={props.onCreateTask} size="icon" type="button" variant="outline">
+            <Plus className="size-4" />
+            <span className="sr-only">New Task</span>
           </Button>
         ) : null}
       </header>
@@ -2100,8 +2102,9 @@ function TaskSheet(props: {
               </p>
             )}
           </div>
-          <Button className="rounded-full" onClick={handleClose} size="sm" type="button" variant="outline">
-            Close
+          <Button className="rounded-full" onClick={handleClose} size="icon" type="button" variant="outline">
+            <X className="size-4" />
+            <span className="sr-only">Close</span>
           </Button>
         </header>
 
