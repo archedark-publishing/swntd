@@ -218,6 +218,28 @@ function createTaskDraft(task?: TaskDetail | null): TaskDraft {
   };
 }
 
+function buildTaskSavePayload(draft: TaskDraft) {
+  return {
+    aiAssistanceEnabled: draft.aiAssistanceEnabled,
+    assigneeUserId: draft.assigneeUserId || null,
+    checklistItems: draft.checklistItems
+      .filter((item) => item.body.trim())
+      .map((item) => ({
+        body: item.body.trim(),
+        isCompleted: item.isCompleted
+      })),
+    description: draft.description.trim(),
+    dueOn: draft.dueOn || null,
+    dueTime: draft.dueTime || null,
+    labelIds: [...draft.labelIds].sort(),
+    title: draft.title.trim()
+  };
+}
+
+function serializeTaskDraft(draft: TaskDraft) {
+  return JSON.stringify(buildTaskSavePayload(draft));
+}
+
 function createTemplateDraft(template?: RecurringTemplate | null): TemplateDraft {
   if (!template) {
     return {
@@ -608,18 +630,22 @@ export function App() {
   async function runMutation<T>(
     action: () => Promise<T>,
     successMessage: string,
-    options?: { closeTaskSheet?: boolean }
+    options?: { closeTaskSheet?: boolean; silentSuccess?: boolean; skipRefresh?: boolean }
   ) {
     try {
       const result = await action();
-      toast.success(successMessage);
+      if (!options?.silentSuccess) {
+        toast.success(successMessage);
+      }
 
       if (options?.closeTaskSheet) {
         setIsTaskSheetOpen(false);
         setIsCreatingTask(false);
       }
 
-      await refreshApp({ background: true });
+      if (!options?.skipRefresh) {
+        await refreshApp({ background: true });
+      }
       return result;
     } catch (error) {
       showErrorToast(
@@ -654,51 +680,75 @@ export function App() {
     setIsTaskSheetOpen(true);
   }
 
-  function openNewTask() {
-    setSelectedTaskId(null);
-    setSelectedTask(null);
-    setIsCreatingTask(true);
-    setIsTaskSheetOpen(true);
+  async function createTaskFromBoardTitle(title: string) {
+    const trimmedTitle = title.trim();
+
+    if (!trimmedTitle) {
+      return false;
+    }
+
+    const created = await runMutation(
+      () =>
+        api.createTask({
+          aiAssistanceEnabled: false,
+          assigneeUserId: null,
+          checklistItems: [],
+          description: "",
+          dueOn: null,
+          dueTime: null,
+          labelIds: [],
+          title: trimmedTitle
+        }),
+      "Task added to the ledger."
+    );
+
+    return Boolean(created);
   }
 
-  async function handleTaskSubmit(draft: TaskDraft) {
-    const payload = {
-      aiAssistanceEnabled: draft.aiAssistanceEnabled,
-      assigneeUserId: draft.assigneeUserId || null,
-      checklistItems: draft.checklistItems
-        .filter((item) => item.body.trim())
-        .map((item) => ({
-          body: item.body.trim(),
-          isCompleted: item.isCompleted
-        })),
-      description: draft.description.trim(),
-      dueOn: draft.dueOn || null,
-      dueTime: draft.dueTime || null,
-      labelIds: draft.labelIds,
-      title: draft.title.trim()
-    };
+  async function handleTaskSubmit(
+    draft: TaskDraft,
+    options?: { silentSuccess?: boolean }
+  ) {
+    const payload = buildTaskSavePayload(draft);
 
     if (isCreatingTask) {
-      await runMutation(async () => {
+      return runMutation(async () => {
         const created = await api.createTask(payload);
 
         setSelectedTaskId(created.item.id);
+        return created.item;
       }, "Task added to the ledger.", { closeTaskSheet: true });
-
-      return;
     }
 
     if (!selectedTask) {
-      return;
+      return null;
     }
 
-    await runMutation(
-      () =>
-        api.updateTask(selectedTask.id, {
+    return runMutation(
+      async () => {
+        const updated = await api.updateTask(selectedTask.id, {
           ...payload,
           expectedRevision: selectedTask.revision
-        }),
-      "Task details updated."
+        });
+
+        setSelectedTask(updated.item);
+        setSnapshot((current) => ({
+          ...current,
+          activeTasks: current.activeTasks.map((task) =>
+            task.id === updated.item.id ? updated.item : task
+          ),
+          archivedTasks: current.archivedTasks.map((task) =>
+            task.id === updated.item.id ? updated.item : task
+          )
+        }));
+
+        return updated.item;
+      },
+      "Task details updated.",
+      {
+        ...(options?.silentSuccess ? { silentSuccess: true } : {}),
+        skipRefresh: true
+      }
     );
   }
 
@@ -1035,7 +1085,7 @@ export function App() {
               allTasks={activeTasks}
               canAdmin={canAdmin}
               isFilteredToActor={onlyMyTasks}
-              onCreateTask={openNewTask}
+              onCreateTask={createTaskFromBoardTitle}
               onDropTask={handleTaskDrop}
               onOpenTask={openTask}
               onQuickMove={handleQuickMove}
@@ -1174,7 +1224,7 @@ function BoardView(props: {
   allTasks: TaskListItem[];
   canAdmin: boolean;
   isFilteredToActor: boolean;
-  onCreateTask: () => void;
+  onCreateTask: (title: string) => Promise<boolean>;
   onDropTask: (input: {
     targetIndex: number;
     targetStatus: TaskStatus;
@@ -1191,6 +1241,9 @@ function BoardView(props: {
     targetIndex: number;
     targetStatus: TaskStatus;
   } | null>(null);
+  const [inlineTaskTitle, setInlineTaskTitle] = useState("");
+  const [isInlineTaskOpen, setIsInlineTaskOpen] = useState(false);
+  const [isInlineTaskPending, setIsInlineTaskPending] = useState(false);
   const taskNodeMapRef = useRef(new Map<string, HTMLDivElement>());
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -1206,6 +1259,31 @@ function BoardView(props: {
     activeTaskId === null
       ? null
       : props.allTasks.find((task) => task.id === activeTaskId) ?? null;
+
+  async function commitInlineTask() {
+    if (isInlineTaskPending) {
+      return;
+    }
+
+    const title = inlineTaskTitle.trim();
+
+    if (!title) {
+      setInlineTaskTitle("");
+      setIsInlineTaskOpen(false);
+      return;
+    }
+
+    setIsInlineTaskPending(true);
+
+    const created = await props.onCreateTask(title);
+
+    setIsInlineTaskPending(false);
+
+    if (created) {
+      setInlineTaskTitle("");
+      setIsInlineTaskOpen(false);
+    }
+  }
 
   function setTaskNode(taskId: string, node: HTMLDivElement | null) {
     if (!node) {
@@ -1395,9 +1473,27 @@ function BoardView(props: {
               <BoardColumn
                 aiAssistanceLabel={props.aiAssistanceLabel}
                 canAdmin={props.canAdmin}
+                inlineTaskTitle={inlineTaskTitle}
+                isInlineTaskOpen={isInlineTaskOpen}
+                isInlineTaskPending={isInlineTaskPending}
                 items={renderItems}
                 key={status}
-                onCreateTask={props.onCreateTask}
+                onChangeInlineTaskTitle={setInlineTaskTitle}
+                onCommitInlineTask={() => {
+                  void commitInlineTask();
+                }}
+                onCreateTask={() => {
+                  setInlineTaskTitle("");
+                  setIsInlineTaskOpen(true);
+                }}
+                onDismissInlineTask={() => {
+                  if (isInlineTaskPending) {
+                    return;
+                  }
+
+                  setInlineTaskTitle("");
+                  setIsInlineTaskOpen(false);
+                }}
                 onOpenTask={props.onOpenTask}
                 onQuickMove={props.onQuickMove}
                 onReorder={props.onReorder}
@@ -1435,11 +1531,17 @@ function BoardView(props: {
 function BoardColumn(props: {
   aiAssistanceLabel: string;
   canAdmin: boolean;
+  inlineTaskTitle: string;
+  isInlineTaskOpen: boolean;
+  isInlineTaskPending: boolean;
   items: Array<
     | { kind: "placeholder"; task: TaskListItem }
     | { kind: "task"; task: TaskListItem }
   >;
+  onChangeInlineTaskTitle: (value: string) => void;
+  onCommitInlineTask: () => void;
   onCreateTask: () => void;
+  onDismissInlineTask: () => void;
   onOpenTask: (taskId: string) => void;
   onQuickMove: (task: TaskListItem, direction: -1 | 1) => Promise<void>;
   onRegisterTaskNode: (taskId: string, node: HTMLDivElement | null) => void;
@@ -1473,7 +1575,16 @@ function BoardColumn(props: {
         strategy={verticalListSortingStrategy}
       >
         <div className="column-stack" ref={setNodeRef}>
-          {props.items.length === 0 ? (
+          {props.status === "To Do" && props.isInlineTaskOpen ? (
+            <InlineTaskComposer
+              isPending={props.isInlineTaskPending}
+              onBlur={props.onCommitInlineTask}
+              onCancel={props.onDismissInlineTask}
+              onChange={props.onChangeInlineTaskTitle}
+              title={props.inlineTaskTitle}
+            />
+          ) : null}
+          {props.items.length === 0 && !(props.status === "To Do" && props.isInlineTaskOpen) ? (
             <EmptyStateCard message="Nothing resting here." />
           ) : null}
           {props.items.map((item, index) =>
@@ -1508,6 +1619,48 @@ function BoardColumn(props: {
           )}
         </div>
       </SortableContext>
+    </SurfaceCard>
+  );
+}
+
+function InlineTaskComposer(props: {
+  isPending: boolean;
+  onBlur: () => void;
+  onCancel: () => void;
+  onChange: (value: string) => void;
+  title: string;
+}) {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  return (
+    <SurfaceCard className="task-card task-card-composer gap-0 py-0">
+      <div className="task-card-main task-card-main-composer">
+        <input
+          className="task-inline-input"
+          disabled={props.isPending}
+          onBlur={props.onBlur}
+          onChange={(event) => props.onChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              inputRef.current?.blur();
+              return;
+            }
+
+            if (event.key === "Escape") {
+              event.preventDefault();
+              props.onCancel();
+            }
+          }}
+          placeholder="What needs doing?"
+          ref={inputRef}
+          value={props.title}
+        />
+      </div>
     </SurfaceCard>
   );
 }
@@ -1710,7 +1863,10 @@ function TaskSheet(props: {
   onCalendarAction: (task: TaskDetail, kind: "google" | "ics") => void;
   onClose: () => void;
   onDownloadAttachment: (attachment: Attachment) => Promise<void>;
-  onSave: (draft: TaskDraft) => Promise<void>;
+  onSave: (
+    draft: TaskDraft,
+    options?: { silentSuccess?: boolean }
+  ) => Promise<TaskDetail | null>;
   onStatusChange: (task: TaskDetail, status: TaskStatus) => Promise<void>;
   onUnarchive: (task: TaskDetail) => Promise<void>;
   onUploadAttachment: (task: TaskDetail, file: File) => Promise<void>;
@@ -1722,18 +1878,111 @@ function TaskSheet(props: {
   const [draft, setDraft] = useState<TaskDraft>(() => createTaskDraft(null));
   const [commentBody, setCommentBody] = useState("");
   const [linkDraft, setLinkDraft] = useState({ name: "", url: "" });
+  const [autosaveState, setAutosaveState] = useState<"idle" | "saving" | "saved">("idle");
+  const lastServerDraftKeyRef = useRef(serializeTaskDraft(createTaskDraft(null)));
+  const currentTaskIdRef = useRef<string | null>(null);
+  const autosaveResetRef = useRef<number | null>(null);
+  const submitAutosave = useEffectEvent(async (nextDraft: TaskDraft) => {
+    setAutosaveState("saving");
+
+    const savedTask = await props.onSave(nextDraft, { silentSuccess: true });
+
+    if (!savedTask) {
+      setAutosaveState("idle");
+      return;
+    }
+
+    lastServerDraftKeyRef.current = serializeTaskDraft(createTaskDraft(savedTask));
+    setAutosaveState("saved");
+  });
 
   useEffect(() => {
-    setDraft(createTaskDraft(props.variant === "detail" ? props.task : null));
+    const nextDraft = createTaskDraft(props.variant === "detail" ? props.task : null);
+    const nextDraftKey = serializeTaskDraft(nextDraft);
+    const isNewTask = currentTaskIdRef.current !== props.task?.id;
+
+    if (props.variant === "detail") {
+      setDraft((current) => {
+        const currentDraftKey = serializeTaskDraft(current);
+
+        if (isNewTask || currentDraftKey === lastServerDraftKeyRef.current) {
+          return nextDraft;
+        }
+
+        return current;
+      });
+
+      currentTaskIdRef.current = props.task?.id ?? null;
+      lastServerDraftKeyRef.current = nextDraftKey;
+      if (isNewTask) {
+        setAutosaveState("idle");
+      }
+    } else {
+      currentTaskIdRef.current = null;
+      lastServerDraftKeyRef.current = nextDraftKey;
+      setDraft(nextDraft);
+      setAutosaveState("idle");
+    }
+
     setCommentBody("");
     setLinkDraft({ name: "", url: "" });
   }, [props.task, props.variant]);
+
+  useEffect(() => {
+    if (autosaveState !== "saved") {
+      return;
+    }
+
+    autosaveResetRef.current = window.setTimeout(() => {
+      setAutosaveState("idle");
+    }, 1400);
+
+    return () => {
+      if (autosaveResetRef.current) {
+        window.clearTimeout(autosaveResetRef.current);
+      }
+    };
+  }, [autosaveState]);
+
+  useEffect(() => {
+    if (props.variant !== "detail" || !props.task || props.isSavingDisabled) {
+      return;
+    }
+
+    const serverDraftKey = serializeTaskDraft(createTaskDraft(props.task));
+    const currentDraftKey = serializeTaskDraft(draft);
+
+    if (currentDraftKey === serverDraftKey || !draft.title.trim()) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      void submitAutosave(draft);
+    }, 700);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [draft, props.isSavingDisabled, props.task, props.variant, submitAutosave]);
 
   if (!props.isOpen) {
     return null;
   }
 
   const currentTask = props.variant === "detail" ? props.task : null;
+  const hasUnsavedChanges =
+    props.variant === "detail" &&
+    !!currentTask &&
+    draft.title.trim().length > 0 &&
+    serializeTaskDraft(draft) !== serializeTaskDraft(createTaskDraft(currentTask));
+
+  function handleClose() {
+    if (hasUnsavedChanges) {
+      void props.onSave(draft, { silentSuccess: true });
+    }
+
+    props.onClose();
+  }
 
   return (
     <div className="sheet-backdrop" role="presentation">
@@ -1741,7 +1990,22 @@ function TaskSheet(props: {
         <header className="sheet-header">
           <div className="sheet-header-copy">
             <p className="eyebrow">{props.variant === "create" ? "New Task" : "Task Detail"}</p>
-            <h2>{props.variant === "create" ? "Add Something to the Board" : currentTask?.title}</h2>
+            {props.variant === "create" ? (
+              <h2>Add Something to the Board</h2>
+            ) : (
+              <input
+                className="sheet-title-input"
+                disabled={props.isSavingDisabled}
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    title: event.target.value
+                  }))
+                }
+                placeholder="What needs doing?"
+                value={draft.title}
+              />
+            )}
             {currentTask ? (
               <div className="sheet-summary">
                 <Badge className="sheet-summary-badge" variant="secondary">
@@ -1755,6 +2019,13 @@ function TaskSheet(props: {
                     {formatDate(currentTask.dueOn, currentTask.dueTime)}
                   </Badge>
                 ) : null}
+                <span className="sheet-autosave-status" role="status">
+                  {autosaveState === "saving"
+                    ? "Saving..."
+                    : autosaveState === "saved"
+                      ? "Saved"
+                      : "Autosaves"}
+                </span>
               </div>
             ) : (
               <p className="section-copy">
@@ -1762,7 +2033,7 @@ function TaskSheet(props: {
               </p>
             )}
           </div>
-          <Button className="rounded-full" onClick={props.onClose} size="sm" type="button" variant="outline">
+          <Button className="rounded-full" onClick={handleClose} size="sm" type="button" variant="outline">
             Close
           </Button>
         </header>
@@ -1777,7 +2048,10 @@ function TaskSheet(props: {
             onSubmit={() => {
               void props.onSave(draft);
             }}
-            submitLabel={props.variant === "create" ? "Create Task" : "Save Changes"}
+            variant={props.variant}
+            showSubmitButton={props.variant === "create"}
+            showTitleField={props.variant === "create"}
+            submitLabel="Create Task"
             users={props.users}
           />
 
@@ -2047,25 +2321,30 @@ function TaskForm(props: {
   labels: Label[];
   onChange: (draft: TaskDraft) => void;
   onSubmit: () => void;
+  showSubmitButton: boolean;
+  showTitleField: boolean;
   submitLabel: string;
   users: UserRef[];
+  variant: "create" | "detail";
 }) {
   return (
     <section className="sheet-section">
       <div className="form-grid">
-        <FormField className="wide" label="Title">
-          <FormInput
-            disabled={!props.canEdit}
-            onChange={(event) =>
-              props.onChange({
-                ...props.draft,
-                title: event.target.value
-              })
-            }
-            placeholder="What needs doing?"
-            value={props.draft.title}
-          />
-        </FormField>
+        {props.showTitleField ? (
+          <FormField className="wide" label="Title">
+            <FormInput
+              disabled={!props.canEdit}
+              onChange={(event) =>
+                props.onChange({
+                  ...props.draft,
+                  title: event.target.value
+                })
+              }
+              placeholder="What needs doing?"
+              value={props.draft.title}
+            />
+          </FormField>
+        ) : null}
 
         <FormField className="wide" label="Description">
           <FormTextarea
@@ -2102,167 +2381,177 @@ function TaskForm(props: {
           value={props.draft.assigneeUserId}
         />
 
-        <FormField label="Due date">
-          <FormInput
-            disabled={!props.canEdit}
-            onChange={(event) =>
-              props.onChange({
-                ...props.draft,
-                dueOn: event.target.value
-              })
-            }
-            type="date"
-            value={props.draft.dueOn}
-          />
-        </FormField>
-
-        <FormField label="Due time">
-          <FormInput
-            disabled={!props.canEdit}
-            onChange={(event) =>
-              props.onChange({
-                ...props.draft,
-                dueTime: event.target.value
-              })
-            }
-            type="time"
-            value={props.draft.dueTime}
-          />
-        </FormField>
-
-        <ToggleField
-          checked={props.draft.aiAssistanceEnabled}
-          disabled={!props.canEdit}
-          label={props.aiAssistanceToggleLabel}
-          onCheckedChange={(value) =>
-            props.onChange({
-              ...props.draft,
-              aiAssistanceEnabled: value
-            })
-          }
-        />
-      </div>
-
-      <div className="sheet-section">
-        <SectionHeading
-          actions={
-            <Button
-              disabled={!props.canEdit}
-              onClick={() =>
-                props.onChange({
-                  ...props.draft,
-                  checklistItems: [
-                    ...props.draft.checklistItems,
-                    {
-                      body: "",
-                      clientId: crypto.randomUUID(),
-                      isCompleted: false
-                    }
-                  ]
-                })
-              }
-              size="sm"
-              type="button"
-              variant="outline"
-            >
-              Add Item
-            </Button>
-          }
-          compact
-          eyebrow="Checklist"
-          title="Subtasks"
-          titleAs="h3"
-        />
-        <div className="checklist-editor">
-          {props.draft.checklistItems.map((item, index) => (
-            <div className="checklist-row" key={item.clientId}>
-              <Checkbox
-                checked={item.isCompleted}
-                disabled={!props.canEdit}
-                onCheckedChange={(checked) =>
-                  props.onChange({
-                    ...props.draft,
-                    checklistItems: props.draft.checklistItems.map((entry, entryIndex) =>
-                      entryIndex === index
-                        ? { ...entry, isCompleted: checked === true }
-                        : entry
-                    )
-                  })
-                }
-              />
+        {props.variant === "detail" ? (
+          <>
+            <FormField label="Due date">
               <FormInput
                 disabled={!props.canEdit}
                 onChange={(event) =>
                   props.onChange({
                     ...props.draft,
-                    checklistItems: props.draft.checklistItems.map((entry, entryIndex) =>
-                      entryIndex === index
-                        ? { ...entry, body: event.target.value }
-                        : entry
-                    )
+                    dueOn: event.target.value
                   })
                 }
-                placeholder="Subtask description"
-                value={item.body}
+                type="date"
+                value={props.draft.dueOn}
               />
-              <Button
+            </FormField>
+
+            <FormField label="Due time">
+              <FormInput
                 disabled={!props.canEdit}
-                onClick={() =>
+                onChange={(event) =>
                   props.onChange({
                     ...props.draft,
-                    checklistItems: props.draft.checklistItems.filter(
-                      (_, entryIndex) => entryIndex !== index
-                    )
+                    dueTime: event.target.value
                   })
                 }
-                size="sm"
-                type="button"
-                variant="ghost"
-              >
-                Remove
-              </Button>
-            </div>
-          ))}
-          {props.draft.checklistItems.length === 0 ? (
-            <EmptyStateCard message="No checklist items yet." />
-          ) : null}
-        </div>
-      </div>
+                type="time"
+                value={props.draft.dueTime}
+              />
+            </FormField>
 
-      <div className="sheet-section">
-        <SectionHeading compact eyebrow="Labels" title="Categories" titleAs="h3" />
-        <div className="checkbox-grid">
-          {props.labels.map((label) => (
-            <ChoiceChip
-              checked={props.draft.labelIds.includes(label.id)}
+            <ToggleField
+              checked={props.draft.aiAssistanceEnabled}
               disabled={!props.canEdit}
-              key={label.id}
-              label={label.name}
-              onCheckedChange={(checked) =>
+              label={props.aiAssistanceToggleLabel}
+              onCheckedChange={(value) =>
                 props.onChange({
                   ...props.draft,
-                  labelIds: checked === true
-                    ? [...props.draft.labelIds, label.id]
-                    : props.draft.labelIds.filter((entry) => entry !== label.id)
+                  aiAssistanceEnabled: value
                 })
               }
             />
-          ))}
-          {props.labels.length === 0 ? (
-            <EmptyStateCard message="Create labels in Settings to use them here." />
-          ) : null}
-        </div>
+          </>
+        ) : null}
       </div>
 
-      <div className="sheet-actions">
-        <Button
-          disabled={!props.canEdit || !props.draft.title.trim()}
-          onClick={props.onSubmit}
-          type="button"
-        >
-          {props.submitLabel}
-        </Button>
-      </div>
+      {props.variant === "detail" ? (
+        <>
+          <div className="sheet-section">
+            <SectionHeading
+              actions={
+                <Button
+                  disabled={!props.canEdit}
+                  onClick={() =>
+                    props.onChange({
+                      ...props.draft,
+                      checklistItems: [
+                        ...props.draft.checklistItems,
+                        {
+                          body: "",
+                          clientId: crypto.randomUUID(),
+                          isCompleted: false
+                        }
+                      ]
+                    })
+                  }
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  Add Item
+                </Button>
+              }
+              compact
+              eyebrow="Checklist"
+              title="Subtasks"
+              titleAs="h3"
+            />
+            <div className="checklist-editor">
+              {props.draft.checklistItems.map((item, index) => (
+                <div className="checklist-row" key={item.clientId}>
+                  <Checkbox
+                    checked={item.isCompleted}
+                    disabled={!props.canEdit}
+                    onCheckedChange={(checked) =>
+                      props.onChange({
+                        ...props.draft,
+                        checklistItems: props.draft.checklistItems.map((entry, entryIndex) =>
+                          entryIndex === index
+                            ? { ...entry, isCompleted: checked === true }
+                            : entry
+                        )
+                      })
+                    }
+                  />
+                  <FormInput
+                    disabled={!props.canEdit}
+                    onChange={(event) =>
+                      props.onChange({
+                        ...props.draft,
+                        checklistItems: props.draft.checklistItems.map((entry, entryIndex) =>
+                          entryIndex === index
+                            ? { ...entry, body: event.target.value }
+                            : entry
+                        )
+                      })
+                    }
+                    placeholder="Subtask description"
+                    value={item.body}
+                  />
+                  <Button
+                    disabled={!props.canEdit}
+                    onClick={() =>
+                      props.onChange({
+                        ...props.draft,
+                        checklistItems: props.draft.checklistItems.filter(
+                          (_, entryIndex) => entryIndex !== index
+                        )
+                      })
+                    }
+                    size="sm"
+                    type="button"
+                    variant="ghost"
+                  >
+                    Remove
+                  </Button>
+                </div>
+              ))}
+              {props.draft.checklistItems.length === 0 ? (
+                <EmptyStateCard message="No checklist items yet." />
+              ) : null}
+            </div>
+          </div>
+
+          <div className="sheet-section">
+            <SectionHeading compact eyebrow="Labels" title="Categories" titleAs="h3" />
+            <div className="checkbox-grid">
+              {props.labels.map((label) => (
+                <ChoiceChip
+                  checked={props.draft.labelIds.includes(label.id)}
+                  disabled={!props.canEdit}
+                  key={label.id}
+                  label={label.name}
+                  onCheckedChange={(checked) =>
+                    props.onChange({
+                      ...props.draft,
+                      labelIds: checked === true
+                        ? [...props.draft.labelIds, label.id]
+                        : props.draft.labelIds.filter((entry) => entry !== label.id)
+                    })
+                  }
+                />
+              ))}
+              {props.labels.length === 0 ? (
+                <EmptyStateCard message="Create labels in Settings to use them here." />
+              ) : null}
+            </div>
+          </div>
+        </>
+      ) : null}
+
+      {props.showSubmitButton ? (
+        <div className="sheet-actions">
+          <Button
+            disabled={!props.canEdit || !props.draft.title.trim()}
+            onClick={props.onSubmit}
+            type="button"
+          >
+            {props.submitLabel}
+          </Button>
+        </div>
+      ) : null}
     </section>
   );
 }

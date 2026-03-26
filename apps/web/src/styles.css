@@ -467,6 +467,29 @@ a {
   max-width: 34rem;
 }
 
+.sheet-title-input {
+  width: 100%;
+  margin: 0.18rem 0 0.5rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--bg-ink);
+  font-family: var(--font-display);
+  font-size: clamp(2.25rem, 4vw, 4.6rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 0.95;
+  outline: none;
+}
+
+.sheet-title-input::placeholder {
+  color: rgb(47 33 22 / 0.42);
+}
+
+.sheet-title-input:disabled {
+  opacity: 0.72;
+}
+
 .section-heading-actions,
 .header-action-row {
   display: flex;
@@ -595,6 +618,11 @@ a {
   cursor: grab;
 }
 
+.task-card-composer,
+.task-card-composer .task-card-main {
+  cursor: text;
+}
+
 .task-sortable-shell-dragging,
 .task-card-dragging {
   cursor: grabbing;
@@ -648,6 +676,27 @@ a {
 .task-card-main:focus-visible {
   outline: none;
   background: rgb(255 255 255 / 0.42);
+}
+
+.task-card-main-composer {
+  padding: 0.9rem 1rem;
+}
+
+.task-inline-input {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--bg-ink);
+  font-family: var(--font-display);
+  font-size: 1.2rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  outline: none;
+}
+
+.task-inline-input::placeholder {
+  color: rgb(47 33 22 / 0.42);
 }
 
 .task-card-header {
@@ -750,6 +799,15 @@ a {
   display: flex;
   flex-wrap: wrap;
   gap: 0.55rem;
+}
+
+.sheet-autosave-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2rem;
+  color: rgb(47 33 22 / 0.62);
+  font-size: 0.82rem;
+  letter-spacing: 0.02em;
 }
 
 .sheet-summary-badge {
