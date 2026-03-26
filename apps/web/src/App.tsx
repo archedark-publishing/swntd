@@ -912,6 +912,8 @@ export function App() {
       <div className="grain" />
       <div className="app-frame">
         <AppNavigation
+          actorDisplayName={snapshot.actor?.displayName ?? "Loading..."}
+          actorRoleLabel={snapshot.actor ? formatRoleLabel(snapshot.actor) : "guest"}
           isOpen={isNavOpen}
           mainItems={navItems.map((item) => ({ id: item.id, label: item.label }))}
           onClose={() => setIsNavOpen(false)}
@@ -921,8 +923,6 @@ export function App() {
 
         <div className="app-content">
           <AppChrome
-            actorDisplayName={snapshot.actor?.displayName ?? "Loading..."}
-            actorRoleLabel={snapshot.actor ? formatRoleLabel(snapshot.actor) : "guest"}
             isManualRefreshPending={isManualRefreshPending}
             onOpenNavigation={() => setIsNavOpen(true)}
             onRefresh={() => {

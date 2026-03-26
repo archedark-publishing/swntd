@@ -7,8 +7,6 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
 export function AppChrome(props: {
-  actorDisplayName: string;
-  actorRoleLabel: string;
   isManualRefreshPending: boolean;
   onOpenNavigation: () => void;
   onRefresh: () => void;
@@ -44,18 +42,14 @@ export function AppChrome(props: {
           <RefreshCw className={cn("size-4", props.isManualRefreshPending && "animate-spin")} />
           {props.isManualRefreshPending ? "Refreshing..." : "Refresh"}
         </Button>
-        <div className="actor-chip border border-border/50 bg-white/70 shadow-sm backdrop-blur-sm">
-          <strong>{props.actorDisplayName}</strong>
-          <Badge className="w-fit" variant="outline">
-            {props.actorRoleLabel}
-          </Badge>
-        </div>
       </div>
     </header>
   );
 }
 
 export function AppNavigation(props: {
+  actorDisplayName: string;
+  actorRoleLabel: string;
   isOpen: boolean;
   mainItems: Array<{ id: string; label: string; meta?: string }>;
   onClose: () => void;
@@ -118,6 +112,18 @@ export function AppNavigation(props: {
             </Button>
           ))}
         </nav>
+
+        <div className="app-sidebar-footer">
+          <div className="app-sidebar-footer-copy">
+            <p className="eyebrow">Signed In As</p>
+          </div>
+          <div className="actor-chip border border-border/50 bg-white/70 shadow-sm backdrop-blur-sm">
+            <strong>{props.actorDisplayName}</strong>
+            <Badge className="w-fit" variant="outline">
+              {props.actorRoleLabel}
+            </Badge>
+          </div>
+        </div>
       </aside>
     </>
   );

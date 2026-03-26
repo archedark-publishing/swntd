@@ -144,8 +144,8 @@ a {
   left: 0;
   bottom: 0;
   z-index: 45;
-  display: grid;
-  align-content: start;
+  display: flex;
+  flex-direction: column;
   gap: 1.2rem;
   width: min(86vw, 20rem);
   padding: 1.15rem;
@@ -191,6 +191,19 @@ a {
 .app-sidebar-nav {
   display: grid;
   gap: 0.6rem;
+}
+
+.app-sidebar-footer {
+  display: grid;
+  gap: 0.7rem;
+  margin-top: auto;
+  padding-top: 1rem;
+  border-top: 1px solid rgb(86 58 30 / 0.12);
+}
+
+.app-sidebar-footer-copy {
+  display: grid;
+  gap: 0.2rem;
 }
 
 .sidebar-nav-button {
