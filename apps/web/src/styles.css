@@ -935,9 +935,11 @@ a {
 }
 
 .settings-shell {
+  width: 100%;
   max-width: 95rem;
   margin: 0 auto;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 1rem;
 }
 
@@ -949,15 +951,36 @@ a {
 
 .settings-page-stack {
   min-width: 0;
+  min-height: clamp(34rem, 72vh, 46rem);
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.settings-page-stack > * {
+  height: 100%;
+  width: 100%;
 }
 
 .template-grid {
   display: grid;
   gap: 1rem;
+  min-height: 100%;
 }
 
 .template-list {
   align-content: start;
+  min-height: 0;
+}
+
+.template-editor {
+  min-height: 0;
+}
+
+.settings-card {
+  min-height: 100%;
+  width: 100%;
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 
 .template-row {
