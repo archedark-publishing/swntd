@@ -374,7 +374,7 @@ export function App() {
   const [selectedTask, setSelectedTask] = useState<TaskDetail | null>(null);
   const [isTaskSheetOpen, setIsTaskSheetOpen] = useState(false);
   const [isCreatingTask, setIsCreatingTask] = useState(false);
-  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
+  const [editingTemplateKey, setEditingTemplateKey] = useState<string | "new" | null>(null);
   const [editingUserKey, setEditingUserKey] = useState<string | "new-admin" | "new-service" | null>(null);
   const [archiveSearch, setArchiveSearch] = useState("");
   const deferredArchiveSearch = useDeferredValue(archiveSearch);
@@ -795,16 +795,20 @@ export function App() {
       title: draft.title.trim()
     };
 
-    if (editingTemplateId) {
+    if (editingTemplateKey && editingTemplateKey !== "new") {
       await runMutation(
-        () => api.updateRecurringTemplate(editingTemplateId, payload),
+        () => api.updateRecurringTemplate(editingTemplateKey, payload),
         "Recurring template updated."
       );
     } else {
-      await runMutation(
+      const created = await runMutation(
         () => api.createRecurringTemplate(payload),
         "Recurring template added."
       );
+
+      if (created) {
+        setEditingTemplateKey(created.item.id);
+      }
     }
   }
 
@@ -1001,19 +1005,23 @@ export function App() {
               onSaveTemplate={handleTemplateSave}
               onSaveUser={handleHouseholdUserSave}
               onSelectPage={handleSettingsPageChange}
-              onSelectTemplate={(templateId) => {
-                setEditingTemplateId(templateId);
+              onSelectTemplate={(templateKey) => {
+                setEditingTemplateKey(templateKey);
                 setSettingsPage("recurring");
               }}
               onSelectUser={(userKey) => {
                 setEditingUserKey(userKey);
                 setSettingsPage("household");
               }}
+              isTemplateEditorOpen={editingTemplateKey !== null}
+              isUserEditorOpen={editingUserKey !== null}
               recurringTemplates={snapshot.recurringTemplates}
               selectedTemplate={
-                snapshot.recurringTemplates.find(
-                  (template) => template.id === editingTemplateId
-                ) ?? null
+                editingTemplateKey && editingTemplateKey !== "new"
+                  ? snapshot.recurringTemplates.find(
+                      (template) => template.id === editingTemplateKey
+                    ) ?? null
+                  : null
               }
               selectedUser={selectedHouseholdUser}
               serviceTokensByUserId={snapshot.serviceTokensByUserId}
@@ -1856,6 +1864,8 @@ function TaskForm(props: {
 function SettingsView(props: {
   activePage: SettingsPage;
   canAdmin: boolean;
+  isTemplateEditorOpen: boolean;
+  isUserEditorOpen: boolean;
   labels: Label[];
   onCreateLabel: (input: { color: string; name: string }) => Promise<void>;
   onIssueServiceToken: (
@@ -1868,7 +1878,7 @@ function SettingsView(props: {
   onSaveTemplate: (draft: TemplateDraft) => Promise<void>;
   onSaveUser: (userId: string | null, draft: HouseholdUserDraft) => Promise<boolean>;
   onSelectPage: (page: SettingsPage) => void;
-  onSelectTemplate: (templateId: string | null) => void;
+  onSelectTemplate: (templateId: string | "new" | null) => void;
   onSelectUser: (userKey: string | "new-admin" | "new-service" | null) => void;
   recurringTemplates: RecurringTemplate[];
   selectedTemplate: RecurringTemplate | null;
@@ -2047,206 +2057,215 @@ function SettingsView(props: {
                 ))}
               </div>
               <div className="template-editor">
-                <div className="form-grid">
-                  <FormField label="Type">
-                    <FormInput
-                      disabled
-                      value={userDraft.mode === "admin" ? "Person" : "Assistant"}
-                    />
-                  </FormField>
-                  <FormField label="Display name">
-                    <FormInput
-                      onChange={(event) =>
-                        setUserDraft({
-                          ...userDraft,
-                          displayName: event.target.value
-                        })
-                      }
-                      value={userDraft.displayName}
-                    />
-                  </FormField>
-                  {userDraft.mode === "admin" ? (
-                    <FormField className="wide" label="Email">
-                      <FormInput
-                        onChange={(event) =>
-                          setUserDraft({
-                            ...userDraft,
-                            email: event.target.value
-                          })
-                        }
-                        placeholder="person@example.com"
-                        type="email"
-                        value={userDraft.email}
-                      />
-                    </FormField>
-                  ) : (
-                    <FormField className="wide" label="Service kind">
-                      <FormInput
-                        onChange={(event) =>
-                          setUserDraft({
-                            ...userDraft,
-                            serviceKind: event.target.value
-                          })
-                        }
-                        placeholder="assistant"
-                        value={userDraft.serviceKind}
-                      />
-                    </FormField>
-                  )}
-                </div>
-                <div className="sheet-actions">
-                  <Button
-                    disabled={
-                      isUserRemovePending ||
-                      isUserSavePending ||
-                      !userDraft.displayName.trim() ||
-                      (userDraft.mode === "admin"
-                        ? !userDraft.email.trim()
-                        : !userDraft.serviceKind.trim())
-                    }
-                    onClick={async () => {
-                      setIsUserSavePending(true);
-                      setUserActionMessage(null);
-                      const saved = await props.onSaveUser(props.selectedUser?.id ?? null, userDraft);
-
-                      setIsUserSavePending(false);
-
-                      if (saved) {
-                        setUserActionMessage(
-                          props.selectedUser ? "Actor saved." : "Actor created."
-                        );
-                      }
-                    }}
-                    type="button"
-                  >
-                    {isUserSavePending
-                      ? props.selectedUser
-                        ? "Saving..."
-                        : "Creating..."
-                      : props.selectedUser
-                        ? "Save Actor"
-                        : "Create Actor"}
-                  </Button>
-                  {props.selectedUser ? (
-                    <Button
-                      disabled={isUserRemovePending || isUserSavePending}
-                      onClick={async () => {
-                        const selectedUserId = props.selectedUser?.id;
-
-                        if (!selectedUserId) {
-                          return;
-                        }
-
-                        if (
-                          !window.confirm(
-                            "Remove this household actor permanently from the active cast? They will stay in task history, lose open assignments, and any assistant tokens will be revoked."
-                          )
-                        ) {
-                          return;
-                        }
-
-                        setIsUserRemovePending(true);
-                        setUserActionMessage(null);
-                        await props.onRemoveUser(selectedUserId);
-                        setIsUserRemovePending(false);
-                      }}
-                      size="sm"
-                      type="button"
-                      variant="ghost"
-                    >
-                      {isUserRemovePending ? "Removing..." : "Remove Actor"}
-                    </Button>
-                  ) : null}
-                </div>
-                {userActionMessage ? <EmptyStateCard message={userActionMessage} /> : null}
-                {props.selectedUser ? (
-                  <EmptyStateCard
-                    message="Removing an actor is permanent. They stay attached to past comments and history, but disappear from the household cast, cannot be assigned to anything new, and assistants lose any active tokens."
-                  />
-                ) : null}
-
-                {props.selectedUser?.role === "service" ? (
-                  <section className="sheet-section">
-                    <SectionHeading
-                      compact
-                      eyebrow="Assistant Access"
-                      title="Service Tokens"
-                      titleAs="h3"
-                    />
-                    <div className="sheet-actions">
-                      <FormField className="compact-field" label="Token name">
+                {props.isUserEditorOpen ? (
+                  <>
+                    <div className="form-grid">
+                      <FormField label="Type">
                         <FormInput
-                          onChange={(event) => setServiceTokenName(event.target.value)}
-                          placeholder="Primary assistant"
-                          value={serviceTokenName}
+                          disabled
+                          value={userDraft.mode === "admin" ? "Person" : "Assistant"}
                         />
                       </FormField>
+                      <FormField label="Display name">
+                        <FormInput
+                          onChange={(event) =>
+                            setUserDraft({
+                              ...userDraft,
+                              displayName: event.target.value
+                            })
+                          }
+                          value={userDraft.displayName}
+                        />
+                      </FormField>
+                      {userDraft.mode === "admin" ? (
+                        <FormField className="wide" label="Email">
+                          <FormInput
+                            onChange={(event) =>
+                              setUserDraft({
+                                ...userDraft,
+                                email: event.target.value
+                              })
+                            }
+                            placeholder="person@example.com"
+                            type="email"
+                            value={userDraft.email}
+                          />
+                        </FormField>
+                      ) : (
+                        <FormField className="wide" label="Service kind">
+                          <FormInput
+                            onChange={(event) =>
+                              setUserDraft({
+                                ...userDraft,
+                                serviceKind: event.target.value
+                              })
+                            }
+                            placeholder="assistant"
+                            value={userDraft.serviceKind}
+                          />
+                        </FormField>
+                      )}
+                    </div>
+                    <div className="sheet-actions">
                       <Button
                         disabled={
-                          !serviceTokenName.trim() || isUserRemovePending || isUserSavePending
+                          isUserRemovePending ||
+                          isUserSavePending ||
+                          !userDraft.displayName.trim() ||
+                          (userDraft.mode === "admin"
+                            ? !userDraft.email.trim()
+                            : !userDraft.serviceKind.trim())
                         }
                         onClick={async () => {
-                          const issued = await props.onIssueServiceToken(
-                            props.selectedUser!.id,
-                            serviceTokenName
+                          setIsUserSavePending(true);
+                          setUserActionMessage(null);
+                          const saved = await props.onSaveUser(
+                            props.selectedUser?.id ?? null,
+                            userDraft
                           );
 
-                          if (issued) {
-                            setIssuedServiceToken(issued.plainTextToken);
-                            setServiceTokenName("");
+                          setIsUserSavePending(false);
+
+                          if (saved) {
+                            setUserActionMessage(
+                              props.selectedUser ? "Actor saved." : "Actor created."
+                            );
                           }
                         }}
-                        size="sm"
                         type="button"
-                        variant="outline"
                       >
-                        Issue Token
+                        {isUserSavePending
+                          ? props.selectedUser
+                            ? "Saving..."
+                            : "Creating..."
+                          : props.selectedUser
+                            ? "Save Actor"
+                            : "Create Actor"}
                       </Button>
+                      {props.selectedUser ? (
+                        <Button
+                          disabled={isUserRemovePending || isUserSavePending}
+                          onClick={async () => {
+                            const selectedUserId = props.selectedUser?.id;
+
+                            if (!selectedUserId) {
+                              return;
+                            }
+
+                            if (
+                              !window.confirm(
+                                "Remove this household actor permanently from the active cast? They will stay in task history, lose open assignments, and any assistant tokens will be revoked."
+                              )
+                            ) {
+                              return;
+                            }
+
+                            setIsUserRemovePending(true);
+                            setUserActionMessage(null);
+                            await props.onRemoveUser(selectedUserId);
+                            setIsUserRemovePending(false);
+                          }}
+                          size="sm"
+                          type="button"
+                          variant="ghost"
+                        >
+                          {isUserRemovePending ? "Removing..." : "Remove Actor"}
+                        </Button>
+                      ) : null}
                     </div>
-                    {issuedServiceToken ? (
+                    {userActionMessage ? <EmptyStateCard message={userActionMessage} /> : null}
+                    {props.selectedUser ? (
                       <EmptyStateCard
-                        message={issuedServiceToken}
-                        title="Copy this token now:"
+                        message="Removing an actor is permanent. They stay attached to past comments and history, but disappear from the household cast, cannot be assigned to anything new, and assistants lose any active tokens."
                       />
                     ) : null}
-                    <div className="cast-list">
-                      {selectedServiceTokens.length === 0 ? (
-                        <EmptyStateCard message="No service tokens issued yet." />
-                      ) : null}
-                      {selectedServiceTokens.map((token) => (
-                        <InfoRow
-                          action={
-                            <Button
-                              disabled={Boolean(token.revokedAt)}
-                              onClick={() => {
-                                void props.onRevokeServiceToken(token.id);
-                              }}
-                              size="sm"
-                              type="button"
-                              variant="ghost"
+
+                    {props.selectedUser?.role === "service" ? (
+                      <section className="sheet-section">
+                        <SectionHeading
+                          compact
+                          eyebrow="Assistant Access"
+                          title="Service Tokens"
+                          titleAs="h3"
+                        />
+                        <div className="sheet-actions">
+                          <FormField className="compact-field" label="Token name">
+                            <FormInput
+                              onChange={(event) => setServiceTokenName(event.target.value)}
+                              placeholder="Primary assistant"
+                              value={serviceTokenName}
+                            />
+                          </FormField>
+                          <Button
+                            disabled={
+                              !serviceTokenName.trim() || isUserRemovePending || isUserSavePending
+                            }
+                            onClick={async () => {
+                              const issued = await props.onIssueServiceToken(
+                                props.selectedUser!.id,
+                                serviceTokenName
+                              );
+
+                              if (issued) {
+                                setIssuedServiceToken(issued.plainTextToken);
+                                setServiceTokenName("");
+                              }
+                            }}
+                            size="sm"
+                            type="button"
+                            variant="outline"
+                          >
+                            Issue Token
+                          </Button>
+                        </div>
+                        {issuedServiceToken ? (
+                          <EmptyStateCard
+                            message={issuedServiceToken}
+                            title="Copy this token now:"
+                          />
+                        ) : null}
+                        <div className="cast-list">
+                          {selectedServiceTokens.length === 0 ? (
+                            <EmptyStateCard message="No service tokens issued yet." />
+                          ) : null}
+                          {selectedServiceTokens.map((token) => (
+                            <InfoRow
+                              action={
+                                <Button
+                                  disabled={Boolean(token.revokedAt)}
+                                  onClick={() => {
+                                    void props.onRevokeServiceToken(token.id);
+                                  }}
+                                  size="sm"
+                                  type="button"
+                                  variant="ghost"
+                                >
+                                  {token.revokedAt ? "Revoked" : "Revoke"}
+                                </Button>
+                              }
+                              key={token.id}
                             >
-                              {token.revokedAt ? "Revoked" : "Revoke"}
-                            </Button>
-                          }
-                          key={token.id}
-                        >
-                          <div>
-                            <strong>{token.name}</strong>
-                            <span>
-                              Created {formatTimestamp(token.createdAt)}
-                              {token.lastUsedAt
-                                ? ` · Last used ${formatTimestamp(token.lastUsedAt)}`
-                                : " · Never used"}
-                              {token.revokedAt
-                                ? ` · Revoked ${formatTimestamp(token.revokedAt)}`
-                                : ""}
-                            </span>
-                          </div>
-                        </InfoRow>
-                      ))}
-                    </div>
-                  </section>
-                ) : null}
+                              <div>
+                                <strong>{token.name}</strong>
+                                <span>
+                                  Created {formatTimestamp(token.createdAt)}
+                                  {token.lastUsedAt
+                                    ? ` · Last used ${formatTimestamp(token.lastUsedAt)}`
+                                    : " · Never used"}
+                                  {token.revokedAt
+                                    ? ` · Revoked ${formatTimestamp(token.revokedAt)}`
+                                    : ""}
+                                </span>
+                              </div>
+                            </InfoRow>
+                          ))}
+                        </div>
+                      </section>
+                    ) : null}
+                  </>
+                ) : (
+                  <EmptyStateCard message="Choose someone from the cast or start a new person or assistant." />
+                )}
               </div>
             </div>
           </SurfaceCard>
@@ -2313,7 +2332,7 @@ function SettingsView(props: {
             <SectionHeading
               actions={
                 <Button
-                  onClick={() => props.onSelectTemplate(null)}
+                  onClick={() => props.onSelectTemplate("new")}
                   size="sm"
                   type="button"
                   variant="outline"
@@ -2340,15 +2359,19 @@ function SettingsView(props: {
                 ))}
               </div>
               <div className="template-editor">
-                <RecurringTemplateForm
-                  draft={templateDraft}
-                  labels={props.labels}
-                  onChange={setTemplateDraft}
-                  onSubmit={() => {
-                    void props.onSaveTemplate(templateDraft);
-                  }}
-                  users={props.users}
-                />
+                {props.isTemplateEditorOpen ? (
+                  <RecurringTemplateForm
+                    draft={templateDraft}
+                    labels={props.labels}
+                    onChange={setTemplateDraft}
+                    onSubmit={() => {
+                      void props.onSaveTemplate(templateDraft);
+                    }}
+                    users={props.users}
+                  />
+                ) : (
+                  <EmptyStateCard message="Choose a recurring template or start a new one." />
+                )}
               </div>
             </div>
           </SurfaceCard>
