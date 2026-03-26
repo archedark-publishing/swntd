@@ -27,7 +27,7 @@ import {
   useRef,
   useState
 } from "react";
-import { GripVertical, Menu } from "lucide-react";
+import { Menu } from "lucide-react";
 import {
   AppNavigation,
   EmptyStateCard,
@@ -1591,8 +1591,6 @@ type TaskCardProps = {
 };
 
 function TaskCard(props: TaskCardProps) {
-  const previousStatus = getStatusStep(props.task.status, -1);
-  const nextStatus = getStatusStep(props.task.status, 1);
   const taskDescription = props.task.description.trim();
   const hasChecklist = props.task.checklistProgress.total > 0;
   const hasComments = props.task.commentCount > 0;
@@ -1663,60 +1661,29 @@ function TaskCard(props: TaskCardProps) {
           </div>
         ) : null}
       </button>
-      {!props.task.archivedAt && !hideActions ? (
+      {!props.task.archivedAt && !hideActions && allowManualReorder ? (
         <div className="card-actions">
-          {allowManualReorder ? (
-            <>
-              <Button
-                disabled={props.index === 0}
-                onClick={() => {
-                  void props.onReorder(props.task, -1);
-                }}
-                size="sm"
-                type="button"
-                variant="ghost"
-              >
-                Move Up
-              </Button>
-              <Button
-                disabled={props.index === props.total - 1}
-                onClick={() => {
-                  void props.onReorder(props.task, 1);
-                }}
-                size="sm"
-                type="button"
-                variant="ghost"
-              >
-                Move Down
-              </Button>
-            </>
-          ) : (
-            <div className="drag-chip">
-              <GripVertical className="size-4" />
-              Drag to reorder
-            </div>
-          )}
           <Button
-            disabled={!previousStatus}
+            disabled={props.index === 0}
             onClick={() => {
-              void props.onQuickMove(props.task, -1);
+              void props.onReorder(props.task, -1);
             }}
             size="sm"
             type="button"
-            variant="outline"
+            variant="ghost"
           >
-            Back
+            Move Up
           </Button>
           <Button
-            disabled={!nextStatus}
+            disabled={props.index === props.total - 1}
             onClick={() => {
-              void props.onQuickMove(props.task, 1);
+              void props.onReorder(props.task, 1);
             }}
             size="sm"
             type="button"
-            variant="outline"
+            variant="ghost"
           >
-            Advance
+            Move Down
           </Button>
         </div>
       ) : null}

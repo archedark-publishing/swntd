@@ -662,20 +662,6 @@ a {
   padding-top: 0.8rem;
 }
 
-.drag-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  min-height: 2.25rem;
-  padding: 0.45rem 0.8rem;
-  border-radius: 999px;
-  background: rgb(255 255 255 / 0.58);
-  border: 1px solid rgb(86 58 30 / 0.12);
-  color: rgb(47 33 22 / 0.72);
-  font-size: 0.9rem;
-  font-weight: 500;
-}
-
 .card-actions button,
 .sheet-actions button,
 .sheet-actions a {
