@@ -923,9 +923,7 @@ export function App() {
           <AppChrome
             actorDisplayName={snapshot.actor?.displayName ?? "Loading..."}
             actorRoleLabel={snapshot.actor ? formatRoleLabel(snapshot.actor) : "guest"}
-            canAdmin={canAdmin}
             isManualRefreshPending={isManualRefreshPending}
-            onCreateTask={openNewTask}
             onOpenNavigation={() => setIsNavOpen(true)}
             onRefresh={() => {
               startTransition(() => {
@@ -944,6 +942,8 @@ export function App() {
           {!isBooting && view === "board" ? (
             <BoardView
               aiAssistanceLabel={getAiAssistanceLabel(snapshot.users)}
+              canAdmin={canAdmin}
+              onCreateTask={openNewTask}
               tasks={activeTasks}
               onOpenTask={openTask}
               onQuickMove={handleQuickMove}
@@ -1090,6 +1090,8 @@ export function App() {
 
 function BoardView(props: {
   aiAssistanceLabel: string;
+  canAdmin: boolean;
+  onCreateTask: () => void;
   onOpenTask: (taskId: string) => void;
   onQuickMove: (task: TaskListItem, direction: -1 | 1) => Promise<void>;
   onReorder: (task: TaskListItem, direction: -1 | 1) => Promise<void>;
@@ -1103,10 +1105,17 @@ function BoardView(props: {
         return (
           <SurfaceCard className="board-column gap-0 py-0" key={status}>
             <header className="column-header">
-              <p className="column-label">{status}</p>
-              <Badge className="count-pill" variant="secondary">
-                {tasks.length}
-              </Badge>
+              <div className="column-header-main">
+                <p className="column-label">{status}</p>
+                <Badge className="count-pill" variant="secondary">
+                  {tasks.length}
+                </Badge>
+              </div>
+              {props.canAdmin && status === "To Do" ? (
+                <Button onClick={props.onCreateTask} size="sm" type="button" variant="outline">
+                  New Task
+                </Button>
+              ) : null}
             </header>
             <div className="column-stack">
               {tasks.length === 0 ? (

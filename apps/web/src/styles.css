@@ -403,6 +403,13 @@ a {
   margin-bottom: 0.75rem;
 }
 
+.column-header-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
 .column-label {
   margin: 0;
   color: rgb(47 33 22 / 0.82);

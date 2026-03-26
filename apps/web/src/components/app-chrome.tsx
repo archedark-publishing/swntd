@@ -9,9 +9,7 @@ import { cn } from "@/lib/utils";
 export function AppChrome(props: {
   actorDisplayName: string;
   actorRoleLabel: string;
-  canAdmin: boolean;
   isManualRefreshPending: boolean;
-  onCreateTask: () => void;
   onOpenNavigation: () => void;
   onRefresh: () => void;
 }) {
@@ -46,11 +44,6 @@ export function AppChrome(props: {
           <RefreshCw className={cn("size-4", props.isManualRefreshPending && "animate-spin")} />
           {props.isManualRefreshPending ? "Refreshing..." : "Refresh"}
         </Button>
-        {props.canAdmin ? (
-          <Button className="gap-2 rounded-full shadow-sm" onClick={props.onCreateTask} type="button">
-            New Task
-          </Button>
-        ) : null}
         <div className="actor-chip border border-border/50 bg-white/70 shadow-sm backdrop-blur-sm">
           <strong>{props.actorDisplayName}</strong>
           <Badge className="w-fit" variant="outline">
