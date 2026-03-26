@@ -2615,6 +2615,26 @@ function TaskForm(props: {
   users: UserRef[];
   variant: "create" | "detail";
 }) {
+  const checklistInputMapRef = useRef(new Map<string, HTMLInputElement>());
+  const pendingChecklistFocusIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const pendingId = pendingChecklistFocusIdRef.current;
+
+    if (!pendingId) {
+      return;
+    }
+
+    const input = checklistInputMapRef.current.get(pendingId);
+
+    if (!input) {
+      return;
+    }
+
+    input.focus();
+    pendingChecklistFocusIdRef.current = null;
+  }, [props.draft.checklistItems]);
+
   return (
     <section className="sheet-section">
       <div className="form-grid">
@@ -2694,19 +2714,22 @@ function TaskForm(props: {
               <Button
                 className="checklist-add-button"
                 disabled={!props.canEdit}
-                onClick={() =>
+                onClick={() => {
+                  const clientId = crypto.randomUUID();
+                  pendingChecklistFocusIdRef.current = clientId;
+
                   props.onChange({
                     ...props.draft,
                     checklistItems: [
                       ...props.draft.checklistItems,
                       {
                         body: "",
-                        clientId: crypto.randomUUID(),
+                        clientId,
                         isCompleted: false
                       }
                     ]
-                  })
-                }
+                  });
+                }}
                 size="icon"
                 type="button"
                 variant="outline"
@@ -2745,6 +2768,13 @@ function TaskForm(props: {
                       })
                     }
                     placeholder="Subtask description"
+                    ref={(node) => {
+                      if (node) {
+                        checklistInputMapRef.current.set(item.clientId, node);
+                      } else {
+                        checklistInputMapRef.current.delete(item.clientId);
+                      }
+                    }}
                     value={item.body}
                   />
                   <Button
