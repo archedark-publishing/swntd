@@ -388,8 +388,8 @@ function getAiAssistanceToggleLabel(users: UserRef[]) {
   const serviceActorName = getPrimaryServiceActorName(users);
 
   return serviceActorName
-    ? `Allow ${serviceActorName} to pick this up when assigned`
-    : "Allow the household assistant to pick this up when assigned";
+    ? `Let ${serviceActorName} help`
+    : "Let the household assistant help";
 }
 
 function buildFlashMessage(error: unknown) {
@@ -1936,10 +1936,8 @@ function TaskSheet(props: {
   const [draft, setDraft] = useState<TaskDraft>(() => createTaskDraft(null));
   const [commentBody, setCommentBody] = useState("");
   const [linkDraft, setLinkDraft] = useState({ name: "", url: "" });
-  const [autosaveState, setAutosaveState] = useState<"idle" | "saving" | "saved">("idle");
   const lastServerDraftKeyRef = useRef(serializeTaskDraft(createTaskDraft(null)));
   const currentTaskIdRef = useRef<string | null>(null);
-  const autosaveResetRef = useRef<number | null>(null);
   const titleInputRef = useRef<HTMLTextAreaElement | null>(null);
   const resizeTitleInput = useEffectEvent(() => {
     const node = titleInputRef.current;
@@ -1952,17 +1950,13 @@ function TaskSheet(props: {
     node.style.height = `${node.scrollHeight}px`;
   });
   const submitAutosave = useEffectEvent(async (nextDraft: TaskDraft) => {
-    setAutosaveState("saving");
-
     const savedTask = await props.onSave(nextDraft, { silentSuccess: true });
 
     if (!savedTask) {
-      setAutosaveState("idle");
       return;
     }
 
     lastServerDraftKeyRef.current = serializeTaskDraft(createTaskDraft(savedTask));
-    setAutosaveState("saved");
   });
 
   useEffect(() => {
@@ -1983,35 +1977,15 @@ function TaskSheet(props: {
 
       currentTaskIdRef.current = props.task?.id ?? null;
       lastServerDraftKeyRef.current = nextDraftKey;
-      if (isNewTask) {
-        setAutosaveState("idle");
-      }
     } else {
       currentTaskIdRef.current = null;
       lastServerDraftKeyRef.current = nextDraftKey;
       setDraft(nextDraft);
-      setAutosaveState("idle");
     }
 
     setCommentBody("");
     setLinkDraft({ name: "", url: "" });
   }, [props.task, props.variant]);
-
-  useEffect(() => {
-    if (autosaveState !== "saved") {
-      return;
-    }
-
-    autosaveResetRef.current = window.setTimeout(() => {
-      setAutosaveState("idle");
-    }, 1400);
-
-    return () => {
-      if (autosaveResetRef.current) {
-        window.clearTimeout(autosaveResetRef.current);
-      }
-    };
-  }, [autosaveState]);
 
   useEffect(() => {
     if (props.variant !== "detail") {
@@ -2104,13 +2078,6 @@ function TaskSheet(props: {
                     {formatDate(currentTask.dueOn, currentTask.dueTime)}
                   </Badge>
                 ) : null}
-                <span className="sheet-autosave-status" role="status">
-                  {autosaveState === "saving"
-                    ? "Saving..."
-                    : autosaveState === "saved"
-                      ? "Saved"
-                      : "Autosaves"}
-                </span>
               </div>
             ) : (
               <p className="section-copy">
@@ -2468,6 +2435,18 @@ function TaskForm(props: {
 
         {props.variant === "detail" ? (
           <>
+            <ToggleField
+              checked={props.draft.aiAssistanceEnabled}
+              disabled={!props.canEdit}
+              label={props.aiAssistanceToggleLabel}
+              onCheckedChange={(value) =>
+                props.onChange({
+                  ...props.draft,
+                  aiAssistanceEnabled: value
+                })
+              }
+            />
+
             <FormField label="Due date">
               <FormInput
                 disabled={!props.canEdit}
@@ -2495,18 +2474,6 @@ function TaskForm(props: {
                 value={props.draft.dueTime}
               />
             </FormField>
-
-            <ToggleField
-              checked={props.draft.aiAssistanceEnabled}
-              disabled={!props.canEdit}
-              label={props.aiAssistanceToggleLabel}
-              onCheckedChange={(value) =>
-                props.onChange({
-                  ...props.draft,
-                  aiAssistanceEnabled: value
-                })
-              }
-            />
           </>
         ) : null}
       </div>

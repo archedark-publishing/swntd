@@ -804,15 +804,6 @@ a {
   gap: 0.55rem;
 }
 
-.sheet-autosave-status {
-  display: inline-flex;
-  align-items: center;
-  min-height: 2rem;
-  color: rgb(47 33 22 / 0.62);
-  font-size: 0.82rem;
-  letter-spacing: 0.02em;
-}
-
 .sheet-summary-badge {
   border-color: rgb(86 58 30 / 0.14);
   background: rgb(255 255 255 / 0.68);
@@ -943,14 +934,55 @@ a {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  padding: 0.75rem 0.85rem;
-  border-radius: 1rem;
-  border: 1px dashed rgb(86 58 30 / 0.18);
-  background: rgb(255 255 255 / 0.46);
+  padding: 0.15rem 0;
+  cursor: pointer;
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease;
 }
 
-.toggle-field input {
-  margin: 0;
+.toggle-field-disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.toggle-field-track {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  width: 2.75rem;
+  height: 1.6rem;
+  padding: 0.15rem;
+  border-radius: 999px;
+  background: rgb(149 126 99 / 0.28);
+  transition: background-color 180ms ease;
+}
+
+.toggle-field-active .toggle-field-track {
+  background: rgb(41 77 67 / 0.9);
+}
+
+.toggle-field-thumb {
+  display: block;
+  width: 1.3rem;
+  height: 1.3rem;
+  border-radius: 999px;
+  background: white;
+  box-shadow: 0 0.2rem 0.5rem rgb(35 24 15 / 0.16);
+  transform: translateX(0);
+  transition: transform 180ms ease;
+}
+
+.toggle-field-active .toggle-field-thumb {
+  transform: translateX(1.1rem);
+}
+
+.toggle-field-label {
+  color: rgb(47 33 22 / 0.82);
+  font-size: 0.92rem;
+  font-weight: 500;
+  line-height: 1.4;
 }
 
 .timeline-entry,

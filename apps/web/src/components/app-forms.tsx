@@ -94,20 +94,26 @@ export function ToggleField(props: {
   const id = useId();
 
   return (
-    <div className="toggle-field">
+    <Label
+      className={cn(
+        "toggle-field",
+        props.checked && "toggle-field-active",
+        props.disabled && "toggle-field-disabled"
+      )}
+      htmlFor={id}
+    >
       <Checkbox
         checked={props.checked}
         disabled={props.disabled}
+        className="sr-only"
         id={id}
         onCheckedChange={(checked) => props.onCheckedChange(checked === true)}
       />
-      <Label
-        className="cursor-pointer text-[0.95rem] leading-snug text-[rgb(47_33_22_/_0.74)]"
-        htmlFor={id}
-      >
-        {props.label}
-      </Label>
-    </div>
+      <span className="toggle-field-track" aria-hidden="true">
+        <span className="toggle-field-thumb" />
+      </span>
+      <span className="toggle-field-label">{props.label}</span>
+    </Label>
   );
 }
 
