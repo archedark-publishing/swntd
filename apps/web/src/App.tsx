@@ -981,6 +981,7 @@ export function App() {
                 onOpenTask={openTask}
                 onQuickMove={() => Promise.resolve()}
                 onReorder={() => Promise.resolve()}
+                showHeader={false}
                 tasks={archivedTasks}
                 title="Archive"
               />
@@ -1130,16 +1131,19 @@ function TaskListView(props: {
   onOpenTask: (taskId: string) => void;
   onQuickMove: (task: TaskListItem, direction: -1 | 1) => Promise<void>;
   onReorder: (task: TaskListItem, direction: -1 | 1) => Promise<void>;
+  showHeader?: boolean;
   tasks: TaskListItem[];
   title: string;
 }) {
   return (
     <section className="panel-stack">
-      <SectionHeading
-        description={props.description}
-        eyebrow="Focused View"
-        title={props.title}
-      />
+      {props.showHeader === false ? null : (
+        <SectionHeading
+          description={props.description}
+          eyebrow="Focused View"
+          title={props.title}
+        />
+      )}
       <SurfaceCard className="list-surface gap-0 py-0">
         {props.tasks.length === 0 ? (
           <EmptyStateCard message={props.emptyMessage} />
