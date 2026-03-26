@@ -1,5 +1,5 @@
 import type { ComponentProps, ReactNode } from "react";
-import { Menu, RefreshCw, ScrollText, X } from "lucide-react";
+import { Menu, ScrollText, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -7,9 +7,7 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
 export function AppChrome(props: {
-  isManualRefreshPending: boolean;
   onOpenNavigation: () => void;
-  onRefresh: () => void;
 }) {
   return (
     <header className="masthead">
@@ -31,16 +29,6 @@ export function AppChrome(props: {
         >
           <Menu className="size-4" />
           <span className="sr-only">Open navigation</span>
-        </Button>
-        <Button
-          className="gap-2 rounded-full bg-white/70 shadow-sm hover:bg-white"
-          onClick={props.onRefresh}
-          size="sm"
-          type="button"
-          variant="outline"
-        >
-          <RefreshCw className={cn("size-4", props.isManualRefreshPending && "animate-spin")} />
-          {props.isManualRefreshPending ? "Refreshing..." : "Refresh"}
         </Button>
       </div>
     </header>

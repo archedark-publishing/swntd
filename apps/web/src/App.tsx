@@ -368,7 +368,6 @@ export function App() {
   const [settingsPage, setSettingsPage] = useState<SettingsPage>(initialRoute.settingsPage);
   const [snapshot, setSnapshot] = useState<AppSnapshot>(emptySnapshot);
   const [isBooting, setIsBooting] = useState(true);
-  const [isManualRefreshPending, setIsManualRefreshPending] = useState(false);
   const [isNavOpen, setIsNavOpen] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [selectedTask, setSelectedTask] = useState<TaskDetail | null>(null);
@@ -439,14 +438,10 @@ export function App() {
   });
 
   const refreshApp = useEffectEvent(
-    async (options?: { background?: boolean; showSpinner?: boolean }) => {
+    async (options?: { background?: boolean }) => {
     if (refreshInFlightRef.current) {
       return refreshInFlightRef.current;
     }
-
-      if (options?.showSpinner) {
-        setIsManualRefreshPending(true);
-      }
 
       if (!options?.background && !hasLoadedRef.current) {
         setIsBooting(true);
@@ -505,15 +500,14 @@ export function App() {
 
           hasLoadedRef.current = true;
         } catch (error) {
-          if (!options?.background || options?.showSpinner) {
+          if (!options?.background) {
             showErrorToast(
               buildFlashMessage(error),
-              options?.showSpinner ? "manual-refresh-error" : "refresh-error"
+              "refresh-error"
             );
           }
         } finally {
           setIsBooting(false);
-          setIsManualRefreshPending(false);
           refreshInFlightRef.current = null;
         }
       })();
@@ -923,13 +917,7 @@ export function App() {
 
         <div className="app-content">
           <AppChrome
-            isManualRefreshPending={isManualRefreshPending}
             onOpenNavigation={() => setIsNavOpen(true)}
-            onRefresh={() => {
-              startTransition(() => {
-                void refreshApp({ background: true, showSpinner: true });
-              });
-            }}
           />
 
           {isBooting ? (
