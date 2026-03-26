@@ -385,7 +385,7 @@ a {
 }
 
 .board-scroll {
-  width: 100%;
+  width: calc(100% + 2rem);
   overflow-x: auto;
   padding-inline: 1rem;
   margin-inline: -1rem;
@@ -905,6 +905,7 @@ a {
   }
 
   .board-scroll {
+    width: 100%;
     overflow: visible;
     margin-inline: 0;
     padding-inline: 0;
