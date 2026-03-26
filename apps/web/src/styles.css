@@ -802,6 +802,36 @@ a {
   max-width: 26rem;
 }
 
+.activity-composer {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.activity-composer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.activity-composer-actions button {
+  flex: 0 0 auto;
+}
+
+.activity-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.activity-subheading {
+  margin: 0;
+  color: rgb(47 33 22 / 0.66);
+  font-size: 0.84rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 .detail-controls-shell {
   display: grid;
   gap: 0.8rem;
@@ -1037,10 +1067,13 @@ a {
 }
 
 .sheet-body {
+  min-height: 0;
   align-content: start;
   overflow: auto;
   padding: 1.2rem 1.35rem 1.5rem;
   overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
 }
 
 .sheet-section {

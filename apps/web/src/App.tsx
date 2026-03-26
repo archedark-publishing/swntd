@@ -25,6 +25,7 @@ import {
   useDeferredValue,
   useEffect,
   useEffectEvent,
+  useMemo,
   useRef,
   useState
 } from "react";
@@ -89,6 +90,8 @@ import "./styles.css";
 type ViewName = "archive" | "board" | "settings";
 type SettingsPage = "general" | "household" | "labels" | "recurring";
 type TaskDetailControlId = "assignee" | "calendar" | "due" | "labels" | "status";
+
+const urlPattern = /https?:\/\/[^\s]+/gi;
 
 type ChecklistDraftItem = {
   body: string;
@@ -227,6 +230,33 @@ function createTaskDraft(task?: TaskDetail | null): TaskDraft {
     labelIds: task.labels.map((label) => label.id),
     title: task.title
   };
+}
+
+function cleanDetectedUrl(rawUrl: string) {
+  return rawUrl.replace(/[),.;!?]+$/g, "");
+}
+
+function extractUrls(value: string) {
+  const matches = value.match(urlPattern) ?? [];
+  const seen = new Set<string>();
+  const urls: string[] = [];
+
+  for (const match of matches) {
+    const cleaned = cleanDetectedUrl(match);
+
+    if (!cleaned || seen.has(cleaned)) {
+      continue;
+    }
+
+    seen.add(cleaned);
+    urls.push(cleaned);
+  }
+
+  return urls;
+}
+
+function hasMeaningfulCommentText(value: string) {
+  return value.replace(urlPattern, " ").replace(/\s+/g, " ").trim().length > 0;
 }
 
 function buildTaskSavePayload(draft: TaskDraft) {
@@ -471,7 +501,7 @@ export function App() {
   }, [settingsPage, view]);
 
   useEffect(() => {
-    if (!isNavOpen) {
+    if (!isNavOpen && !isTaskSheetOpen) {
       return;
     }
 
@@ -481,7 +511,7 @@ export function App() {
     return () => {
       document.body.style.overflow = previousOverflow;
     };
-  }, [isNavOpen]);
+  }, [isNavOpen, isTaskSheetOpen]);
 
   const loadTaskDetail = useEffectEvent(async (taskId: string | null) => {
     if (!taskId) {
@@ -882,25 +912,38 @@ export function App() {
     );
   }
 
-  async function handleComment(task: TaskDetail, body: string) {
-    await runMutation(
-      () => api.addComment(task.id, { body }),
-      "Comment added."
+  async function handleActivitySubmit(
+    task: TaskDetail,
+    input: { body: string; files: File[]; links: string[] }
+  ) {
+    const trimmedBody = input.body.trim();
+    const links = Array.from(
+      new Set(input.links.map((link) => cleanDetectedUrl(link)).filter(Boolean))
     );
-  }
+    const shouldCreateComment = hasMeaningfulCommentText(trimmedBody);
 
-  async function handleAttachmentLink(task: TaskDetail, input: { name: string; url: string }) {
-    await runMutation(
-      () => api.addAttachmentLink(task.id, input),
-      "Link attached."
-    );
-  }
+    if (!shouldCreateComment && input.files.length === 0 && links.length === 0) {
+      return false;
+    }
 
-  async function handleAttachmentUpload(task: TaskDetail, file: File) {
-    await runMutation(
-      () => api.uploadAttachment(task.id, file),
-      "File attached."
-    );
+    const result = await runMutation(async () => {
+      if (shouldCreateComment) {
+        await api.addComment(task.id, { body: trimmedBody });
+      }
+
+      for (const file of input.files) {
+        await api.uploadAttachment(task.id, file);
+      }
+
+      for (const link of links) {
+        await api.addAttachmentLink(task.id, {
+          name: new URL(link).hostname.replace(/^www\./, ""),
+          url: link
+        });
+      }
+    }, shouldCreateComment ? "Activity added." : "Attachments added.");
+
+    return result !== null;
   }
 
   async function handleSettingsSave(nextSettings: Settings) {
@@ -1181,8 +1224,7 @@ export function App() {
         isOpen={isTaskSheetOpen}
         isSavingDisabled={!canAdmin}
         labels={snapshot.labels}
-        onAddAttachmentLink={handleAttachmentLink}
-        onAddComment={handleComment}
+        onSubmitActivity={handleActivitySubmit}
         onArchive={handleArchive}
         onCalendarAction={(task, calendarKind) => {
           if (!snapshot.settings) {
@@ -1219,7 +1261,6 @@ export function App() {
         onSave={handleTaskSubmit}
         onStatusChange={handleStatusChange}
         onUnarchive={handleUnarchive}
-        onUploadAttachment={handleAttachmentUpload}
         settings={snapshot.settings}
         task={selectedTask}
         users={snapshot.users}
@@ -1927,8 +1968,6 @@ function TaskSheet(props: {
   isOpen: boolean;
   isSavingDisabled: boolean;
   labels: Label[];
-  onAddAttachmentLink: (task: TaskDetail, input: { name: string; url: string }) => Promise<void>;
-  onAddComment: (task: TaskDetail, body: string) => Promise<void>;
   onArchive: (task: TaskDetail) => Promise<void>;
   onCalendarAction: (task: TaskDetail, kind: "google" | "ics") => void;
   onClose: () => void;
@@ -1938,8 +1977,11 @@ function TaskSheet(props: {
     options?: { silentSuccess?: boolean }
   ) => Promise<TaskDetail | null>;
   onStatusChange: (task: TaskDetail, status: TaskStatus) => Promise<void>;
+  onSubmitActivity: (
+    task: TaskDetail,
+    input: { body: string; files: File[]; links: string[] }
+  ) => Promise<boolean>;
   onUnarchive: (task: TaskDetail) => Promise<void>;
-  onUploadAttachment: (task: TaskDetail, file: File) => Promise<void>;
   settings: Settings | null;
   task: TaskDetail | null;
   users: UserRef[];
@@ -1948,9 +1990,11 @@ function TaskSheet(props: {
   const [draft, setDraft] = useState<TaskDraft>(() => createTaskDraft(null));
   const [activeControl, setActiveControl] = useState<TaskDetailControlId | null>(null);
   const [commentBody, setCommentBody] = useState("");
-  const [linkDraft, setLinkDraft] = useState({ name: "", url: "" });
+  const [pendingActivityFiles, setPendingActivityFiles] = useState<File[]>([]);
+  const [ignoredParsedLinks, setIgnoredParsedLinks] = useState<string[]>([]);
   const lastServerDraftKeyRef = useRef(serializeTaskDraft(createTaskDraft(null)));
   const currentTaskIdRef = useRef<string | null>(null);
+  const activityFileInputRef = useRef<HTMLInputElement | null>(null);
   const titleInputRef = useRef<HTMLTextAreaElement | null>(null);
   const resizeTitleInput = useEffectEvent(() => {
     const node = titleInputRef.current;
@@ -1990,15 +2034,22 @@ function TaskSheet(props: {
 
       currentTaskIdRef.current = props.task?.id ?? null;
       lastServerDraftKeyRef.current = nextDraftKey;
+
+      if (isNewTask) {
+        setActiveControl(null);
+        setCommentBody("");
+        setPendingActivityFiles([]);
+        setIgnoredParsedLinks([]);
+      }
     } else {
       currentTaskIdRef.current = null;
       lastServerDraftKeyRef.current = nextDraftKey;
       setDraft(nextDraft);
+      setActiveControl(null);
+      setCommentBody("");
+      setPendingActivityFiles([]);
+      setIgnoredParsedLinks([]);
     }
-
-    setActiveControl(null);
-    setCommentBody("");
-    setLinkDraft({ name: "", url: "" });
   }, [props.task, props.variant]);
 
   useEffect(() => {
@@ -2008,6 +2059,24 @@ function TaskSheet(props: {
 
     resizeTitleInput();
   }, [draft.title, props.variant, resizeTitleInput]);
+
+  const detectedLinks = useMemo(() => extractUrls(commentBody), [commentBody]);
+  const parsedLinks = useMemo(
+    () => detectedLinks.filter((link) => !ignoredParsedLinks.includes(link)),
+    [detectedLinks, ignoredParsedLinks]
+  );
+
+  useEffect(() => {
+    setIgnoredParsedLinks((current) => {
+      const next = current.filter((link) => detectedLinks.includes(link));
+
+      if (next.length === current.length && next.every((link, index) => link === current[index])) {
+        return current;
+      }
+
+      return next;
+    });
+  }, [detectedLinks]);
 
   useEffect(() => {
     if (props.variant !== "detail" || !props.task || props.isSavingDisabled) {
@@ -2048,6 +2117,30 @@ function TaskSheet(props: {
     }
 
     props.onClose();
+  }
+
+  async function handleActivitySubmit() {
+    if (!currentTask) {
+      return;
+    }
+
+    const didSubmit = await props.onSubmitActivity(currentTask, {
+      body: commentBody,
+      files: pendingActivityFiles,
+      links: parsedLinks
+    });
+
+    if (!didSubmit) {
+      return;
+    }
+
+    setCommentBody("");
+    setPendingActivityFiles([]);
+    setIgnoredParsedLinks([]);
+
+    if (activityFileInputRef.current) {
+      activityFileInputRef.current.value = "";
+    }
   }
 
   return (
@@ -2177,155 +2270,152 @@ function TaskSheet(props: {
           ) : null}
 
           {currentTask ? (
-            <>
-              <section className="sheet-section">
-                <SectionHeading compact eyebrow="Comments" title="Conversation" titleAs="h3" />
-                <div className="timeline">
-                  {currentTask.comments.length === 0 ? (
-                    <EmptyStateCard message="No comments yet." />
-                  ) : null}
-                  {currentTask.comments.map((comment) => (
-                    <SurfaceCard className="timeline-entry gap-2 py-4" key={comment.id}>
-                      <div className="timeline-meta">
-                        <strong>{comment.author.displayName}</strong>
-                        <span>{formatTimestamp(comment.createdAt)}</span>
-                      </div>
-                      <p>{comment.body}</p>
-                    </SurfaceCard>
-                  ))}
-                </div>
-                <FormField label="Add a comment">
-                  <FormTextarea
-                    onChange={(event) => setCommentBody(event.target.value)}
-                    placeholder="Leave a note for the household."
-                    rows={3}
-                    value={commentBody}
-                  />
-                </FormField>
-                <Button
-                  onClick={() => {
-                    if (!commentBody.trim()) {
-                      return;
-                    }
-
-                    void props.onAddComment(currentTask, commentBody.trim());
-                    setCommentBody("");
-                  }}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                >
-                  Add Comment
-                </Button>
-              </section>
-
-              <section className="sheet-section">
-                <SectionHeading compact eyebrow="Attachments" title="Files and links" titleAs="h3" />
-                <div className="attachment-list">
-                  {currentTask.attachments.length === 0 ? (
-                    <EmptyStateCard message="No attachments yet." />
-                  ) : null}
-                  {currentTask.attachments.map((attachment) => (
-                    <InfoRow
-                      action={
-                        attachment.storageKind === "upload" ? (
-                          <Button
-                            onClick={() => {
-                              void props.onDownloadAttachment(attachment);
-                            }}
-                            size="sm"
-                            type="button"
-                            variant="outline"
-                          >
-                            Download
-                          </Button>
-                        ) : (
-                          <Button asChild size="sm" variant="outline">
-                            <a
-                              href={attachment.externalUrl ?? "#"}
-                              rel="noreferrer"
-                              target="_blank"
-                            >
-                              Open Link
-                            </a>
-                          </Button>
-                        )
-                      }
-                      key={attachment.id}
-                    >
-                      <div>
-                        <strong>{attachment.originalName}</strong>
-                        <p>
-                          Added by {attachment.uploadedBy.displayName} on{" "}
-                          {formatTimestamp(attachment.createdAt)}
-                        </p>
-                      </div>
-                    </InfoRow>
-                  ))}
-                </div>
-                <div className="sheet-actions">
-                  <FormField className="file-input" label="Upload file">
-                    <FormInput
-                      accept=".csv,.heic,.jpeg,.jpg,.json,.md,.pdf,.png,.txt,.webp"
-                      onChange={(event) => {
-                        const file = event.target.files?.[0];
-
-                        if (!file) {
-                          return;
+            <section className="sheet-section">
+              <SectionHeading compact eyebrow="Activity" title="Notes and attachments" titleAs="h3" />
+              <div className="activity-composer">
+                <FormTextarea
+                  onChange={(event) => setCommentBody(event.target.value)}
+                  placeholder="Leave a note for the household."
+                  rows={3}
+                  value={commentBody}
+                />
+                {pendingActivityFiles.length > 0 || parsedLinks.length > 0 ? (
+                  <div className="activity-chip-row">
+                    {pendingActivityFiles.map((file, index) => (
+                      <button
+                        className="detail-label-chip"
+                        key={`${file.name}-${file.size}-${index}`}
+                        onClick={() =>
+                          setPendingActivityFiles((current) =>
+                            current.filter((_, currentIndex) => currentIndex !== index)
+                          )
                         }
+                        type="button"
+                      >
+                        <span>{file.name}</span>
+                        <span aria-hidden="true">x</span>
+                      </button>
+                    ))}
+                    {parsedLinks.map((link) => (
+                      <button
+                        className="detail-label-chip"
+                        key={link}
+                        onClick={() =>
+                          setIgnoredParsedLinks((current) => [...current, link])
+                        }
+                        type="button"
+                      >
+                        <span>{link}</span>
+                        <span aria-hidden="true">x</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+                <div className="activity-composer-actions">
+                  <input
+                    accept=".csv,.heic,.jpeg,.jpg,.json,.md,.pdf,.png,.txt,.webp"
+                    className="sr-only"
+                    multiple
+                    onChange={(event) => {
+                      const files = Array.from(event.target.files ?? []);
 
-                        void props.onUploadAttachment(currentTask, file);
-                        event.currentTarget.value = "";
-                      }}
-                      type="file"
-                    />
-                  </FormField>
-                  <FormField className="compact-field" label="Link label">
-                    <FormInput
-                      onChange={(event) =>
-                        setLinkDraft((current) => ({
-                          ...current,
-                          name: event.target.value
-                        }))
-                      }
-                      placeholder="Reference note"
-                      value={linkDraft.name}
-                    />
-                  </FormField>
-                  <FormField className="compact-field" label="URL">
-                    <FormInput
-                      onChange={(event) =>
-                        setLinkDraft((current) => ({
-                          ...current,
-                          url: event.target.value
-                        }))
-                      }
-                      placeholder="https://example.com"
-                      type="url"
-                      value={linkDraft.url}
-                    />
-                  </FormField>
-                  <Button
-                    onClick={() => {
-                      if (!linkDraft.name.trim() || !linkDraft.url.trim()) {
+                      if (files.length === 0) {
                         return;
                       }
 
-                      void props.onAddAttachmentLink(currentTask, {
-                        name: linkDraft.name.trim(),
-                        url: linkDraft.url.trim()
-                      });
-                      setLinkDraft({ name: "", url: "" });
+                      setPendingActivityFiles((current) => [...current, ...files]);
+                    }}
+                    ref={activityFileInputRef}
+                    type="file"
+                  />
+                  <Button
+                    onClick={() => activityFileInputRef.current?.click()}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    Attach File
+                  </Button>
+                  <Button
+                    disabled={
+                      !commentBody.trim() &&
+                      pendingActivityFiles.length === 0 &&
+                      parsedLinks.length === 0
+                    }
+                    onClick={() => {
+                      void handleActivitySubmit();
                     }}
                     size="sm"
                     type="button"
                     variant="outline"
                   >
-                    Attach Link
+                    Post Update
                   </Button>
                 </div>
-              </section>
-            </>
+              </div>
+
+              {currentTask.comments.length > 0 ? (
+                <>
+                  <p className="activity-subheading">Comments</p>
+                  <div className="timeline">
+                    {currentTask.comments.map((comment) => (
+                      <SurfaceCard className="timeline-entry gap-2 py-4" key={comment.id}>
+                        <div className="timeline-meta">
+                          <strong>{comment.author.displayName}</strong>
+                          <span>{formatTimestamp(comment.createdAt)}</span>
+                        </div>
+                        <p>{comment.body}</p>
+                      </SurfaceCard>
+                    ))}
+                  </div>
+                </>
+              ) : null}
+
+              {currentTask.attachments.length > 0 ? (
+                <>
+                  <p className="activity-subheading">Attachments</p>
+                  <div className="attachment-list">
+                    {currentTask.attachments.map((attachment) => (
+                      <InfoRow
+                        action={
+                          attachment.storageKind === "upload" ? (
+                            <Button
+                              onClick={() => {
+                                void props.onDownloadAttachment(attachment);
+                              }}
+                              size="sm"
+                              type="button"
+                              variant="outline"
+                            >
+                              Download
+                            </Button>
+                          ) : (
+                            <Button asChild size="sm" variant="outline">
+                              <a
+                                href={attachment.externalUrl ?? "#"}
+                                rel="noreferrer"
+                                target="_blank"
+                              >
+                                Open Link
+                              </a>
+                            </Button>
+                          )
+                        }
+                        key={attachment.id}
+                      >
+                        <div>
+                          <strong>{attachment.originalName}</strong>
+                          <p>
+                            Added by {attachment.uploadedBy.displayName} on{" "}
+                            {formatTimestamp(attachment.createdAt)}
+                          </p>
+                        </div>
+                      </InfoRow>
+                    ))}
+                  </div>
+                </>
+              ) : null}
+            </section>
           ) : null}
         </div>
       </aside>
