@@ -595,10 +595,14 @@ a {
 .timeline,
 .attachment-list,
 .template-list,
-.checklist-editor,
 .cast-list {
   display: grid;
   gap: 0.85rem;
+}
+
+.checklist-editor {
+  display: grid;
+  gap: 0.05rem;
 }
 
 .panel-stack {
@@ -1155,7 +1159,7 @@ a {
 }
 
 .checklist-row + .checklist-row {
-  margin-top: 0.6rem;
+  margin-top: 0.05rem;
 }
 
 .checklist-remove-button {
