@@ -7,12 +7,12 @@ import {
   useDroppable,
   useSensor,
   useSensors,
+  type DragOverEvent,
   type DragEndEvent,
   type UniqueIdentifier,
 } from "@dnd-kit/core";
 import {
   SortableContext,
-  arrayMove,
   sortableKeyboardCoordinates,
   useSortable,
   verticalListSortingStrategy,
@@ -738,9 +738,9 @@ export function App() {
   }
 
   async function handleTaskDrop(input: {
-    overTaskId: string | null;
-    taskId: string;
     targetStatus: TaskStatus;
+    targetIndex: number;
+    taskId: string;
   }) {
     const task = activeTasks.find((entry) => entry.id === input.taskId);
 
@@ -749,11 +749,10 @@ export function App() {
     }
 
     const destinationTasks = getTaskColumnOrder(activeTasks, input.targetStatus);
-    const overIndex =
-      input.overTaskId === null
-        ? destinationTasks.length
-        : destinationTasks.findIndex((entry) => entry.id === input.overTaskId);
-    const safeTargetIndex = overIndex < 0 ? destinationTasks.length : overIndex;
+    const safeTargetIndex = Math.max(
+      0,
+      Math.min(input.targetIndex, destinationTasks.length)
+    );
 
     if (task.status === input.targetStatus) {
       const currentIndex = destinationTasks.findIndex((entry) => entry.id === task.id);
@@ -762,14 +761,7 @@ export function App() {
         return;
       }
 
-      const reorderedIds = arrayMove(
-        destinationTasks.map((entry) => entry.id),
-        currentIndex,
-        safeTargetIndex
-      );
-      const targetIndex = reorderedIds.indexOf(task.id);
-
-      if (targetIndex === currentIndex) {
+      if (safeTargetIndex === currentIndex) {
         return;
       }
 
@@ -777,7 +769,7 @@ export function App() {
         () =>
           api.reorderTask(task.id, {
             expectedRevision: task.revision,
-            targetIndex
+            targetIndex: safeTargetIndex
           }),
         "Task order updated."
       );
@@ -791,7 +783,7 @@ export function App() {
         status: input.targetStatus
       });
 
-      if (safeTargetIndex === 0 || destinationTasks.length === 0) {
+      if (safeTargetIndex === 0) {
         return transitioned;
       }
 
@@ -1183,7 +1175,7 @@ function BoardView(props: {
   isFilteredToActor: boolean;
   onCreateTask: () => void;
   onDropTask: (input: {
-    overTaskId: string | null;
+    targetIndex: number;
     targetStatus: TaskStatus;
     taskId: string;
   }) => Promise<void>;
@@ -1194,6 +1186,10 @@ function BoardView(props: {
   visibleTasks: TaskListItem[];
 }) {
   const [activeTaskId, setActiveTaskId] = useState<UniqueIdentifier | null>(null);
+  const [dragProjection, setDragProjection] = useState<{
+    targetIndex: number;
+    targetStatus: TaskStatus;
+  } | null>(null);
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
@@ -1208,6 +1204,67 @@ function BoardView(props: {
     activeTaskId === null
       ? null
       : props.allTasks.find((task) => task.id === activeTaskId) ?? null;
+
+  function resolveDragProjection(event: DragOverEvent | DragEndEvent) {
+    const taskId = String(event.active.id);
+    const task = props.allTasks.find((entry) => entry.id === taskId);
+
+    if (!task || !event.over) {
+      return null;
+    }
+
+    const overId = String(event.over.id);
+
+    if (overId.startsWith("column:")) {
+      const status = overId.replace("column:", "");
+
+      if (!isTaskStatus(status)) {
+        return null;
+      }
+
+      const tasks = getTaskColumnOrder(
+        props.visibleTasks.filter((entry) => entry.id !== taskId),
+        status
+      );
+
+      return {
+        targetIndex: tasks.length,
+        targetStatus: status
+      };
+    }
+
+    const overTask = props.visibleTasks.find((entry) => entry.id === overId);
+
+    if (!overTask) {
+      return null;
+    }
+
+    const tasks = getTaskColumnOrder(
+      props.visibleTasks.filter((entry) => entry.id !== taskId),
+      overTask.status
+    );
+    const overIndex = tasks.findIndex((entry) => entry.id === overTask.id);
+
+    if (overIndex < 0) {
+      return {
+        targetIndex: tasks.length,
+        targetStatus: overTask.status
+      };
+    }
+
+    const activeMidpoint = event.active.rect.current.translated
+      ? event.active.rect.current.translated.top +
+        event.active.rect.current.translated.height / 2
+      : null;
+    const overMidpoint = event.over.rect.top + event.over.rect.height / 2;
+    const shouldInsertAfter =
+      activeMidpoint !== null && activeMidpoint > overMidpoint;
+
+    return {
+      targetIndex: overIndex + (shouldInsertAfter ? 1 : 0),
+      targetStatus: overTask.status
+    };
+  }
 
   return (
     <section className="panel-stack">
@@ -1227,60 +1284,97 @@ function BoardView(props: {
       />
       <DndContext
         collisionDetection={closestCorners}
-        onDragCancel={() => setActiveTaskId(null)}
-        onDragEnd={(event: DragEndEvent) => {
+        onDragCancel={() => {
           setActiveTaskId(null);
+          setDragProjection(null);
+        }}
+        onDragOver={(event: DragOverEvent) => {
+          setDragProjection(resolveDragProjection(event));
+        }}
+        onDragEnd={(event: DragEndEvent) => {
+          const nextProjection = resolveDragProjection(event) ?? dragProjection;
 
-          if (!props.canAdmin || !event.over) {
+          setActiveTaskId(null);
+          setDragProjection(null);
+
+          if (!props.canAdmin || !nextProjection) {
             return;
           }
 
           const taskId = String(event.active.id);
-          const overId = String(event.over.id);
-          let targetStatus: TaskStatus | null = null;
-          let overTaskId: string | null = null;
-
-          if (overId.startsWith("column:")) {
-            const status = overId.replace("column:", "");
-
-            targetStatus = isTaskStatus(status) ? status : null;
-          } else {
-            const overTask = props.allTasks.find((task) => task.id === overId);
-
-            if (overTask) {
-              targetStatus = overTask.status;
-              overTaskId = overTask.id;
-            }
-          }
-
-          if (!targetStatus) {
-            return;
-          }
 
           void props.onDropTask({
-            overTaskId,
-            targetStatus,
+            targetIndex: nextProjection.targetIndex,
+            targetStatus: nextProjection.targetStatus,
             taskId
           });
         }}
-        onDragStart={(event) => setActiveTaskId(event.active.id)}
+        onDragStart={(event) => {
+          const nextActiveId = event.active.id;
+          const task = props.visibleTasks.find((entry) => entry.id === nextActiveId);
+
+          setActiveTaskId(nextActiveId);
+
+          if (!task) {
+            setDragProjection(null);
+            return;
+          }
+
+          const sourceTasks = getTaskColumnOrder(props.visibleTasks, task.status);
+          const sourceIndex = sourceTasks.findIndex((entry) => entry.id === task.id);
+
+          setDragProjection(
+            sourceIndex < 0
+              ? null
+              : {
+                  targetIndex: sourceIndex,
+                  targetStatus: task.status
+                }
+          );
+        }}
         sensors={sensors}
       >
         <div className="board-scroll">
           <div className="board-grid">
-            {taskStatuses.map((status) => (
-              <BoardColumn
-                aiAssistanceLabel={props.aiAssistanceLabel}
-                canAdmin={props.canAdmin}
-                key={status}
-                onCreateTask={props.onCreateTask}
-                onOpenTask={props.onOpenTask}
-                onQuickMove={props.onQuickMove}
-                onReorder={props.onReorder}
-                status={status}
-                tasks={getTaskColumnOrder(props.visibleTasks, status)}
-              />
-            ))}
+            {taskStatuses.map((status) => {
+              const tasks = getTaskColumnOrder(
+                props.visibleTasks.filter((task) => task.id !== activeTaskId),
+                status
+              );
+              const renderItems: Array<
+                | { kind: "placeholder"; task: TaskListItem }
+                | { kind: "task"; task: TaskListItem }
+              > = tasks.map((task) => ({
+                kind: "task" as const,
+                task
+              }));
+
+              if (activeTask && dragProjection?.targetStatus === status) {
+                renderItems.splice(
+                  Math.max(0, Math.min(dragProjection.targetIndex, renderItems.length)),
+                  0,
+                  {
+                    kind: "placeholder",
+                    task: activeTask
+                  }
+                );
+              }
+
+              return (
+                <BoardColumn
+                  aiAssistanceLabel={props.aiAssistanceLabel}
+                  canAdmin={props.canAdmin}
+                  items={renderItems}
+                  key={status}
+                  onCreateTask={props.onCreateTask}
+                  onOpenTask={props.onOpenTask}
+                  onQuickMove={props.onQuickMove}
+                  onReorder={props.onReorder}
+                  status={status}
+                  taskCount={getTaskColumnOrder(props.visibleTasks, status).length}
+                />
+              );
+            })}
           </div>
         </div>
         <DragOverlay>
@@ -1309,14 +1403,18 @@ function BoardView(props: {
 function BoardColumn(props: {
   aiAssistanceLabel: string;
   canAdmin: boolean;
+  items: Array<
+    | { kind: "placeholder"; task: TaskListItem }
+    | { kind: "task"; task: TaskListItem }
+  >;
   onCreateTask: () => void;
   onOpenTask: (taskId: string) => void;
   onQuickMove: (task: TaskListItem, direction: -1 | 1) => Promise<void>;
   onReorder: (task: TaskListItem, direction: -1 | 1) => Promise<void>;
   status: TaskStatus;
-  tasks: TaskListItem[];
+  taskCount: number;
 }) {
-  const { isOver, setNodeRef } = useDroppable({
+  const { setNodeRef } = useDroppable({
     id: `column:${props.status}`
   });
 
@@ -1326,7 +1424,7 @@ function BoardColumn(props: {
         <div className="column-header-main">
           <p className="column-label">{props.status}</p>
           <Badge className="count-pill" variant="secondary">
-            {props.tasks.length}
+            {props.taskCount}
           </Badge>
         </div>
         {props.canAdmin && props.status === "To Do" ? (
@@ -1336,26 +1434,44 @@ function BoardColumn(props: {
         ) : null}
       </header>
       <SortableContext
-        items={props.tasks.map((task) => task.id)}
+        items={props.items
+          .filter((item) => item.kind === "task")
+          .map((item) => item.task.id)}
         strategy={verticalListSortingStrategy}
       >
-        <div className={cn("column-stack", isOver && "column-stack-over")} ref={setNodeRef}>
-          {props.tasks.length === 0 ? (
+        <div className="column-stack" ref={setNodeRef}>
+          {props.items.length === 0 ? (
             <EmptyStateCard message="Nothing resting here." />
           ) : null}
-          {props.tasks.map((task, index) => (
-            <SortableTaskCard
-              aiAssistanceLabel={props.aiAssistanceLabel}
-              canDrag={props.canAdmin}
-              index={index}
-              key={task.id}
-              onOpen={props.onOpenTask}
-              onQuickMove={props.onQuickMove}
-              onReorder={props.onReorder}
-              task={task}
-              total={props.tasks.length}
-            />
-          ))}
+          {props.items.map((item, index) =>
+            item.kind === "placeholder" ? (
+              <TaskCard
+                aiAssistanceLabel={props.aiAssistanceLabel}
+                allowManualReorder={false}
+                hideActions
+                index={index}
+                isPlaceholder
+                key={`placeholder:${item.task.id}:${props.status}:${index}`}
+                onOpen={() => undefined}
+                onQuickMove={() => Promise.resolve()}
+                onReorder={() => Promise.resolve()}
+                task={item.task}
+                total={props.items.length}
+              />
+            ) : (
+              <SortableTaskCard
+                aiAssistanceLabel={props.aiAssistanceLabel}
+                canDrag={props.canAdmin}
+                index={index}
+                key={item.task.id}
+                onOpen={props.onOpenTask}
+                onQuickMove={props.onQuickMove}
+                onReorder={props.onReorder}
+                task={item.task}
+                total={props.items.length}
+              />
+            )
+          )}
         </div>
       </SortableContext>
     </SurfaceCard>
@@ -1435,6 +1551,7 @@ type TaskCardProps = {
   hideActions?: boolean;
   index: number;
   isDragging?: boolean;
+  isPlaceholder?: boolean;
   onOpen: (taskId: string) => void;
   onQuickMove: (task: TaskListItem, direction: -1 | 1) => Promise<void>;
   onReorder: (task: TaskListItem, direction: -1 | 1) => Promise<void>;
@@ -1451,10 +1568,22 @@ function TaskCard(props: TaskCardProps) {
   const hasAttachments = props.task.attachmentCount > 0;
   const allowManualReorder = props.allowManualReorder ?? true;
   const hideActions = props.hideActions ?? false;
+  const isPlaceholder = props.isPlaceholder ?? false;
 
   return (
-    <SurfaceCard className={cn("task-card gap-0 py-0", props.isDragging && "task-card-dragging")}>
-      <button className="task-card-main" onClick={() => props.onOpen(props.task.id)} type="button">
+    <SurfaceCard
+      className={cn(
+        "task-card gap-0 py-0",
+        props.isDragging && "task-card-dragging",
+        isPlaceholder && "task-card-placeholder"
+      )}
+    >
+      <button
+        className={cn("task-card-main", isPlaceholder && "task-card-main-placeholder")}
+        disabled={isPlaceholder}
+        onClick={() => props.onOpen(props.task.id)}
+        type="button"
+      >
         <div className="task-card-header">
           <h3>{props.task.title}</h3>
           {props.task.aiAssistanceEnabled ? (
