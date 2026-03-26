@@ -805,16 +805,35 @@ a {
 .activity-composer {
   display: grid;
   gap: 0.75rem;
+  margin-bottom: 0.9rem;
+}
+
+.activity-input-shell {
+  position: relative;
+}
+
+.activity-textarea {
+  padding-top: 1.05rem;
+  padding-right: 5.5rem;
 }
 
 .activity-composer-actions {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.55rem;
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.6rem;
+  gap: 0.1rem;
+  align-items: center;
 }
 
-.activity-composer-actions button {
-  flex: 0 0 auto;
+.activity-icon-button {
+  width: 1.95rem;
+  height: 1.95rem;
+  color: rgb(47 33 22 / 0.66);
+}
+
+.activity-icon-button:hover {
+  color: var(--accent-green);
 }
 
 .activity-chip-row {
@@ -823,13 +842,50 @@ a {
   gap: 0.5rem;
 }
 
-.activity-subheading {
-  margin: 0;
-  color: rgb(47 33 22 / 0.66);
+.attachment-list {
+  gap: 0;
+  border-radius: 0.95rem;
+  border: 1px solid rgb(86 58 30 / 0.08);
+  background: rgb(255 255 255 / 0.34);
+  overflow: hidden;
+}
+
+.attachment-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.72rem 0.9rem;
+}
+
+.attachment-row + .attachment-row {
+  border-top: 1px solid rgb(86 58 30 / 0.08);
+}
+
+.attachment-copy {
+  min-width: 0;
+}
+
+.attachment-copy strong {
+  display: block;
+  font-size: 0.96rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.attachment-meta {
+  margin: 0.2rem 0 0;
+  color: rgb(47 33 22 / 0.68);
   font-size: 0.84rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  line-height: 1.35;
+}
+
+.attachment-action {
+  color: rgb(47 33 22 / 0.82);
+}
+
+.attachment-action:hover {
+  color: var(--accent-green);
 }
 
 .detail-controls-shell {

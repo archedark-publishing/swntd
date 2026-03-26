@@ -32,12 +32,16 @@ import {
 import {
   CalendarDays,
   CalendarPlus2,
-  X,
+  Download,
+  ExternalLink,
   Menu,
+  Paperclip,
   Plus,
+  SendHorizontal,
   Tag,
   Trash2,
-  UserRound
+  UserRound,
+  X
 } from "lucide-react";
 import {
   AppNavigation,
@@ -2271,14 +2275,62 @@ function TaskSheet(props: {
 
           {currentTask ? (
             <section className="sheet-section">
-              <SectionHeading compact eyebrow="Activity" title="Notes and attachments" titleAs="h3" />
+              <p className="eyebrow">Notes</p>
               <div className="activity-composer">
-                <FormTextarea
-                  onChange={(event) => setCommentBody(event.target.value)}
-                  placeholder="Leave a note for the household."
-                  rows={3}
-                  value={commentBody}
-                />
+                <div className="activity-input-shell">
+                  <FormTextarea
+                    className="activity-textarea"
+                    onChange={(event) => setCommentBody(event.target.value)}
+                    placeholder="Leave a note for the household."
+                    rows={3}
+                    value={commentBody}
+                  />
+                  <div className="activity-composer-actions">
+                    <input
+                      accept=".csv,.heic,.jpeg,.jpg,.json,.md,.pdf,.png,.txt,.webp"
+                      className="sr-only"
+                      multiple
+                      onChange={(event) => {
+                        const files = Array.from(event.target.files ?? []);
+
+                        if (files.length === 0) {
+                          return;
+                        }
+
+                        setPendingActivityFiles((current) => [...current, ...files]);
+                      }}
+                      ref={activityFileInputRef}
+                      type="file"
+                    />
+                    <Button
+                      className="activity-icon-button"
+                      onClick={() => activityFileInputRef.current?.click()}
+                      size="icon"
+                      type="button"
+                      variant="ghost"
+                    >
+                      <Paperclip className="size-4" />
+                      <span className="sr-only">Attach file</span>
+                    </Button>
+                    <Button
+                      className="activity-icon-button"
+                      disabled={
+                        !commentBody.trim() &&
+                        pendingActivityFiles.length === 0 &&
+                        parsedLinks.length === 0
+                      }
+                      onClick={() => {
+                        void handleActivitySubmit();
+                      }}
+                      size="icon"
+                      type="button"
+                      variant="ghost"
+                    >
+                      <SendHorizontal className="size-4" />
+                      <span className="sr-only">Post update</span>
+                    </Button>
+                  </div>
+                </div>
                 {pendingActivityFiles.length > 0 || parsedLinks.length > 0 ? (
                   <div className="activity-chip-row">
                     {pendingActivityFiles.map((file, index) => (
@@ -2311,110 +2363,65 @@ function TaskSheet(props: {
                     ))}
                   </div>
                 ) : null}
-                <div className="activity-composer-actions">
-                  <input
-                    accept=".csv,.heic,.jpeg,.jpg,.json,.md,.pdf,.png,.txt,.webp"
-                    className="sr-only"
-                    multiple
-                    onChange={(event) => {
-                      const files = Array.from(event.target.files ?? []);
-
-                      if (files.length === 0) {
-                        return;
-                      }
-
-                      setPendingActivityFiles((current) => [...current, ...files]);
-                    }}
-                    ref={activityFileInputRef}
-                    type="file"
-                  />
-                  <Button
-                    onClick={() => activityFileInputRef.current?.click()}
-                    size="sm"
-                    type="button"
-                    variant="outline"
-                  >
-                    Attach File
-                  </Button>
-                  <Button
-                    disabled={
-                      !commentBody.trim() &&
-                      pendingActivityFiles.length === 0 &&
-                      parsedLinks.length === 0
-                    }
-                    onClick={() => {
-                      void handleActivitySubmit();
-                    }}
-                    size="sm"
-                    type="button"
-                    variant="outline"
-                  >
-                    Post Update
-                  </Button>
-                </div>
               </div>
 
               {currentTask.comments.length > 0 ? (
-                <>
-                  <p className="activity-subheading">Comments</p>
-                  <div className="timeline">
-                    {currentTask.comments.map((comment) => (
-                      <SurfaceCard className="timeline-entry gap-2 py-4" key={comment.id}>
-                        <div className="timeline-meta">
-                          <strong>{comment.author.displayName}</strong>
-                          <span>{formatTimestamp(comment.createdAt)}</span>
-                        </div>
-                        <p>{comment.body}</p>
-                      </SurfaceCard>
-                    ))}
-                  </div>
-                </>
+                <div className="timeline">
+                  {currentTask.comments.map((comment) => (
+                    <SurfaceCard className="timeline-entry gap-2 py-4" key={comment.id}>
+                      <div className="timeline-meta">
+                        <strong>{comment.author.displayName}</strong>
+                        <span>{formatTimestamp(comment.createdAt)}</span>
+                      </div>
+                      <p>{comment.body}</p>
+                    </SurfaceCard>
+                  ))}
+                </div>
               ) : null}
+            </section>
+          ) : null}
 
-              {currentTask.attachments.length > 0 ? (
-                <>
-                  <p className="activity-subheading">Attachments</p>
-                  <div className="attachment-list">
-                    {currentTask.attachments.map((attachment) => (
-                      <InfoRow
-                        action={
-                          attachment.storageKind === "upload" ? (
-                            <Button
-                              onClick={() => {
-                                void props.onDownloadAttachment(attachment);
-                              }}
-                              size="sm"
-                              type="button"
-                              variant="outline"
-                            >
-                              Download
-                            </Button>
-                          ) : (
-                            <Button asChild size="sm" variant="outline">
-                              <a
-                                href={attachment.externalUrl ?? "#"}
-                                rel="noreferrer"
-                                target="_blank"
-                              >
-                                Open Link
-                              </a>
-                            </Button>
-                          )
-                        }
-                        key={attachment.id}
+          {currentTask && currentTask.attachments.length > 0 ? (
+            <section className="sheet-section">
+              <p className="eyebrow">Attachments</p>
+              <div className="attachment-list">
+                {currentTask.attachments.map((attachment) => (
+                  <div className="attachment-row" key={attachment.id}>
+                    <div className="attachment-copy">
+                      <strong>{attachment.originalName}</strong>
+                      <p className="attachment-meta">
+                        Added by {attachment.uploadedBy.displayName} on{" "}
+                        {formatTimestamp(attachment.createdAt)}
+                      </p>
+                    </div>
+                    {attachment.storageKind === "upload" ? (
+                      <Button
+                        className="attachment-action"
+                        onClick={() => {
+                          void props.onDownloadAttachment(attachment);
+                        }}
+                        size="icon"
+                        type="button"
+                        variant="ghost"
                       >
-                        <div>
-                          <strong>{attachment.originalName}</strong>
-                          <p>
-                            Added by {attachment.uploadedBy.displayName} on{" "}
-                            {formatTimestamp(attachment.createdAt)}
-                          </p>
-                        </div>
-                      </InfoRow>
-                    ))}
+                        <Download className="size-4" />
+                        <span className="sr-only">Download attachment</span>
+                      </Button>
+                    ) : (
+                      <Button asChild className="attachment-action" size="icon" variant="ghost">
+                        <a
+                          href={attachment.externalUrl ?? "#"}
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          <ExternalLink className="size-4" />
+                          <span className="sr-only">Open attachment link</span>
+                        </a>
+                      </Button>
+                    )}
                   </div>
-                </>
-              ) : null}
+                ))}
+              </div>
             </section>
           ) : null}
         </div>
