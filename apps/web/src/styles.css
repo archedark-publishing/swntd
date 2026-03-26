@@ -218,6 +218,12 @@ a {
   box-shadow: 0 0.5rem 1.2rem rgb(80 50 24 / 0.06);
 }
 
+.settings-gear-button-active {
+  background: linear-gradient(135deg, rgb(41 77 67 / 0.94), rgb(26 55 46 / 0.92));
+  color: rgb(255 250 241 / 0.98);
+  border-color: rgb(41 77 67 / 0.3);
+}
+
 .sidebar-nav-button {
   border: 1px solid rgb(86 58 30 / 0.12);
   background: rgb(255 255 255 / 0.58);

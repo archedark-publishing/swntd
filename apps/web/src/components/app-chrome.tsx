@@ -79,7 +79,10 @@ export function AppNavigation(props: {
               </Badge>
             </div>
             <Button
-              className="settings-gear-button rounded-full"
+              className={cn(
+                "settings-gear-button rounded-full",
+                props.selectedMain === "settings" && "settings-gear-button-active"
+              )}
               onClick={() => {
                 props.onSelectMain("settings");
                 props.onClose();
