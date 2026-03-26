@@ -78,6 +78,7 @@ import "./styles.css";
 
 type ViewName = "archive" | "board" | "settings";
 type SettingsPage = "general" | "household" | "labels" | "recurring";
+type TaskDetailControlId = "assignee" | "calendar" | "due" | "labels" | "status";
 
 type ChecklistDraftItem = {
   body: string;
@@ -382,14 +383,6 @@ function getAiAssistanceLabel(users: UserRef[]) {
   const serviceActorName = getPrimaryServiceActorName(users);
 
   return serviceActorName ? `${serviceActorName} can help` : "AI help enabled";
-}
-
-function getAiAssistanceToggleLabel(users: UserRef[]) {
-  const serviceActorName = getPrimaryServiceActorName(users);
-
-  return serviceActorName
-    ? `Let ${serviceActorName} help`
-    : "Let the household assistant help";
 }
 
 function buildFlashMessage(error: unknown) {
@@ -1165,7 +1158,6 @@ export function App() {
       </div>
 
       <TaskSheet
-        aiAssistanceToggleLabel={getAiAssistanceToggleLabel(snapshot.users)}
         actor={snapshot.actor}
         isOpen={isTaskSheetOpen}
         isSavingDisabled={!canAdmin}
@@ -1910,7 +1902,6 @@ function TaskCard(props: TaskCardProps) {
 }
 
 function TaskSheet(props: {
-  aiAssistanceToggleLabel: string;
   actor: Actor | null;
   isOpen: boolean;
   isSavingDisabled: boolean;
@@ -1934,6 +1925,7 @@ function TaskSheet(props: {
   variant: "create" | "detail";
 }) {
   const [draft, setDraft] = useState<TaskDraft>(() => createTaskDraft(null));
+  const [activeControl, setActiveControl] = useState<TaskDetailControlId | null>(null);
   const [commentBody, setCommentBody] = useState("");
   const [linkDraft, setLinkDraft] = useState({ name: "", url: "" });
   const lastServerDraftKeyRef = useRef(serializeTaskDraft(createTaskDraft(null)));
@@ -1983,6 +1975,7 @@ function TaskSheet(props: {
       setDraft(nextDraft);
     }
 
+    setActiveControl(null);
     setCommentBody("");
     setLinkDraft({ name: "", url: "" });
   }, [props.task, props.variant]);
@@ -2021,6 +2014,7 @@ function TaskSheet(props: {
   }
 
   const currentTask = props.variant === "detail" ? props.task : null;
+  const selectedLabels = props.labels.filter((label) => draft.labelIds.includes(label.id));
   const hasUnsavedChanges =
     props.variant === "detail" &&
     !!currentTask &&
@@ -2066,19 +2060,21 @@ function TaskSheet(props: {
               />
             )}
             {currentTask ? (
-              <div className="sheet-summary">
-                <Badge className="sheet-summary-badge" variant="secondary">
-                  {currentTask.status}
-                </Badge>
-                <Badge className="sheet-summary-badge" variant="outline">
-                  {currentTask.assignee?.displayName ?? "Unassigned"}
-                </Badge>
-                {currentTask.dueOn ? (
-                  <Badge className="sheet-summary-badge" variant="outline">
-                    {formatDate(currentTask.dueOn, currentTask.dueTime)}
-                  </Badge>
-                ) : null}
-              </div>
+              <TaskDetailControlGrid
+                activeControl={activeControl}
+                canEdit={!props.isSavingDisabled}
+                currentTask={currentTask}
+                draft={draft}
+                labels={props.labels}
+                onCalendarAction={props.onCalendarAction}
+                onChangeDraft={setDraft}
+                onStatusChange={props.onStatusChange}
+                onToggleControl={(control) =>
+                  setActiveControl((current) => (current === control ? null : control))
+                }
+                settings={props.settings}
+                users={props.users}
+              />
             ) : (
               <p className="section-copy">
                 Capture the errand, chore, or recurring ritual with enough context for anyone in the household to pick it up.
@@ -2092,10 +2088,8 @@ function TaskSheet(props: {
 
         <div className="sheet-body">
           <TaskForm
-            aiAssistanceToggleLabel={props.aiAssistanceToggleLabel}
             canEdit={!props.isSavingDisabled}
             draft={draft}
-            labels={props.labels}
             onChange={setDraft}
             onSubmit={() => {
               void props.onSave(draft);
@@ -2111,31 +2105,27 @@ function TaskSheet(props: {
 
           {currentTask ? (
             <section className="sheet-section">
-              <SectionHeading
-                actions={
-                  <div className="status-row">
-                    {taskStatuses.map((status) => (
-                      <Button
-                        className="rounded-full"
-                        key={status}
-                        onClick={() => {
-                          void props.onStatusChange(currentTask, status);
-                        }}
-                        size="sm"
-                        type="button"
-                        variant={currentTask.status === status ? "default" : "outline"}
-                      >
-                        {status}
-                      </Button>
-                    ))}
-                  </div>
-                }
-                compact
-                eyebrow="Status"
-                title="Move the card"
-                titleAs="h3"
-              />
-              <div className="sheet-actions">
+              {selectedLabels.length > 0 ? (
+                <div className="detail-labels-wrap">
+                  {selectedLabels.map((label) => (
+                    <button
+                      className="detail-label-chip"
+                      key={label.id}
+                      onClick={() =>
+                        setDraft((current) => ({
+                          ...current,
+                          labelIds: current.labelIds.filter((entry) => entry !== label.id)
+                        }))
+                      }
+                      type="button"
+                    >
+                      <span>{label.name}</span>
+                      <span aria-hidden="true">x</span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              <div className="sheet-actions detail-actions">
                 {currentTask.archivedAt ? (
                   <Button
                     onClick={() => {
@@ -2159,13 +2149,6 @@ function TaskSheet(props: {
                     Archive Task
                   </Button>
                 )}
-                {currentTask.dueOn && props.settings ? (
-                  <CalendarActions
-                    currentTask={currentTask}
-                    onCalendarAction={props.onCalendarAction}
-                    settings={props.settings}
-                  />
-                ) : null}
               </div>
             </section>
           ) : null}
@@ -2327,50 +2310,272 @@ function TaskSheet(props: {
   );
 }
 
-function CalendarActions(props: {
+function TaskDetailControlGrid(props: {
+  activeControl: TaskDetailControlId | null;
+  canEdit: boolean;
   currentTask: TaskDetail;
+  draft: TaskDraft;
+  labels: Label[];
   onCalendarAction: (task: TaskDetail, kind: "google" | "ics") => void;
-  settings: Settings;
+  onChangeDraft: (draft: TaskDraft | ((current: TaskDraft) => TaskDraft)) => void;
+  onStatusChange: (task: TaskDetail, status: TaskStatus) => Promise<void>;
+  onToggleControl: (control: TaskDetailControlId) => void;
+  settings: Settings | null;
+  users: UserRef[];
+}) {
+  const selectedLabels = props.labels.filter((label) =>
+    props.draft.labelIds.includes(label.id)
+  );
+  const assigneeLabel =
+    props.users.find((user) => user.id === props.draft.assigneeUserId)?.displayName ??
+    "Unassigned";
+  const dueLabel = props.draft.dueOn
+    ? formatDate(props.draft.dueOn, props.draft.dueTime || null)
+    : "No due date";
+  const calendarLabel = props.settings
+    ? props.settings.defaultCalendarExportKind === "google"
+      ? "Google"
+      : ".ics"
+    : "Unavailable";
+
+  return (
+    <div className="detail-controls-shell">
+      <div className="detail-controls-grid">
+        <DetailControlButton
+          active={props.activeControl === "status"}
+          disabled={!props.canEdit}
+          label="Status"
+          onClick={() => props.onToggleControl("status")}
+          value={props.currentTask.status}
+        />
+        <DetailControlButton
+          active={props.activeControl === "assignee"}
+          disabled={!props.canEdit}
+          label="Assignee"
+          onClick={() => props.onToggleControl("assignee")}
+          value={assigneeLabel}
+        />
+        <DetailControlButton
+          active={props.activeControl === "labels"}
+          disabled={!props.canEdit}
+          label="Labels"
+          onClick={() => props.onToggleControl("labels")}
+          value={selectedLabels.length > 0 ? `${selectedLabels.length} selected` : "None"}
+        />
+        <DetailControlButton
+          active={props.activeControl === "due"}
+          disabled={!props.canEdit}
+          label="Due"
+          onClick={() => props.onToggleControl("due")}
+          value={dueLabel}
+        />
+        <DetailControlButton
+          active={props.activeControl === "calendar"}
+          disabled={!props.currentTask.dueOn || !props.settings}
+          label="Calendar"
+          onClick={() => props.onToggleControl("calendar")}
+          value={calendarLabel}
+        />
+      </div>
+
+      {props.activeControl === "status" ? (
+        <div className="detail-control-panel">
+          <div className="detail-control-options">
+            {taskStatuses.map((status) => (
+              <Button
+                className="rounded-full"
+                disabled={!props.canEdit}
+                key={status}
+                onClick={() => {
+                  void props.onStatusChange(props.currentTask, status);
+                  props.onToggleControl("status");
+                }}
+                size="sm"
+                type="button"
+                variant={props.currentTask.status === status ? "default" : "outline"}
+              >
+                {status}
+              </Button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {props.activeControl === "assignee" ? (
+        <div className="detail-control-panel">
+          <div className="detail-control-options">
+            <Button
+              className="rounded-full"
+              disabled={!props.canEdit}
+              onClick={() => {
+                props.onChangeDraft((current) => ({
+                  ...current,
+                  assigneeUserId: ""
+                }));
+                props.onToggleControl("assignee");
+              }}
+              size="sm"
+              type="button"
+              variant={!props.draft.assigneeUserId ? "default" : "outline"}
+            >
+              Unassigned
+            </Button>
+            {props.users
+              .filter((user) => !user.deactivatedAt)
+              .map((user) => (
+                <Button
+                  className="rounded-full"
+                  disabled={!props.canEdit}
+                  key={user.id}
+                  onClick={() => {
+                    props.onChangeDraft((current) => ({
+                      ...current,
+                      assigneeUserId: user.id
+                    }));
+                    props.onToggleControl("assignee");
+                  }}
+                  size="sm"
+                  type="button"
+                  variant={props.draft.assigneeUserId === user.id ? "default" : "outline"}
+                >
+                  {user.displayName}
+                </Button>
+              ))}
+          </div>
+        </div>
+      ) : null}
+
+      {props.activeControl === "due" ? (
+        <div className="detail-control-panel detail-control-panel-grid">
+          <FormField label="Due date">
+            <FormInput
+              disabled={!props.canEdit}
+              onChange={(event) =>
+                props.onChangeDraft((current) => ({
+                  ...current,
+                  dueOn: event.target.value
+                }))
+              }
+              type="date"
+              value={props.draft.dueOn}
+            />
+          </FormField>
+          <FormField label="Due time">
+            <FormInput
+              disabled={!props.canEdit || !props.draft.dueOn}
+              onChange={(event) =>
+                props.onChangeDraft((current) => ({
+                  ...current,
+                  dueTime: event.target.value
+                }))
+              }
+              type="time"
+              value={props.draft.dueTime}
+            />
+          </FormField>
+          <div className="detail-control-actions">
+            <Button
+              disabled={!props.canEdit || (!props.draft.dueOn && !props.draft.dueTime)}
+              onClick={() =>
+                props.onChangeDraft((current) => ({
+                  ...current,
+                  dueOn: "",
+                  dueTime: ""
+                }))
+              }
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              Clear Due
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
+      {props.activeControl === "calendar" ? (
+        <div className="detail-control-panel">
+          <div className="detail-control-options">
+            <Button
+              className="rounded-full"
+              disabled={!props.currentTask.dueOn || !props.settings}
+              onClick={() => props.onCalendarAction(props.currentTask, "google")}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              Open Google Calendar
+            </Button>
+            <Button
+              className="rounded-full"
+              disabled={!props.currentTask.dueOn || !props.settings}
+              onClick={() => props.onCalendarAction(props.currentTask, "ics")}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              Download .ics
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
+      {props.activeControl === "labels" ? (
+        <div className="detail-control-panel">
+          <div className="checkbox-grid">
+            {props.labels.map((label) => (
+              <ChoiceChip
+                checked={props.draft.labelIds.includes(label.id)}
+                disabled={!props.canEdit}
+                key={label.id}
+                label={label.name}
+                onCheckedChange={(checked) =>
+                  props.onChangeDraft((current) => ({
+                    ...current,
+                    labelIds:
+                      checked === true
+                        ? [...current.labelIds, label.id]
+                        : current.labelIds.filter((entry) => entry !== label.id)
+                  }))
+                }
+              />
+            ))}
+            {props.labels.length === 0 ? (
+              <EmptyStateCard message="Create labels in Settings to use them here." />
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function DetailControlButton(props: {
+  active: boolean;
+  disabled?: boolean;
+  label: string;
+  onClick: () => void;
+  value: string;
 }) {
   return (
-    <>
-      <Button
-        onClick={() =>
-          props.onCalendarAction(
-            props.currentTask,
-            props.settings.defaultCalendarExportKind
-          )
-        }
-        size="sm"
-        type="button"
-        variant="outline"
-      >
-        Add to Calendar
-      </Button>
-      <Button
-        onClick={() =>
-          props.onCalendarAction(
-            props.currentTask,
-            props.settings.defaultCalendarExportKind === "google"
-              ? "ics"
-              : "google"
-          )
-        }
-        size="sm"
-        type="button"
-        variant="outline"
-      >
-        Use {props.settings.defaultCalendarExportKind === "google" ? "ICS" : "Google"} Instead
-      </Button>
-    </>
+    <button
+      className={cn(
+        "detail-control-button",
+        props.active && "detail-control-button-active"
+      )}
+      disabled={props.disabled}
+      onClick={props.onClick}
+      type="button"
+    >
+      <span className="detail-control-label">{props.label}</span>
+      <span className="detail-control-value">{props.value}</span>
+    </button>
   );
 }
 
 function TaskForm(props: {
-  aiAssistanceToggleLabel: string;
   canEdit: boolean;
   draft: TaskDraft;
-  labels: Label[];
   onChange: (draft: TaskDraft) => void;
   onSubmit: () => void;
   showSubmitButton: boolean;
@@ -2432,50 +2637,6 @@ function TaskForm(props: {
           placeholder="Unassigned"
           value={props.draft.assigneeUserId}
         />
-
-        {props.variant === "detail" ? (
-          <>
-            <ToggleField
-              checked={props.draft.aiAssistanceEnabled}
-              disabled={!props.canEdit}
-              label={props.aiAssistanceToggleLabel}
-              onCheckedChange={(value) =>
-                props.onChange({
-                  ...props.draft,
-                  aiAssistanceEnabled: value
-                })
-              }
-            />
-
-            <FormField label="Due date">
-              <FormInput
-                disabled={!props.canEdit}
-                onChange={(event) =>
-                  props.onChange({
-                    ...props.draft,
-                    dueOn: event.target.value
-                  })
-                }
-                type="date"
-                value={props.draft.dueOn}
-              />
-            </FormField>
-
-            <FormField label="Due time">
-              <FormInput
-                disabled={!props.canEdit}
-                onChange={(event) =>
-                  props.onChange({
-                    ...props.draft,
-                    dueTime: event.target.value
-                  })
-                }
-                type="time"
-                value={props.draft.dueTime}
-              />
-            </FormField>
-          </>
-        ) : null}
       </div>
 
       {props.variant === "detail" ? (
@@ -2566,30 +2727,6 @@ function TaskForm(props: {
             </div>
           </div>
 
-          <div className="sheet-section">
-            <SectionHeading compact eyebrow="Labels" title="Categories" titleAs="h3" />
-            <div className="checkbox-grid">
-              {props.labels.map((label) => (
-                <ChoiceChip
-                  checked={props.draft.labelIds.includes(label.id)}
-                  disabled={!props.canEdit}
-                  key={label.id}
-                  label={label.name}
-                  onCheckedChange={(checked) =>
-                    props.onChange({
-                      ...props.draft,
-                      labelIds: checked === true
-                        ? [...props.draft.labelIds, label.id]
-                        : props.draft.labelIds.filter((entry) => entry !== label.id)
-                    })
-                  }
-                />
-              ))}
-              {props.labels.length === 0 ? (
-                <EmptyStateCard message="Create labels in Settings to use them here." />
-              ) : null}
-            </div>
-          </div>
         </>
       ) : null}
 
