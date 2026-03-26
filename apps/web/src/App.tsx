@@ -1291,14 +1291,21 @@ function BoardView(props: {
     <section className="panel-stack">
       <SectionHeading
         actions={
-          <Button
+          <button
+            aria-checked={props.isFilteredToActor}
+            className={cn(
+              "board-filter-toggle",
+              props.isFilteredToActor && "board-filter-toggle-active"
+            )}
             onClick={props.onToggleActorFilter}
-            size="sm"
+            role="switch"
             type="button"
-            variant={props.isFilteredToActor ? "default" : "outline"}
           >
-            Only My Tasks
-          </Button>
+            <span className="board-filter-toggle-track" aria-hidden="true">
+              <span className="board-filter-toggle-thumb" />
+            </span>
+            <span className="board-filter-toggle-label">Only My Tasks</span>
+          </button>
         }
         eyebrow="Chore Board"
         title="The S#!% List"
