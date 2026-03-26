@@ -1244,6 +1244,8 @@ function BoardView(props: {
   const [inlineTaskTitle, setInlineTaskTitle] = useState("");
   const [isInlineTaskOpen, setIsInlineTaskOpen] = useState(false);
   const [isInlineTaskPending, setIsInlineTaskPending] = useState(false);
+  const boardScrollRef = useRef<HTMLDivElement | null>(null);
+  const edgeScrollLockRef = useRef<"left" | "right" | null>(null);
   const taskNodeMapRef = useRef(new Map<string, HTMLDivElement>());
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -1292,6 +1294,57 @@ function BoardView(props: {
     }
 
     taskNodeMapRef.current.set(taskId, node);
+  }
+
+  function handleBoardEdgeScroll(event: DragMoveEvent | DragOverEvent | DragEndEvent) {
+    const boardScrollNode = boardScrollRef.current;
+
+    if (!boardScrollNode || boardScrollNode.scrollWidth <= boardScrollNode.clientWidth + 4) {
+      edgeScrollLockRef.current = null;
+      return;
+    }
+
+    const translated = event.active.rect.current.translated;
+
+    if (!translated) {
+      edgeScrollLockRef.current = null;
+      return;
+    }
+
+    const pointerX = translated.left + translated.width / 2;
+    const rect = boardScrollNode.getBoundingClientRect();
+    const edgeThreshold = Math.min(72, rect.width * 0.18);
+    let direction: "left" | "right" | null = null;
+
+    if (pointerX <= rect.left + edgeThreshold) {
+      direction = "left";
+    } else if (pointerX >= rect.right - edgeThreshold) {
+      direction = "right";
+    }
+
+    if (!direction) {
+      edgeScrollLockRef.current = null;
+      return;
+    }
+
+    if (edgeScrollLockRef.current === direction) {
+      return;
+    }
+
+    const boardGridNode = boardScrollNode.querySelector<HTMLElement>(".board-grid");
+    const firstColumn = boardScrollNode.querySelector<HTMLElement>(".board-column");
+    const gap = boardGridNode
+      ? Number.parseFloat(getComputedStyle(boardGridNode).columnGap || "0")
+      : 0;
+    const step = firstColumn
+      ? firstColumn.getBoundingClientRect().width + gap
+      : boardScrollNode.clientWidth * 0.82;
+
+    boardScrollNode.scrollBy({
+      behavior: "smooth",
+      left: direction === "left" ? -step : step
+    });
+    edgeScrollLockRef.current = direction;
   }
 
   function getProjectedIndex(taskId: string, status: TaskStatus, activeMidpoint: number | null) {
@@ -1389,15 +1442,19 @@ function BoardView(props: {
         title="The S#!% List"
       />
       <DndContext
+        autoScroll={false}
         collisionDetection={closestCorners}
         onDragCancel={() => {
           setActiveTaskId(null);
           setDragProjection(null);
+          edgeScrollLockRef.current = null;
         }}
         onDragMove={(event: DragMoveEvent) => {
+          handleBoardEdgeScroll(event);
           setDragProjection(resolveDragProjection(event));
         }}
         onDragOver={(event: DragOverEvent) => {
+          handleBoardEdgeScroll(event);
           setDragProjection(resolveDragProjection(event));
         }}
         onDragEnd={(event: DragEndEvent) => {
@@ -1405,6 +1462,7 @@ function BoardView(props: {
 
           setActiveTaskId(null);
           setDragProjection(null);
+          edgeScrollLockRef.current = null;
 
           if (!props.canAdmin || !nextProjection) {
             return;
@@ -1443,7 +1501,7 @@ function BoardView(props: {
         }}
         sensors={sensors}
       >
-        <div className="board-scroll">
+        <div className="board-scroll" ref={boardScrollRef}>
           <div className="board-grid">
             {taskStatuses.map((status) => {
               const tasks = getTaskColumnOrder(
