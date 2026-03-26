@@ -384,17 +384,40 @@ a {
   padding: 1.5rem;
 }
 
+.board-scroll {
+  width: 100%;
+  overflow-x: auto;
+  padding-inline: 1rem;
+  margin-inline: -1rem;
+  scroll-snap-type: x mandatory;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.board-scroll::-webkit-scrollbar {
+  display: none;
+}
+
 .board-grid {
   display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(17rem, calc(100vw - 5.5rem));
   gap: 1rem;
-  max-width: 95rem;
-  margin: 0 auto;
+  max-width: none;
+  width: max-content;
+  margin: 0;
 }
 
 .board-column,
 .settings-card,
 .list-surface {
   padding: 1rem;
+}
+
+.board-column {
+  scroll-snap-align: center;
+  scroll-snap-stop: always;
 }
 
 .column-header,
@@ -873,7 +896,19 @@ a {
   }
 
   .board-grid {
+    width: auto;
+    margin: 0 auto;
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-auto-flow: row;
+    grid-auto-columns: auto;
+    max-width: 95rem;
+  }
+
+  .board-scroll {
+    overflow: visible;
+    margin-inline: 0;
+    padding-inline: 0;
+    scroll-snap-type: none;
   }
 
   .form-grid {
