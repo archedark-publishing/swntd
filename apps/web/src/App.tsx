@@ -392,6 +392,14 @@ function getAiAssistanceLabel(users: UserRef[]) {
   return serviceActorName ? `${serviceActorName} can help` : "AI help enabled";
 }
 
+function getAiAssistanceToggleLabel(users: UserRef[]) {
+  const serviceActorName = getPrimaryServiceActorName(users);
+
+  return serviceActorName
+    ? `Let ${serviceActorName} help`
+    : "Let the household assistant help";
+}
+
 function buildFlashMessage(error: unknown) {
   if (isConflictError(error)) {
     return "This task changed somewhere else. The board has been refreshed so you can try again.";
@@ -1165,6 +1173,7 @@ export function App() {
       </div>
 
       <TaskSheet
+        aiAssistanceToggleLabel={getAiAssistanceToggleLabel(snapshot.users)}
         actor={snapshot.actor}
         isOpen={isTaskSheetOpen}
         isSavingDisabled={!canAdmin}
@@ -1909,6 +1918,7 @@ function TaskCard(props: TaskCardProps) {
 }
 
 function TaskSheet(props: {
+  aiAssistanceToggleLabel: string;
   actor: Actor | null;
   isOpen: boolean;
   isSavingDisabled: boolean;
@@ -2095,6 +2105,7 @@ function TaskSheet(props: {
 
         <div className="sheet-body">
           <TaskForm
+            aiAssistanceToggleLabel={props.aiAssistanceToggleLabel}
             canEdit={!props.isSavingDisabled}
             draft={draft}
             onChange={setDraft}
@@ -2588,6 +2599,7 @@ function DetailControlButton(props: {
 }
 
 function TaskForm(props: {
+  aiAssistanceToggleLabel: string;
   canEdit: boolean;
   draft: TaskDraft;
   onChange: (draft: TaskDraft) => void;
@@ -2617,6 +2629,20 @@ function TaskForm(props: {
           </FormField>
         ) : null}
 
+        {props.variant === "detail" ? (
+          <ToggleField
+            checked={props.draft.aiAssistanceEnabled}
+            disabled={!props.canEdit}
+            label={props.aiAssistanceToggleLabel}
+            onCheckedChange={(value) =>
+              props.onChange({
+                ...props.draft,
+                aiAssistanceEnabled: value
+              })
+            }
+          />
+        ) : null}
+
         <FormField className="wide" label="Description">
           <FormTextarea
             disabled={!props.canEdit}
@@ -2632,25 +2658,27 @@ function TaskForm(props: {
           />
         </FormField>
 
-        <FormSelect
-          className=""
-          disabled={!props.canEdit}
-          label="Assignee"
-          onValueChange={(value) =>
-            props.onChange({
-              ...props.draft,
-              assigneeUserId: value
-            })
-          }
-          options={props.users
-            .filter((user) => !user.deactivatedAt)
-            .map((user) => ({
-              label: user.displayName,
-              value: user.id
-            }))}
-          placeholder="Unassigned"
-          value={props.draft.assigneeUserId}
-        />
+        {props.variant === "create" ? (
+          <FormSelect
+            className=""
+            disabled={!props.canEdit}
+            label="Assignee"
+            onValueChange={(value) =>
+              props.onChange({
+                ...props.draft,
+                assigneeUserId: value
+              })
+            }
+            options={props.users
+              .filter((user) => !user.deactivatedAt)
+              .map((user) => ({
+                label: user.displayName,
+                value: user.id
+              }))}
+            placeholder="Unassigned"
+            value={props.draft.assigneeUserId}
+          />
+        ) : null}
       </div>
 
       {props.variant === "detail" ? (
