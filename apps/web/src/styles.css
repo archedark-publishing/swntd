@@ -217,27 +217,11 @@ a {
   color: rgb(255 250 241 / 0.98);
 }
 
-.masthead,
 .board-grid,
 .panel-stack,
 .settings-shell {
   position: relative;
   z-index: 1;
-}
-
-.masthead {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  margin: 0 auto 1rem;
-  padding: 1.5rem;
-  max-width: 95rem;
-  border: 1px solid var(--border-soft);
-  border-radius: 1.5rem;
-  background:
-    linear-gradient(135deg, rgb(255 255 255 / 0.5), transparent 60%),
-    var(--bg-paper);
-  box-shadow: var(--shadow-soft);
 }
 
 .eyebrow {
@@ -248,7 +232,6 @@ a {
   font-size: 0.72rem;
 }
 
-.masthead h1,
 .status-panel h2,
 .section-header h2,
 .section-header h3,
@@ -261,7 +244,6 @@ a {
   letter-spacing: -0.02em;
 }
 
-.masthead h1,
 .status-panel h2,
 .section-header h2,
 .sheet-header h2 {
@@ -274,7 +256,6 @@ a {
   font-size: 1.2rem;
 }
 
-.subtitle,
 .section-copy,
 .status-panel p,
 .task-card p,
@@ -285,11 +266,12 @@ a {
   line-height: 1.65;
 }
 
-.masthead-actions {
+.mobile-nav-row {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.75rem;
+  justify-content: flex-end;
+  width: 100%;
+  margin: 0 auto 1rem;
+  max-width: 95rem;
 }
 
 .nav-drawer-trigger,
@@ -875,12 +857,6 @@ a {
     border-radius: 1.5rem;
     transform: none;
     box-shadow: var(--shadow-soft);
-  }
-
-  .masthead {
-    flex-direction: row;
-    justify-content: space-between;
-    align-items: flex-start;
   }
 
   .board-grid {

@@ -6,9 +6,9 @@ import {
   useRef,
   useState
 } from "react";
+import { Menu } from "lucide-react";
 import {
   AppNavigation,
-  AppChrome,
   EmptyStateCard,
   InfoRow,
   SectionHeading,
@@ -916,9 +916,18 @@ export function App() {
         />
 
         <div className="app-content">
-          <AppChrome
-            onOpenNavigation={() => setIsNavOpen(true)}
-          />
+          <div className="mobile-nav-row">
+            <Button
+              className="nav-drawer-trigger rounded-full bg-white/70 shadow-sm hover:bg-white"
+              onClick={() => setIsNavOpen(true)}
+              size="icon"
+              type="button"
+              variant="outline"
+            >
+              <Menu className="size-4" />
+              <span className="sr-only">Open navigation</span>
+            </Button>
+          </div>
 
           {isBooting ? (
             <StatusMessageCard

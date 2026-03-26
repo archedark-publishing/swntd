@@ -1,39 +1,10 @@
 import type { ComponentProps, ReactNode } from "react";
-import { Menu, ScrollText, X } from "lucide-react";
+import { ScrollText, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-
-export function AppChrome(props: {
-  onOpenNavigation: () => void;
-}) {
-  return (
-    <header className="masthead">
-      <div>
-        <p className="eyebrow">Household Ledger</p>
-        <h1>S#!% We Need To Do</h1>
-        <p className="subtitle">
-          A shared board for chores, errands, recurring rituals, and the small
-          domestic plot twists that keep a household moving.
-        </p>
-      </div>
-      <div className="masthead-actions">
-        <Button
-          className="nav-drawer-trigger rounded-full bg-white/70 shadow-sm hover:bg-white"
-          onClick={props.onOpenNavigation}
-          size="icon"
-          type="button"
-          variant="outline"
-        >
-          <Menu className="size-4" />
-          <span className="sr-only">Open navigation</span>
-        </Button>
-      </div>
-    </header>
-  );
-}
 
 export function AppNavigation(props: {
   actorDisplayName: string;
