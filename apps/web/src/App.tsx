@@ -7,6 +7,7 @@ import {
   useDroppable,
   useSensor,
   useSensors,
+  type DragMoveEvent,
   type DragOverEvent,
   type DragEndEvent,
   type UniqueIdentifier,
@@ -1190,6 +1191,7 @@ function BoardView(props: {
     targetIndex: number;
     targetStatus: TaskStatus;
   } | null>(null);
+  const taskNodeMapRef = useRef(new Map<string, HTMLDivElement>());
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
@@ -1205,7 +1207,48 @@ function BoardView(props: {
       ? null
       : props.allTasks.find((task) => task.id === activeTaskId) ?? null;
 
-  function resolveDragProjection(event: DragOverEvent | DragEndEvent) {
+  function setTaskNode(taskId: string, node: HTMLDivElement | null) {
+    if (!node) {
+      taskNodeMapRef.current.delete(taskId);
+      return;
+    }
+
+    taskNodeMapRef.current.set(taskId, node);
+  }
+
+  function getProjectedIndex(taskId: string, status: TaskStatus, activeMidpoint: number | null) {
+    const tasks = getTaskColumnOrder(
+      props.visibleTasks.filter((entry) => entry.id !== taskId),
+      status
+    );
+
+    if (tasks.length === 0) {
+      return 0;
+    }
+
+    if (activeMidpoint === null) {
+      return tasks.length;
+    }
+
+    for (const [index, task] of tasks.entries()) {
+      const node = taskNodeMapRef.current.get(task.id);
+
+      if (!node) {
+        continue;
+      }
+
+      const rect = node.getBoundingClientRect();
+      const midpoint = rect.top + rect.height / 2;
+
+      if (activeMidpoint < midpoint) {
+        return index;
+      }
+    }
+
+    return tasks.length;
+  }
+
+  function resolveDragProjection(event: DragMoveEvent | DragOverEvent | DragEndEvent) {
     const taskId = String(event.active.id);
     const task = props.allTasks.find((entry) => entry.id === taskId);
 
@@ -1214,6 +1257,10 @@ function BoardView(props: {
     }
 
     const overId = String(event.over.id);
+    const activeMidpoint = event.active.rect.current.translated
+      ? event.active.rect.current.translated.top +
+        event.active.rect.current.translated.height / 2
+      : null;
 
     if (overId.startsWith("column:")) {
       const status = overId.replace("column:", "");
@@ -1222,13 +1269,8 @@ function BoardView(props: {
         return null;
       }
 
-      const tasks = getTaskColumnOrder(
-        props.visibleTasks.filter((entry) => entry.id !== taskId),
-        status
-      );
-
       return {
-        targetIndex: tasks.length,
+        targetIndex: getProjectedIndex(taskId, status, activeMidpoint),
         targetStatus: status
       };
     }
@@ -1239,29 +1281,8 @@ function BoardView(props: {
       return null;
     }
 
-    const tasks = getTaskColumnOrder(
-      props.visibleTasks.filter((entry) => entry.id !== taskId),
-      overTask.status
-    );
-    const overIndex = tasks.findIndex((entry) => entry.id === overTask.id);
-
-    if (overIndex < 0) {
-      return {
-        targetIndex: tasks.length,
-        targetStatus: overTask.status
-      };
-    }
-
-    const activeMidpoint = event.active.rect.current.translated
-      ? event.active.rect.current.translated.top +
-        event.active.rect.current.translated.height / 2
-      : null;
-    const overMidpoint = event.over.rect.top + event.over.rect.height / 2;
-    const shouldInsertAfter =
-      activeMidpoint !== null && activeMidpoint > overMidpoint;
-
     return {
-      targetIndex: overIndex + (shouldInsertAfter ? 1 : 0),
+      targetIndex: getProjectedIndex(taskId, overTask.status, activeMidpoint),
       targetStatus: overTask.status
     };
   }
@@ -1287,6 +1308,9 @@ function BoardView(props: {
         onDragCancel={() => {
           setActiveTaskId(null);
           setDragProjection(null);
+        }}
+        onDragMove={(event: DragMoveEvent) => {
+          setDragProjection(resolveDragProjection(event));
         }}
         onDragOver={(event: DragOverEvent) => {
           setDragProjection(resolveDragProjection(event));
@@ -1361,18 +1385,19 @@ function BoardView(props: {
               }
 
               return (
-                <BoardColumn
-                  aiAssistanceLabel={props.aiAssistanceLabel}
-                  canAdmin={props.canAdmin}
-                  items={renderItems}
-                  key={status}
-                  onCreateTask={props.onCreateTask}
-                  onOpenTask={props.onOpenTask}
-                  onQuickMove={props.onQuickMove}
-                  onReorder={props.onReorder}
-                  status={status}
-                  taskCount={getTaskColumnOrder(props.visibleTasks, status).length}
-                />
+              <BoardColumn
+                aiAssistanceLabel={props.aiAssistanceLabel}
+                canAdmin={props.canAdmin}
+                items={renderItems}
+                key={status}
+                onCreateTask={props.onCreateTask}
+                onOpenTask={props.onOpenTask}
+                onQuickMove={props.onQuickMove}
+                onReorder={props.onReorder}
+                onRegisterTaskNode={setTaskNode}
+                status={status}
+                taskCount={getTaskColumnOrder(props.visibleTasks, status).length}
+              />
               );
             })}
           </div>
@@ -1410,6 +1435,7 @@ function BoardColumn(props: {
   onCreateTask: () => void;
   onOpenTask: (taskId: string) => void;
   onQuickMove: (task: TaskListItem, direction: -1 | 1) => Promise<void>;
+  onRegisterTaskNode: (taskId: string, node: HTMLDivElement | null) => void;
   onReorder: (task: TaskListItem, direction: -1 | 1) => Promise<void>;
   status: TaskStatus;
   taskCount: number;
@@ -1466,6 +1492,7 @@ function BoardColumn(props: {
                 key={item.task.id}
                 onOpen={props.onOpenTask}
                 onQuickMove={props.onQuickMove}
+                onRegisterNode={props.onRegisterTaskNode}
                 onReorder={props.onReorder}
                 task={item.task}
                 total={props.items.length}
@@ -1481,6 +1508,7 @@ function BoardColumn(props: {
 function SortableTaskCard(
   props: {
     canDrag: boolean;
+    onRegisterNode: (taskId: string, node: HTMLDivElement | null) => void;
   } & Omit<TaskCardProps, "allowManualReorder">
 ) {
   const { attributes, isDragging, listeners, setNodeRef, transform, transition } = useSortable({
@@ -1491,7 +1519,10 @@ function SortableTaskCard(
   return (
     <div
       className={cn("task-sortable-shell", isDragging && "task-sortable-shell-dragging")}
-      ref={setNodeRef}
+      ref={(node) => {
+        setNodeRef(node);
+        props.onRegisterNode(props.task.id, node);
+      }}
       style={{
         transform: CSS.Transform.toString(transform),
         transition
