@@ -20,6 +20,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import {
+  type ComponentType,
   startTransition,
   useDeferredValue,
   useEffect,
@@ -27,7 +28,13 @@ import {
   useRef,
   useState
 } from "react";
-import { Menu } from "lucide-react";
+import {
+  CalendarDays,
+  CalendarPlus2,
+  Menu,
+  Tag,
+  UserRound
+} from "lucide-react";
 import {
   AppNavigation,
   EmptyStateCard,
@@ -2328,15 +2335,16 @@ function TaskDetailControlGrid(props: {
   );
   const assigneeLabel =
     props.users.find((user) => user.id === props.draft.assigneeUserId)?.displayName ??
-    "Unassigned";
+    null;
   const dueLabel = props.draft.dueOn
     ? formatDate(props.draft.dueOn, props.draft.dueTime || null)
-    : "No due date";
-  const calendarLabel = props.settings
-    ? props.settings.defaultCalendarExportKind === "google"
-      ? "Google"
-      : ".ics"
-    : "Unavailable";
+    : null;
+  const labelValue =
+    selectedLabels.length === 0
+      ? null
+      : selectedLabels.length === 1
+        ? selectedLabels[0]?.name ?? null
+        : `${selectedLabels.length} labels`;
 
   return (
     <div className="detail-controls-shell">
@@ -2344,37 +2352,36 @@ function TaskDetailControlGrid(props: {
         <DetailControlButton
           active={props.activeControl === "status"}
           disabled={!props.canEdit}
-          label="Status"
           onClick={() => props.onToggleControl("status")}
           value={props.currentTask.status}
         />
         <DetailControlButton
           active={props.activeControl === "assignee"}
           disabled={!props.canEdit}
-          label="Assignee"
+          emptyIcon={UserRound}
           onClick={() => props.onToggleControl("assignee")}
           value={assigneeLabel}
         />
         <DetailControlButton
           active={props.activeControl === "labels"}
           disabled={!props.canEdit}
-          label="Labels"
+          emptyIcon={Tag}
           onClick={() => props.onToggleControl("labels")}
-          value={selectedLabels.length > 0 ? `${selectedLabels.length} selected` : "None"}
+          value={labelValue}
         />
         <DetailControlButton
           active={props.activeControl === "due"}
           disabled={!props.canEdit}
-          label="Due"
+          emptyIcon={CalendarDays}
           onClick={() => props.onToggleControl("due")}
           value={dueLabel}
         />
         <DetailControlButton
           active={props.activeControl === "calendar"}
           disabled={!props.currentTask.dueOn || !props.settings}
-          label="Calendar"
+          emptyIcon={CalendarPlus2}
           onClick={() => props.onToggleControl("calendar")}
-          value={calendarLabel}
+          value={null}
         />
       </div>
 
@@ -2553,10 +2560,12 @@ function TaskDetailControlGrid(props: {
 function DetailControlButton(props: {
   active: boolean;
   disabled?: boolean;
-  label: string;
+  emptyIcon?: ComponentType<{ className?: string }>;
   onClick: () => void;
-  value: string;
+  value: string | null;
 }) {
+  const EmptyIcon = props.emptyIcon;
+
   return (
     <button
       className={cn(
@@ -2567,8 +2576,13 @@ function DetailControlButton(props: {
       onClick={props.onClick}
       type="button"
     >
-      <span className="detail-control-label">{props.label}</span>
-      <span className="detail-control-value">{props.value}</span>
+      {props.value ? (
+        <span className="detail-control-value">{props.value}</span>
+      ) : EmptyIcon ? (
+        <span className="detail-control-icon-wrap">
+          <EmptyIcon className="detail-control-icon" />
+        </span>
+      ) : null}
     </button>
   );
 }

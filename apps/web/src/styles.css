@@ -806,20 +806,21 @@ a {
 .detail-controls-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.75rem;
+  gap: 0.55rem;
 }
 
 .detail-control-button {
-  display: grid;
-  justify-items: start;
-  gap: 0.22rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   min-width: 0;
-  padding: 0.8rem 0.9rem;
+  min-height: 2.8rem;
+  padding: 0.55rem 0.7rem;
   border: 1px solid rgb(86 58 30 / 0.14);
-  border-radius: 1rem;
+  border-radius: 0.85rem;
   background: rgb(255 255 255 / 0.72);
   box-shadow: 0 0.5rem 1.2rem rgb(80 50 24 / 0.04);
-  text-align: left;
+  text-align: center;
   transition:
     background-color 180ms ease,
     border-color 180ms ease,
@@ -842,22 +843,27 @@ a {
   background: rgb(241 248 245 / 0.92);
 }
 
-.detail-control-label {
-  color: rgb(47 33 22 / 0.6);
-  font-size: 0.74rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
 .detail-control-value {
   width: 100%;
   color: rgb(32 23 15 / 0.86);
-  font-size: 0.96rem;
+  font-size: 0.88rem;
   font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.2;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.detail-control-icon-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+}
+
+.detail-control-icon {
+  width: 1rem;
+  height: 1rem;
+  color: rgb(47 33 22 / 0.56);
 }
 
 .detail-control-panel {
