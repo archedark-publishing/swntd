@@ -47,6 +47,8 @@ pnpm --filter @swntd/api dev
 pnpm --filter @swntd/mcp dev
 ```
 
+In `local_dev`, the API also runs the lifecycle jobs internally by default so recurring occurrences, archive rollover, and stale-upload cleanup continue to move while you test the app. In multi-instance or externally scheduled deployments, disable that with `SWNTD_INTERNAL_JOBS_ENABLED=false` and run `pnpm jobs:run` from your scheduler instead.
+
 For browser development, `apps/web` proxies `/api` requests to `SWNTD_API_PROXY_TARGET`, which defaults to `http://127.0.0.1:3001`, and can optionally send `VITE_SWNTD_DEV_ACTOR_EMAIL` in local development when the API is running in `local_dev` auth mode.
 
 The MCP server reads `SWNTD_MCP_SERVICE_TOKEN` from the environment and authenticates as a service actor on each tool call. In local development, point that env var at an issued SWNTD service token before running `pnpm --filter @swntd/mcp dev`.
