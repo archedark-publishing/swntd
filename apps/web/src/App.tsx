@@ -374,6 +374,31 @@ function formatDate(dateValue: string | null, timeValue?: string | null) {
   }).format(date);
 }
 
+function formatDueControlValue(dateValue: string | null, timeValue?: string | null) {
+  if (!dateValue) {
+    return null;
+  }
+
+  const date = new Date(`${dateValue}T00:00:00`);
+
+  if (!timeValue) {
+    return new Intl.DateTimeFormat(undefined, {
+      day: "numeric",
+      month: "short"
+    }).format(date);
+  }
+
+  const [hour, minute] = timeValue.split(":");
+  date.setHours(Number(hour), Number(minute), 0, 0);
+
+  return new Intl.DateTimeFormat(undefined, {
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    month: "short"
+  }).format(date);
+}
+
 function formatTimestamp(value: string) {
   return new Intl.DateTimeFormat(undefined, {
     dateStyle: "medium",
@@ -1677,7 +1702,13 @@ function BoardColumn(props: {
           </Badge>
         </div>
         {props.canAdmin && props.status === "To Do" ? (
-          <Button onClick={props.onCreateTask} size="icon" type="button" variant="outline">
+          <Button
+            className="column-add-button"
+            onClick={props.onCreateTask}
+            size="icon"
+            type="button"
+            variant="outline"
+          >
             <Plus className="size-4" />
             <span className="sr-only">New Task</span>
           </Button>
@@ -2245,31 +2276,6 @@ function TaskSheet(props: {
                   ))}
                 </div>
               ) : null}
-              <div className="sheet-actions detail-actions">
-                {currentTask.archivedAt ? (
-                  <Button
-                    onClick={() => {
-                      void props.onUnarchive(currentTask);
-                    }}
-                    size="sm"
-                    type="button"
-                    variant="outline"
-                  >
-                    Restore from Archive
-                  </Button>
-                ) : (
-                  <Button
-                    onClick={() => {
-                      void props.onArchive(currentTask);
-                    }}
-                    size="sm"
-                    type="button"
-                    variant="outline"
-                  >
-                    Archive Task
-                  </Button>
-                )}
-              </div>
             </section>
           ) : null}
 
@@ -2424,6 +2430,36 @@ function TaskSheet(props: {
               </div>
             </section>
           ) : null}
+
+          {currentTask ? (
+            <section className="sheet-section">
+              <div className="sheet-actions detail-actions">
+                {currentTask.archivedAt ? (
+                  <Button
+                    onClick={() => {
+                      void props.onUnarchive(currentTask);
+                    }}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    Restore from Archive
+                  </Button>
+                ) : (
+                  <Button
+                    onClick={() => {
+                      void props.onArchive(currentTask);
+                    }}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    Archive Task
+                  </Button>
+                )}
+              </div>
+            </section>
+          ) : null}
         </div>
       </aside>
     </div>
@@ -2450,7 +2486,7 @@ function TaskDetailControlGrid(props: {
     props.users.find((user) => user.id === props.draft.assigneeUserId)?.displayName ??
     null;
   const dueLabel = props.draft.dueOn
-    ? formatDate(props.draft.dueOn, props.draft.dueTime || null)
+    ? formatDueControlValue(props.draft.dueOn, props.draft.dueTime || null)
     : null;
   const labelValue =
     selectedLabels.length === 0

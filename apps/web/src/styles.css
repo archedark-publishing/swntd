@@ -436,8 +436,21 @@ a {
 }
 
 .column-header {
+  position: relative;
   align-items: center;
   margin-bottom: 0.75rem;
+  padding-right: 2.5rem;
+}
+
+.column-add-button {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+  width: 2rem;
+  height: 2rem;
+  min-width: 2rem;
+  border-radius: 999px;
 }
 
 .column-header-main {
