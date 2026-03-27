@@ -95,7 +95,7 @@ import "./styles.css";
 
 type ViewName = "archive" | "board" | "settings";
 type SettingsPage = "general" | "household" | "labels" | "recurring";
-type TaskDetailControlId = "assignee" | "calendar" | "due" | "labels" | "status";
+type TaskDetailControlId = "assignee" | "due" | "labels" | "status";
 
 const urlPattern = /https?:\/\/[^\s]+/gi;
 
@@ -2545,10 +2545,19 @@ function TaskDetailControlGrid(props: {
           value={dueLabel}
         />
         <DetailControlButton
-          active={props.activeControl === "calendar"}
+          active={false}
           disabled={!props.currentTask.dueOn || !props.settings}
           emptyIcon={CalendarPlus2}
-          onClick={() => props.onToggleControl("calendar")}
+          onClick={() => {
+            if (!props.settings || !props.currentTask.dueOn) {
+              return;
+            }
+
+            props.onCalendarAction(
+              props.currentTask,
+              props.settings.defaultCalendarExportKind
+            );
+          }}
           value={null}
         />
       </div>
@@ -2663,33 +2672,6 @@ function TaskDetailControlGrid(props: {
               variant="outline"
             >
               Clear Due
-            </Button>
-          </div>
-        </div>
-      ) : null}
-
-      {props.activeControl === "calendar" ? (
-        <div className="detail-control-panel">
-          <div className="detail-control-options">
-            <Button
-              className="rounded-full"
-              disabled={!props.currentTask.dueOn || !props.settings}
-              onClick={() => props.onCalendarAction(props.currentTask, "google")}
-              size="sm"
-              type="button"
-              variant="outline"
-            >
-              Open Google Calendar
-            </Button>
-            <Button
-              className="rounded-full"
-              disabled={!props.currentTask.dueOn || !props.settings}
-              onClick={() => props.onCalendarAction(props.currentTask, "ics")}
-              size="sm"
-              type="button"
-              variant="outline"
-            >
-              Download .ics
             </Button>
           </div>
         </div>
