@@ -865,7 +865,7 @@ a {
 
 .attachment-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: 2.5rem minmax(0, 1fr) auto;
   align-items: center;
   gap: 0.75rem;
   padding: 0.72rem 0.9rem;
@@ -873,6 +873,35 @@ a {
 
 .attachment-row + .attachment-row {
   border-top: 1px solid rgb(86 58 30 / 0.08);
+}
+
+.attachment-preview {
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 0.8rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(255 255 255 / 0.72);
+  border: 1px solid rgb(86 58 30 / 0.08);
+  overflow: hidden;
+  color: rgb(47 33 22 / 0.52);
+}
+
+.attachment-preview-image,
+.attachment-preview-favicon {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.attachment-preview-favicon {
+  padding: 0.45rem;
+  object-fit: contain;
+}
+
+.attachment-preview-fallback {
+  background: rgb(255 255 255 / 0.56);
 }
 
 .attachment-copy {

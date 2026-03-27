@@ -34,6 +34,7 @@ import {
   CalendarPlus2,
   Download,
   ExternalLink,
+  FileImage,
   Menu,
   Paperclip,
   Plus,
@@ -71,6 +72,7 @@ import {
   api,
   downloadAttachment,
   isConflictError,
+  loadAttachmentObjectUrl,
   taskStatuses,
   type Actor,
   type Attachment,
@@ -404,6 +406,22 @@ function formatTimestamp(value: string) {
     dateStyle: "medium",
     timeStyle: "short"
   }).format(new Date(value));
+}
+
+function isImageAttachment(attachment: Attachment) {
+  return attachment.storageKind === "upload" && attachment.mimeType?.startsWith("image/");
+}
+
+function getFaviconUrl(externalUrl: string | null) {
+  if (!externalUrl) {
+    return null;
+  }
+
+  try {
+    return new URL("/favicon.ico", externalUrl).toString();
+  } catch {
+    return null;
+  }
 }
 
 function getStatusStep(status: TaskStatus, direction: -1 | 1) {
@@ -2393,6 +2411,7 @@ function TaskSheet(props: {
               <div className="attachment-list">
                 {currentTask.attachments.map((attachment) => (
                   <div className="attachment-row" key={attachment.id}>
+                    <AttachmentPreview attachment={attachment} />
                     <div className="attachment-copy">
                       <strong>{attachment.originalName}</strong>
                       <p className="attachment-meta">
@@ -2703,6 +2722,87 @@ function TaskDetailControlGrid(props: {
         </div>
       ) : null}
     </div>
+  );
+}
+
+function AttachmentPreview(props: {
+  attachment: Attachment;
+}) {
+  const [imageObjectUrl, setImageObjectUrl] = useState<string | null>(null);
+  const [hasPreviewError, setHasPreviewError] = useState(false);
+  const faviconUrl = getFaviconUrl(props.attachment.externalUrl);
+
+  useEffect(() => {
+    if (!isImageAttachment(props.attachment) || !props.attachment.downloadUrl) {
+      setImageObjectUrl(null);
+      setHasPreviewError(false);
+      return;
+    }
+
+    let isActive = true;
+    let objectUrlToRevoke: string | null = null;
+
+    setHasPreviewError(false);
+
+    void loadAttachmentObjectUrl(props.attachment.downloadUrl)
+      .then((objectUrl) => {
+        if (!isActive) {
+          URL.revokeObjectURL(objectUrl);
+          return;
+        }
+
+        objectUrlToRevoke = objectUrl;
+        setImageObjectUrl(objectUrl);
+      })
+      .catch(() => {
+        if (!isActive) {
+          return;
+        }
+
+        setImageObjectUrl(null);
+        setHasPreviewError(true);
+      });
+
+    return () => {
+      isActive = false;
+
+      if (objectUrlToRevoke) {
+        URL.revokeObjectURL(objectUrlToRevoke);
+      }
+    };
+  }, [props.attachment]);
+
+  if (imageObjectUrl && !hasPreviewError) {
+    return (
+      <span className="attachment-preview" aria-hidden="true">
+        <img alt="" className="attachment-preview-image" src={imageObjectUrl} />
+      </span>
+    );
+  }
+
+  if (props.attachment.storageKind === "external_link" && faviconUrl && !hasPreviewError) {
+    return (
+      <span className="attachment-preview" aria-hidden="true">
+        <img
+          alt=""
+          className="attachment-preview-favicon"
+          onError={() => setHasPreviewError(true)}
+          src={faviconUrl}
+        />
+      </span>
+    );
+  }
+
+  return (
+    <span className="attachment-preview attachment-preview-fallback" aria-hidden="true">
+      {isImageAttachment(props.attachment) ? (
+        <FileImage className="size-4" />
+      ) : props.attachment.storageKind === "external_link" ? (
+        <ExternalLink className="size-4" />
+      ) : (
+        <Paperclip className="size-4" />
+      )}
+    </span>
   );
 }
 
