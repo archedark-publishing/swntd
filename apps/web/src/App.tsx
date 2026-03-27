@@ -93,8 +93,8 @@ import {
 import { toast } from "sonner";
 import "./styles.css";
 
-type ViewName = "archive" | "board" | "settings";
-type SettingsPage = "general" | "household" | "labels" | "recurring";
+type ViewName = "archive" | "board" | "recurring" | "settings";
+type SettingsPage = "general" | "household" | "labels";
 type TaskDetailControlId = "assignee" | "due" | "labels" | "status";
 
 const urlPattern = /https?:\/\/[^\s]+/gi;
@@ -164,17 +164,17 @@ const emptySnapshot: AppSnapshot = {
 
 const navItems: Array<{ id: ViewName; label: string }> = [
   { id: "board", label: "Board" },
+  { id: "recurring", label: "Recurring" },
   { id: "archive", label: "Archive" }
 ];
 const settingsNavItems: Array<{ id: SettingsPage; label: string }> = [
   { id: "general", label: "General" },
   { id: "household", label: "Household" },
-  { id: "labels", label: "Labels" },
-  { id: "recurring", label: "Recurring" }
+  { id: "labels", label: "Labels" }
 ];
 
 function isSettingsPage(value: string | undefined): value is SettingsPage {
-  return value === "general" || value === "household" || value === "labels" || value === "recurring";
+  return value === "general" || value === "household" || value === "labels";
 }
 
 function readRouteFromHash(): {
@@ -193,7 +193,15 @@ function readRouteFromHash(): {
     return { onlyMyTasks: false, settingsPage: "general", view: "archive" };
   }
 
+  if (viewPart === "recurring") {
+    return { onlyMyTasks: false, settingsPage: "general", view: "recurring" };
+  }
+
   if (viewPart === "settings") {
+    if (subpagePart === "recurring") {
+      return { onlyMyTasks: false, settingsPage: "general", view: "recurring" };
+    }
+
     return {
       onlyMyTasks: false,
       settingsPage: isSettingsPage(subpagePart) ? subpagePart : "general",
@@ -202,6 +210,10 @@ function readRouteFromHash(): {
   }
 
   return { onlyMyTasks: false, settingsPage: "general", view: "board" };
+}
+
+function buildHashForRoute(view: ViewName, settingsPage: SettingsPage) {
+  return view === "settings" ? `settings/${settingsPage}` : view;
 }
 
 function createChecklistDraft(items: Array<{ body: string; isCompleted: boolean }>) {
@@ -540,15 +552,7 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    const nextHash = view === "settings" ? `settings/${settingsPage}` : view;
-
-    if (window.location.hash !== `#${nextHash}`) {
-      window.location.hash = nextHash;
-    }
-  }, [settingsPage, view]);
-
-  useEffect(() => {
-    if (!isNavOpen && !isTaskSheetOpen) {
+    if (!isNavOpen && !isTaskSheetOpen && editingTemplateKey === null) {
       return;
     }
 
@@ -558,7 +562,7 @@ export function App() {
     return () => {
       document.body.style.overflow = previousOverflow;
     };
-  }, [isNavOpen, isTaskSheetOpen]);
+  }, [editingTemplateKey, isNavOpen, isTaskSheetOpen]);
 
   const loadTaskDetail = useEffectEvent(async (taskId: string | null) => {
     if (!taskId) {
@@ -753,12 +757,27 @@ export function App() {
     setView(nextView);
     setOnlyMyTasks(false);
 
+    if (nextView === "recurring") {
+      setEditingTemplateKey(null);
+    }
+
+    const nextHash = buildHashForRoute(nextView, settingsPage);
+
+    if (window.location.hash !== `#${nextHash}`) {
+      window.location.hash = nextHash;
+    }
+
     setIsNavOpen(false);
   }
 
   function handleSettingsPageChange(nextPage: SettingsPage) {
     setView("settings");
     setSettingsPage(nextPage);
+    const nextHash = buildHashForRoute("settings", nextPage);
+
+    if (window.location.hash !== `#${nextHash}`) {
+      window.location.hash = nextHash;
+    }
     setIsNavOpen(false);
   }
 
@@ -1224,6 +1243,28 @@ export function App() {
             </section>
           ) : null}
 
+          {!isBooting && view === "recurring" ? (
+            <RecurringView
+              canAdmin={canAdmin}
+              isTemplateEditorOpen={editingTemplateKey !== null}
+              labels={snapshot.labels}
+              onSaveTemplate={handleTemplateSave}
+              onSelectTemplate={(templateKey) => {
+                setEditingTemplateKey(templateKey);
+                setIsNavOpen(false);
+              }}
+              recurringTemplates={snapshot.recurringTemplates}
+              selectedTemplate={
+                editingTemplateKey && editingTemplateKey !== "new"
+                  ? snapshot.recurringTemplates.find(
+                      (template) => template.id === editingTemplateKey
+                    ) ?? null
+                  : null
+              }
+              users={snapshot.users}
+            />
+          ) : null}
+
           {!isBooting && view === "settings" ? (
             <SettingsView
               activePage={settingsPage}
@@ -1234,27 +1275,13 @@ export function App() {
               onRemoveUser={handleHouseholdUserRemove}
               onRevokeServiceToken={handleServiceTokenRevoke}
               onSaveSettings={handleSettingsSave}
-              onSaveTemplate={handleTemplateSave}
               onSaveUser={handleHouseholdUserSave}
               onSelectPage={handleSettingsPageChange}
-              onSelectTemplate={(templateKey) => {
-                setEditingTemplateKey(templateKey);
-                setSettingsPage("recurring");
-              }}
               onSelectUser={(userKey) => {
                 setEditingUserKey(userKey);
                 setSettingsPage("household");
               }}
-              isTemplateEditorOpen={editingTemplateKey !== null}
               isUserEditorOpen={editingUserKey !== null}
-              recurringTemplates={snapshot.recurringTemplates}
-              selectedTemplate={
-                editingTemplateKey && editingTemplateKey !== "new"
-                  ? snapshot.recurringTemplates.find(
-                      (template) => template.id === editingTemplateKey
-                    ) ?? null
-                  : null
-              }
               selectedUser={selectedHouseholdUser}
               serviceTokensByUserId={snapshot.serviceTokensByUserId}
               settings={snapshot.settings}
@@ -3036,7 +3063,6 @@ function TaskForm(props: {
 function SettingsView(props: {
   activePage: SettingsPage;
   canAdmin: boolean;
-  isTemplateEditorOpen: boolean;
   isUserEditorOpen: boolean;
   labels: Label[];
   onCreateLabel: (input: { color: string; name: string }) => Promise<void>;
@@ -3047,13 +3073,9 @@ function SettingsView(props: {
   onRemoveUser: (userId: string) => Promise<boolean>;
   onRevokeServiceToken: (tokenId: string) => Promise<void>;
   onSaveSettings: (settings: Settings) => Promise<void>;
-  onSaveTemplate: (draft: TemplateDraft) => Promise<void>;
   onSaveUser: (userId: string | null, draft: HouseholdUserDraft) => Promise<boolean>;
   onSelectPage: (page: SettingsPage) => void;
-  onSelectTemplate: (templateId: string | "new" | null) => void;
   onSelectUser: (userKey: string | "new-admin" | "new-service" | null) => void;
-  recurringTemplates: RecurringTemplate[];
-  selectedTemplate: RecurringTemplate | null;
   selectedUser: UserRef | null;
   serviceTokensByUserId: Record<string, ServiceToken[]>;
   settings: Settings | null;
@@ -3063,9 +3085,6 @@ function SettingsView(props: {
   const [labelName, setLabelName] = useState("");
   const [labelColor, setLabelColor] = useState("");
   const [settingsDraft, setSettingsDraft] = useState<Settings | null>(props.settings);
-  const [templateDraft, setTemplateDraft] = useState<TemplateDraft>(
-    createTemplateDraft(props.selectedTemplate)
-  );
   const [userDraft, setUserDraft] = useState<HouseholdUserDraft>(
     createHouseholdUserDraft(props.selectedUser, props.userEditorMode)
   );
@@ -3078,10 +3097,6 @@ function SettingsView(props: {
   useEffect(() => {
     setSettingsDraft(props.settings);
   }, [props.settings]);
-
-  useEffect(() => {
-    setTemplateDraft(createTemplateDraft(props.selectedTemplate));
-  }, [props.selectedTemplate]);
 
   useEffect(() => {
     setUserDraft(createHouseholdUserDraft(props.selectedUser, props.userEditorMode));
@@ -3499,57 +3514,140 @@ function SettingsView(props: {
           </SurfaceCard>
         ) : null}
 
-        {props.activePage === "recurring" ? (
-          <SurfaceCard className="settings-card gap-0 py-0">
-            <SectionHeading
-              actions={
-                <Button
-                  onClick={() => props.onSelectTemplate("new")}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                >
-                  New Template
-                </Button>
-              }
-              eyebrow="Recurring Work"
-              title="Templates"
-            />
-            <div className="template-grid">
-              <div className="template-list">
-                {props.recurringTemplates.length === 0 ? (
-                  <EmptyStateCard message="No recurring templates yet." />
-                ) : null}
-                {props.recurringTemplates.map((template) => (
-                  <SelectionListButton
-                    active={props.selectedTemplate?.id === template.id}
-                    key={template.id}
-                    label={template.title}
-                    meta={`${template.recurrenceCadence} every ${template.recurrenceInterval}`}
-                    onClick={() => props.onSelectTemplate(template.id)}
-                  />
-                ))}
-              </div>
-              <div className="template-editor">
-                {props.isTemplateEditorOpen ? (
-                  <RecurringTemplateForm
-                    draft={templateDraft}
-                    labels={props.labels}
-                    onChange={setTemplateDraft}
-                    onSubmit={() => {
-                      void props.onSaveTemplate(templateDraft);
-                    }}
-                    users={props.users}
-                  />
-                ) : (
-                  <EmptyStateCard message="Choose a recurring template or start a new one." />
-                )}
-              </div>
-            </div>
-          </SurfaceCard>
-        ) : null}
       </div>
     </section>
+  );
+}
+
+function RecurringView(props: {
+  canAdmin: boolean;
+  isTemplateEditorOpen: boolean;
+  labels: Label[];
+  onSaveTemplate: (draft: TemplateDraft) => Promise<void>;
+  onSelectTemplate: (templateId: string | "new" | null) => void;
+  recurringTemplates: RecurringTemplate[];
+  selectedTemplate: RecurringTemplate | null;
+  users: UserRef[];
+}) {
+  const [templateDraft, setTemplateDraft] = useState<TemplateDraft>(
+    createTemplateDraft(props.selectedTemplate)
+  );
+
+  useEffect(() => {
+    setTemplateDraft(createTemplateDraft(props.selectedTemplate));
+  }, [props.selectedTemplate]);
+
+  if (!props.canAdmin) {
+    return (
+      <StatusMessageCard
+        description="The current browser session does not have admin access."
+        title="Recurring templates are reserved for household admins."
+      />
+    );
+  }
+
+  return (
+    <section className="settings-shell">
+      <div className="settings-page-stack">
+        <SurfaceCard className="settings-card gap-0 py-0">
+          <SectionHeading
+            actions={
+              <Button
+                onClick={() => props.onSelectTemplate("new")}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                New Template
+              </Button>
+            }
+            eyebrow="Recurring Work"
+            title="Templates"
+          />
+          <div className="template-list">
+            {props.recurringTemplates.length === 0 ? (
+              <EmptyStateCard message="No recurring templates yet." />
+            ) : null}
+            {props.recurringTemplates.map((template) => (
+              <SelectionListButton
+                active={props.selectedTemplate?.id === template.id}
+                key={template.id}
+                label={template.title}
+                meta={`${template.recurrenceCadence} every ${template.recurrenceInterval}`}
+                onClick={() => props.onSelectTemplate(template.id)}
+              />
+            ))}
+          </div>
+        </SurfaceCard>
+      </div>
+
+      {props.isTemplateEditorOpen ? (
+        <RecurringTemplateDrawer
+          draft={templateDraft}
+          labels={props.labels}
+          onChange={setTemplateDraft}
+          onClose={() => props.onSelectTemplate(null)}
+          onSubmit={() => {
+            void props.onSaveTemplate(templateDraft);
+          }}
+          selectedTemplate={props.selectedTemplate}
+          users={props.users}
+        />
+      ) : null}
+    </section>
+  );
+}
+
+function RecurringTemplateDrawer(props: {
+  draft: TemplateDraft;
+  labels: Label[];
+  onChange: (draft: TemplateDraft) => void;
+  onClose: () => void;
+  onSubmit: () => void;
+  selectedTemplate: RecurringTemplate | null;
+  users: UserRef[];
+}) {
+  return (
+    <div
+      className="sheet-backdrop recurring-drawer-backdrop"
+      onClick={props.onClose}
+      role="presentation"
+    >
+      <aside
+        aria-label="Recurring template editor"
+        className="sheet-panel recurring-drawer-panel"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <header className="sheet-header">
+          <div className="sheet-header-copy">
+            <p className="eyebrow">Recurring Work</p>
+            <h2>{props.selectedTemplate ? props.selectedTemplate.title : "New Template"}</h2>
+            <p className="section-copy">
+              Set the cadence, defaults, and checklist once, then let the board keep the rhythm.
+            </p>
+          </div>
+          <Button
+            className="rounded-full"
+            onClick={props.onClose}
+            size="icon"
+            type="button"
+            variant="outline"
+          >
+            <X className="size-4" />
+            <span className="sr-only">Close recurring template editor</span>
+          </Button>
+        </header>
+        <div className="sheet-body">
+          <RecurringTemplateForm
+            draft={props.draft}
+            labels={props.labels}
+            onChange={props.onChange}
+            onSubmit={props.onSubmit}
+            users={props.users}
+          />
+        </div>
+      </aside>
+    </div>
   );
 }
 

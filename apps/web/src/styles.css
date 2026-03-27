@@ -1145,6 +1145,10 @@ a {
   pointer-events: none;
 }
 
+.recurring-drawer-panel {
+  width: min(100%, 52rem);
+}
+
 .sheet-header {
   position: sticky;
   top: 0;
