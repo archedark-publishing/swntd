@@ -3255,6 +3255,7 @@ function SettingsView(props: {
   const [isUserRemovePending, setIsUserRemovePending] = useState(false);
   const [isUserSavePending, setIsUserSavePending] = useState(false);
   const lastSavedLabelDraftRef = useRef(serializeLabelDraft(createLabelDraft(props.selectedLabel)));
+  const inlineLabelInputRef = useRef<HTMLInputElement | null>(null);
   const normalizedLabelDraft = useMemo(() => serializeLabelDraft(labelDraft), [labelDraft]);
 
   useEffect(() => {
@@ -3262,14 +3263,33 @@ function SettingsView(props: {
   }, [props.settings]);
 
   useEffect(() => {
-    setLabelDraft(createLabelDraft(props.selectedLabel));
+    if (props.selectedLabelKey && props.selectedLabelKey !== "new" && !props.selectedLabel) {
+      return;
+    }
+
+    if (props.selectedLabelKey === "new") {
+      setLabelDraft(createLabelDraft(null));
+      lastSavedLabelDraftRef.current = serializeLabelDraft(createLabelDraft(null));
+    } else {
+      setLabelDraft(createLabelDraft(props.selectedLabel));
+      lastSavedLabelDraftRef.current = serializeLabelDraft(createLabelDraft(props.selectedLabel));
+    }
+
     setIsLabelDeletePending(false);
     setIsLabelSavePending(false);
-    lastSavedLabelDraftRef.current = serializeLabelDraft(createLabelDraft(props.selectedLabel));
     setPendingLabelDelete((current) =>
       current && current.id !== props.selectedLabel?.id ? null : current
     );
   }, [props.isLabelEditorOpen, props.selectedLabel, props.selectedLabelKey]);
+
+  useEffect(() => {
+    if (!props.isLabelEditorOpen) {
+      return;
+    }
+
+    inlineLabelInputRef.current?.focus();
+    inlineLabelInputRef.current?.select();
+  }, [props.isLabelEditorOpen, props.selectedLabelKey]);
 
   useEffect(() => {
     setUserDraft(createHouseholdUserDraft(props.selectedUser, props.userEditorMode));
@@ -3721,30 +3741,77 @@ function SettingsView(props: {
                   {props.labels.length === 0 ? (
                     <EmptyStateCard message="No labels yet. Add a few tags to make the board easier to scan." />
                   ) : null}
-                  {props.labels.length > 0 ? (
-                    <div className="label-library-list">
-                      {props.labels.map((label) => (
+                  <div className="label-library-list">
+                    {props.selectedLabelKey === "new" ? (
+                      <div className="label-library-item label-library-item-active">
+                        <div className="label-library-item-input-wrap">
+                          <input
+                            aria-label="New label name"
+                            className={cn(
+                              "label-library-inline-input",
+                              !labelDraft.color &&
+                                !labelDraft.name.trim() &&
+                                "label-library-inline-input-neutral"
+                            )}
+                            maxLength={maxLabelNameLength}
+                            onChange={(event) =>
+                              setLabelDraft((current) => ({
+                                ...current,
+                                name: event.target.value.slice(0, maxLabelNameLength)
+                              }))
+                            }
+                            placeholder="New label"
+                            ref={inlineLabelInputRef}
+                            style={getLabelBadgeStyle(labelDraft.color || null)}
+                            value={labelDraft.name}
+                          />
+                        </div>
+                      </div>
+                    ) : null}
+                    {props.labels.map((label) => {
+                      const isSelected = props.selectedLabelKey === label.id;
+
+                      return (
                         <div
                           className={cn(
                             "label-library-item",
-                            props.selectedLabel?.id === label.id && "label-library-item-active"
+                            isSelected && "label-library-item-active"
                           )}
                           key={label.id}
                         >
-                          <button
-                            aria-pressed={props.selectedLabel?.id === label.id}
-                            className="label-library-item-button"
-                            onClick={() => props.onSelectLabel(label.id)}
-                            type="button"
-                          >
-                            <Badge
-                              className="label-pill label-library-item-pill"
-                              style={getLabelBadgeStyle(label.color ?? null)}
-                              variant="outline"
+                          {isSelected ? (
+                            <div className="label-library-item-input-wrap">
+                              <input
+                                aria-label={`Edit label ${label.name}`}
+                                className="label-library-inline-input"
+                                maxLength={maxLabelNameLength}
+                                onChange={(event) =>
+                                  setLabelDraft((current) => ({
+                                    ...current,
+                                    name: event.target.value.slice(0, maxLabelNameLength)
+                                  }))
+                                }
+                                ref={inlineLabelInputRef}
+                                style={getLabelBadgeStyle(labelDraft.color || null)}
+                                value={labelDraft.name}
+                              />
+                            </div>
+                          ) : (
+                            <button
+                              aria-pressed={isSelected}
+                              className="label-library-item-button"
+                              onClick={() => props.onSelectLabel(label.id)}
+                              type="button"
                             >
-                              {label.name}
-                            </Badge>
-                          </button>
+                              <Badge
+                                className="label-pill label-library-item-pill"
+                                style={getLabelBadgeStyle(label.color ?? null)}
+                                variant="outline"
+                              >
+                                {label.name}
+                              </Badge>
+                            </button>
+                          )}
                           <Button
                             className="label-library-delete-button rounded-full"
                             disabled={isLabelDeletePending || isLabelSavePending}
@@ -3764,80 +3831,56 @@ function SettingsView(props: {
                             <span className="sr-only">Delete {label.name}</span>
                           </Button>
                         </div>
-                      ))}
-                    </div>
-                  ) : null}
+                      );
+                    })}
+                  </div>
                 </div>
                 <div className="template-editor">
                   {props.isLabelEditorOpen ? (
                     <>
-                      <div className="form-grid">
-                        <FormField className="wide" label="Name">
-                          <FormInput
-                            maxLength={maxLabelNameLength}
-                            onChange={(event) =>
-                              setLabelDraft((current) => ({
-                                ...current,
-                                name: event.target.value.slice(0, maxLabelNameLength)
-                              }))
-                            }
-                            placeholder="Errand"
-                            value={labelDraft.name}
-                          />
-                        </FormField>
-                        <FormField className="wide" label="Color">
-                          <div className="label-color-field">
-                            <div className="label-color-preview-row">
-                              <Badge
-                                className="label-pill label-preview-pill"
-                                style={getLabelBadgeStyle(labelDraft.color || null)}
-                                variant="outline"
-                              >
-                                {(labelDraft.name.trim() || "Preview").slice(0, maxLabelNameLength)}
-                              </Badge>
-                            </div>
-                            <div className="label-color-grid">
+                      <div className="wide">
+                        <div className="label-color-field">
+                          <div className="label-color-grid">
+                            <button
+                              aria-label="Clear label color"
+                              aria-pressed={!labelDraft.color}
+                              className={cn(
+                                "label-color-swatch label-color-swatch-clear",
+                                !labelDraft.color && "label-color-swatch-active"
+                              )}
+                              onClick={() =>
+                                setLabelDraft((current) => ({
+                                  ...current,
+                                  color: ""
+                                }))
+                              }
+                              type="button"
+                            >
+                              <X className="size-4" />
+                            </button>
+                            {labelPalette.map((color) => (
                               <button
-                                aria-label="Clear label color"
-                                aria-pressed={!labelDraft.color}
+                                aria-label={`Select label color ${color}`}
+                                aria-pressed={labelDraft.color === color}
                                 className={cn(
-                                  "label-color-swatch label-color-swatch-clear",
-                                  !labelDraft.color && "label-color-swatch-active"
+                                  "label-color-swatch",
+                                  labelDraft.color === color && "label-color-swatch-active"
                                 )}
+                                key={color}
                                 onClick={() =>
                                   setLabelDraft((current) => ({
                                     ...current,
-                                    color: ""
+                                    color
                                   }))
                                 }
+                                style={{ backgroundColor: color }}
                                 type="button"
                               >
-                                <X className="size-4" />
+                                {labelDraft.color === color ? <Check className="size-4" /> : null}
                               </button>
-                              {labelPalette.map((color) => (
-                                <button
-                                  aria-label={`Select label color ${color}`}
-                                  aria-pressed={labelDraft.color === color}
-                                  className={cn(
-                                    "label-color-swatch",
-                                    labelDraft.color === color && "label-color-swatch-active"
-                                  )}
-                                  key={color}
-                                  onClick={() =>
-                                    setLabelDraft((current) => ({
-                                      ...current,
-                                      color
-                                    }))
-                                  }
-                                  style={{ backgroundColor: color }}
-                                  type="button"
-                                >
-                                  {labelDraft.color === color ? <Check className="size-4" /> : null}
-                                </button>
                               ))}
                             </div>
                           </div>
-                        </FormField>
                       </div>
                     </>
                   ) : (
