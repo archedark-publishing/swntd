@@ -288,6 +288,11 @@ export const api = {
       method: "POST"
     });
   },
+  deleteLabel(labelId: string) {
+    return request<{ item: Label }>(`/api/v1/labels/${labelId}`, {
+      method: "DELETE"
+    });
+  },
   createRecurringTemplate(input: {
     aiAssistanceEnabledDefault: boolean;
     checklistItems: Array<{ body: string }>;
@@ -447,6 +452,15 @@ export const api = {
         "content-type": "application/json"
       },
       method: "POST"
+    });
+  },
+  updateLabel(labelId: string, input: { color?: string | null; name?: string }) {
+    return request<{ item: Label }>(`/api/v1/labels/${labelId}`, {
+      body: JSON.stringify(input),
+      headers: {
+        "content-type": "application/json"
+      },
+      method: "PATCH"
     });
   },
   updateRecurringTemplate(

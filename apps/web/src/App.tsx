@@ -20,6 +20,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import {
+  type CSSProperties,
   type ComponentType,
   startTransition,
   useDeferredValue,
@@ -30,6 +31,7 @@ import {
   useState
 } from "react";
 import {
+  Check,
   CalendarDays,
   CalendarPlus2,
   Download,
@@ -96,8 +98,30 @@ import "./styles.css";
 type ViewName = "archive" | "board" | "recurring" | "settings";
 type SettingsPage = "general" | "household" | "labels";
 type TaskDetailControlId = "assignee" | "due" | "labels" | "status";
+const maxLabelNameLength = 16;
 
 const urlPattern = /https?:\/\/[^\s]+/gi;
+const labelPalette = [
+  "#4bce97",
+  "#1f845a",
+  "#f5cd47",
+  "#e2b203",
+  "#faa53d",
+  "#f87168",
+  "#c9372c",
+  "#9f8fef",
+  "#6e5dc6",
+  "#579dff",
+  "#1d7afc",
+  "#6cc3e0",
+  "#2898bd",
+  "#94c748",
+  "#5b7f24",
+  "#ca74cf",
+  "#ae4787",
+  "#8590a2",
+  "#626f86"
+] as const;
 
 type ChecklistDraftItem = {
   body: string;
@@ -138,6 +162,11 @@ type HouseholdUserDraft = {
   email: string;
   mode: "admin" | "service";
   serviceKind: string;
+};
+
+type LabelDraft = {
+  color: string;
+  name: string;
 };
 
 type AppSnapshot = {
@@ -355,6 +384,31 @@ function createHouseholdUserDraft(
   };
 }
 
+function createLabelDraft(label?: Label | null): LabelDraft {
+  if (!label) {
+    return {
+      color: "",
+      name: ""
+    };
+  }
+
+  return {
+    color: label.color ?? "",
+    name: label.name
+  };
+}
+
+function normalizeLabelDraft(draft: LabelDraft) {
+  return {
+    color: draft.color.trim() || "",
+    name: draft.name.trim().slice(0, maxLabelNameLength)
+  };
+}
+
+function serializeLabelDraft(draft: LabelDraft) {
+  return JSON.stringify(normalizeLabelDraft(draft));
+}
+
 function getTaskColumnOrder(tasks: TaskListItem[], status: TaskStatus) {
   return tasks
     .filter((task) => task.status === status)
@@ -436,6 +490,33 @@ function formatRecurringScheduleMeta(template: Pick<
       : `Every ${template.recurrenceInterval} ${unit}`;
 
   return `${cadenceLabel} · Next ${formatDueControlValue(template.nextOccurrenceOn)}`;
+}
+
+function getContrastingTextColor(color: string) {
+  const normalized = color.replace("#", "");
+
+  if (!/^[\da-f]{6}$/i.test(normalized)) {
+    return "rgb(47 33 22 / 0.88)";
+  }
+
+  const red = Number.parseInt(normalized.slice(0, 2), 16);
+  const green = Number.parseInt(normalized.slice(2, 4), 16);
+  const blue = Number.parseInt(normalized.slice(4, 6), 16);
+  const luminance = (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255;
+
+  return luminance > 0.62 ? "rgb(47 33 22 / 0.88)" : "rgb(255 250 241 / 0.98)";
+}
+
+function getLabelBadgeStyle(color: string | null): CSSProperties | undefined {
+  if (!color) {
+    return undefined;
+  }
+
+  return {
+    backgroundColor: color,
+    borderColor: color,
+    color: getContrastingTextColor(color)
+  };
 }
 
 function formatTimestamp(value: string) {
@@ -554,6 +635,7 @@ export function App() {
   const [isTaskSheetOpen, setIsTaskSheetOpen] = useState(false);
   const [isCreatingTask, setIsCreatingTask] = useState(false);
   const [editingTemplateKey, setEditingTemplateKey] = useState<string | "new" | null>(null);
+  const [editingLabelKey, setEditingLabelKey] = useState<string | "new" | null>(null);
   const [editingUserKey, setEditingUserKey] = useState<string | "new-admin" | "new-service" | null>(null);
   const [archiveSearch, setArchiveSearch] = useState("");
   const deferredArchiveSearch = useDeferredValue(archiveSearch);
@@ -1049,15 +1131,44 @@ export function App() {
     );
   }
 
-  async function handleLabelCreate(input: { color: string; name: string }) {
-    await runMutation(
-      () =>
-        api.createLabel({
-          color: input.color.trim() || null,
-          name: input.name.trim()
-        }),
-      "Label added."
+  async function handleLabelSave(labelId: string | null, draft: LabelDraft) {
+    const payload = {
+      color: draft.color.trim() || null,
+      name: draft.name.trim().slice(0, maxLabelNameLength)
+    };
+
+    if (!payload.name) {
+      return null;
+    }
+
+    if (labelId) {
+      const updated = await runMutation(
+        () => api.updateLabel(labelId, payload),
+        "Label updated.",
+        { silentSuccess: true }
+      );
+
+      return updated?.item ?? null;
+    }
+
+    const created = await runMutation(() => api.createLabel(payload), "Label added.", {
+      silentSuccess: true
+    });
+
+    if (created?.item) {
+      setEditingLabelKey(created.item.id);
+    }
+
+    return created?.item ?? null;
+  }
+
+  async function handleLabelDelete(labelId: string) {
+    const removed = await runMutation(
+      () => api.deleteLabel(labelId),
+      "Label removed."
     );
+
+    return removed !== null;
   }
 
   async function handleTemplateSave(draft: TemplateDraft) {
@@ -1188,6 +1299,10 @@ export function App() {
       : editingUserKey === "new-admin"
         ? "admin"
         : selectedHouseholdUser?.role ?? "admin";
+  const selectedLabel =
+    editingLabelKey && editingLabelKey !== "new"
+      ? snapshot.labels.find((label) => label.id === editingLabelKey) ?? null
+      : null;
 
   return (
     <main className="app-shell">
@@ -1294,18 +1409,23 @@ export function App() {
             <SettingsView
               activePage={settingsPage}
               canAdmin={canAdmin}
+              isLabelEditorOpen={editingLabelKey !== null}
               labels={snapshot.labels}
-              onCreateLabel={handleLabelCreate}
+              onDeleteLabel={handleLabelDelete}
               onIssueServiceToken={handleServiceTokenIssue}
               onRemoveUser={handleHouseholdUserRemove}
               onRevokeServiceToken={handleServiceTokenRevoke}
+              onSaveLabel={handleLabelSave}
               onSaveSettings={handleSettingsSave}
               onSaveUser={handleHouseholdUserSave}
+              onSelectLabel={setEditingLabelKey}
               onSelectPage={handleSettingsPageChange}
               onSelectUser={(userKey) => {
                 setEditingUserKey(userKey);
                 setSettingsPage("household");
               }}
+              selectedLabel={selectedLabel}
+              selectedLabelKey={editingLabelKey}
               isUserEditorOpen={editingUserKey !== null}
               selectedUser={selectedHouseholdUser}
               serviceTokensByUserId={snapshot.serviceTokensByUserId}
@@ -2030,7 +2150,12 @@ function TaskCard(props: TaskCardProps) {
         {props.task.labels.length > 0 ? (
           <div className="label-row">
             {props.task.labels.map((label) => (
-              <Badge className="label-pill" key={label.id} variant="outline">
+              <Badge
+                className="label-pill"
+                key={label.id}
+                style={getLabelBadgeStyle(label.color)}
+                variant="outline"
+              >
                 {label.name}
               </Badge>
             ))}
@@ -2332,6 +2457,7 @@ function TaskSheet(props: {
                     <button
                       className="detail-label-chip"
                       key={label.id}
+                      style={getLabelBadgeStyle(label.color)}
                       onClick={() =>
                         setDraft((current) => ({
                           ...current,
@@ -3088,40 +3214,62 @@ function TaskForm(props: {
 function SettingsView(props: {
   activePage: SettingsPage;
   canAdmin: boolean;
+  isLabelEditorOpen: boolean;
   isUserEditorOpen: boolean;
   labels: Label[];
-  onCreateLabel: (input: { color: string; name: string }) => Promise<void>;
+  onDeleteLabel: (labelId: string) => Promise<boolean>;
   onIssueServiceToken: (
     userId: string,
     name: string
   ) => Promise<{ item: ServiceToken; plainTextToken: string } | null>;
   onRemoveUser: (userId: string) => Promise<boolean>;
   onRevokeServiceToken: (tokenId: string) => Promise<void>;
+  onSaveLabel: (labelId: string | null, draft: LabelDraft) => Promise<Label | null>;
   onSaveSettings: (settings: Settings) => Promise<void>;
   onSaveUser: (userId: string | null, draft: HouseholdUserDraft) => Promise<boolean>;
+  onSelectLabel: (labelId: string | "new" | null) => void;
   onSelectPage: (page: SettingsPage) => void;
   onSelectUser: (userKey: string | "new-admin" | "new-service" | null) => void;
+  selectedLabel: Label | null;
+  selectedLabelKey: string | "new" | null;
   selectedUser: UserRef | null;
   serviceTokensByUserId: Record<string, ServiceToken[]>;
   settings: Settings | null;
   userEditorMode: "admin" | "service";
   users: UserRef[];
 }) {
-  const [labelName, setLabelName] = useState("");
-  const [labelColor, setLabelColor] = useState("");
+  const [labelDraft, setLabelDraft] = useState<LabelDraft>(createLabelDraft(props.selectedLabel));
   const [settingsDraft, setSettingsDraft] = useState<Settings | null>(props.settings);
   const [userDraft, setUserDraft] = useState<HouseholdUserDraft>(
     createHouseholdUserDraft(props.selectedUser, props.userEditorMode)
   );
   const [serviceTokenName, setServiceTokenName] = useState("");
   const [issuedServiceToken, setIssuedServiceToken] = useState<string | null>(null);
+  const [isLabelDeletePending, setIsLabelDeletePending] = useState(false);
+  const [isLabelSavePending, setIsLabelSavePending] = useState(false);
+  const [pendingLabelDelete, setPendingLabelDelete] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
   const [userActionMessage, setUserActionMessage] = useState<string | null>(null);
   const [isUserRemovePending, setIsUserRemovePending] = useState(false);
   const [isUserSavePending, setIsUserSavePending] = useState(false);
+  const lastSavedLabelDraftRef = useRef(serializeLabelDraft(createLabelDraft(props.selectedLabel)));
+  const normalizedLabelDraft = useMemo(() => serializeLabelDraft(labelDraft), [labelDraft]);
 
   useEffect(() => {
     setSettingsDraft(props.settings);
   }, [props.settings]);
+
+  useEffect(() => {
+    setLabelDraft(createLabelDraft(props.selectedLabel));
+    setIsLabelDeletePending(false);
+    setIsLabelSavePending(false);
+    lastSavedLabelDraftRef.current = serializeLabelDraft(createLabelDraft(props.selectedLabel));
+    setPendingLabelDelete((current) =>
+      current && current.id !== props.selectedLabel?.id ? null : current
+    );
+  }, [props.isLabelEditorOpen, props.selectedLabel, props.selectedLabelKey]);
 
   useEffect(() => {
     setUserDraft(createHouseholdUserDraft(props.selectedUser, props.userEditorMode));
@@ -3131,6 +3279,69 @@ function SettingsView(props: {
     setIsUserRemovePending(false);
     setIsUserSavePending(false);
   }, [props.selectedUser, props.userEditorMode]);
+
+  const submitLabelAutosave = useEffectEvent(async (nextDraft: LabelDraft) => {
+    const normalized = normalizeLabelDraft(nextDraft);
+    const labelId =
+      props.selectedLabelKey && props.selectedLabelKey !== "new" ? props.selectedLabelKey : null;
+
+    if (!normalized.name) {
+      return;
+    }
+
+    setIsLabelSavePending(true);
+    const saved = await props.onSaveLabel(labelId, nextDraft);
+    setIsLabelSavePending(false);
+
+    if (saved) {
+      lastSavedLabelDraftRef.current = JSON.stringify({
+        color: saved.color ?? "",
+        name: saved.name
+      });
+    }
+  });
+
+  useEffect(() => {
+    if (!props.isLabelEditorOpen || isLabelDeletePending || isLabelSavePending) {
+      return;
+    }
+
+    if (normalizedLabelDraft === lastSavedLabelDraftRef.current) {
+      return;
+    }
+
+    const normalized = normalizeLabelDraft(labelDraft);
+
+    if (!normalized.name) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      void submitLabelAutosave(labelDraft);
+    }, 450);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [
+    isLabelDeletePending,
+    isLabelSavePending,
+    labelDraft,
+    normalizedLabelDraft,
+    props.isLabelEditorOpen,
+    submitLabelAutosave
+  ]);
+
+  const handleLabelDeleteConfirm = useEffectEvent(async (labelId: string) => {
+    setIsLabelDeletePending(true);
+    const deleted = await props.onDeleteLabel(labelId);
+    setIsLabelDeletePending(false);
+    setPendingLabelDelete(null);
+
+    if (deleted && props.selectedLabel?.id === labelId) {
+      props.onSelectLabel(null);
+    }
+  });
 
   if (!props.canAdmin || !settingsDraft) {
     return (
@@ -3484,59 +3695,204 @@ function SettingsView(props: {
         ) : null}
 
         {props.activePage === "labels" ? (
-          <SurfaceCard className="settings-card gap-0 py-0">
-            <SectionHeading
-              description="Create short labels for things like errands, bills, cleaning, shopping, or anything else you want to scan quickly on the board."
-              eyebrow="Labels"
-              title="Tag Library"
-            />
-            <div className="sheet-actions">
-              <FormField className="compact-field" label="Name">
-                <FormInput
-                  onChange={(event) => setLabelName(event.target.value)}
-                  placeholder="Errand"
-                  value={labelName}
-                />
-              </FormField>
-              <FormField className="compact-field" label="Color note">
-                <FormInput
-                  onChange={(event) => setLabelColor(event.target.value)}
-                  placeholder="#c96 or brass"
-                  value={labelColor}
-                />
-              </FormField>
-              <Button
-                onClick={() => {
-                  if (!labelName.trim()) {
-                    return;
-                  }
-
-                  void props.onCreateLabel({
-                    color: labelColor,
-                    name: labelName
-                  });
-                  setLabelName("");
-                  setLabelColor("");
-                }}
-                size="sm"
-                type="button"
-                variant="outline"
-              >
-                Add Label
-              </Button>
-            </div>
-            {props.labels.length > 0 ? (
-              <div className="label-row roomy">
-                {props.labels.map((label) => (
-                  <Badge className="label-pill" key={label.id} variant="outline">
-                    {label.name}
-                  </Badge>
-                ))}
+          <>
+            <SurfaceCard className="settings-card gap-0 py-0">
+              <SectionHeading
+                actions={
+                  <div className="section-icon-actions">
+                    <Button
+                      className="rounded-full"
+                      onClick={() => props.onSelectLabel("new")}
+                      size="icon"
+                      type="button"
+                      variant="outline"
+                    >
+                      <Plus className="size-4" />
+                      <span className="sr-only">New label</span>
+                    </Button>
+                  </div>
+                }
+                description="Create short labels for things like errands, bills, cleaning, shopping, or anything else you want to scan quickly on the board."
+                eyebrow="Labels"
+                title="Tag Library"
+              />
+              <div className="template-grid">
+                <div className="template-list">
+                  {props.labels.length === 0 ? (
+                    <EmptyStateCard message="No labels yet. Add a few tags to make the board easier to scan." />
+                  ) : null}
+                  {props.labels.length > 0 ? (
+                    <div className="label-library-list">
+                      {props.labels.map((label) => (
+                        <div
+                          className={cn(
+                            "label-library-item",
+                            props.selectedLabel?.id === label.id && "label-library-item-active"
+                          )}
+                          key={label.id}
+                        >
+                          <button
+                            aria-pressed={props.selectedLabel?.id === label.id}
+                            className="label-library-item-button"
+                            onClick={() => props.onSelectLabel(label.id)}
+                            type="button"
+                          >
+                            <Badge
+                              className="label-pill label-library-item-pill"
+                              style={getLabelBadgeStyle(label.color ?? null)}
+                              variant="outline"
+                            >
+                              {label.name}
+                            </Badge>
+                          </button>
+                          <Button
+                            className="label-library-delete-button rounded-full"
+                            disabled={isLabelDeletePending || isLabelSavePending}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              props.onSelectLabel(label.id);
+                              setPendingLabelDelete({
+                                id: label.id,
+                                name: label.name
+                              });
+                            }}
+                            size="icon"
+                            type="button"
+                            variant="ghost"
+                          >
+                            <Trash2 className="size-4" />
+                            <span className="sr-only">Delete {label.name}</span>
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+                <div className="template-editor">
+                  {props.isLabelEditorOpen ? (
+                    <>
+                      <div className="form-grid">
+                        <FormField className="wide" label="Name">
+                          <FormInput
+                            maxLength={maxLabelNameLength}
+                            onChange={(event) =>
+                              setLabelDraft((current) => ({
+                                ...current,
+                                name: event.target.value.slice(0, maxLabelNameLength)
+                              }))
+                            }
+                            placeholder="Errand"
+                            value={labelDraft.name}
+                          />
+                        </FormField>
+                        <FormField className="wide" label="Color">
+                          <div className="label-color-field">
+                            <div className="label-color-preview-row">
+                              <Badge
+                                className="label-pill label-preview-pill"
+                                style={getLabelBadgeStyle(labelDraft.color || null)}
+                                variant="outline"
+                              >
+                                {(labelDraft.name.trim() || "Preview").slice(0, maxLabelNameLength)}
+                              </Badge>
+                            </div>
+                            <div className="label-color-grid">
+                              <button
+                                aria-label="Clear label color"
+                                aria-pressed={!labelDraft.color}
+                                className={cn(
+                                  "label-color-swatch label-color-swatch-clear",
+                                  !labelDraft.color && "label-color-swatch-active"
+                                )}
+                                onClick={() =>
+                                  setLabelDraft((current) => ({
+                                    ...current,
+                                    color: ""
+                                  }))
+                                }
+                                type="button"
+                              >
+                                <X className="size-4" />
+                              </button>
+                              {labelPalette.map((color) => (
+                                <button
+                                  aria-label={`Select label color ${color}`}
+                                  aria-pressed={labelDraft.color === color}
+                                  className={cn(
+                                    "label-color-swatch",
+                                    labelDraft.color === color && "label-color-swatch-active"
+                                  )}
+                                  key={color}
+                                  onClick={() =>
+                                    setLabelDraft((current) => ({
+                                      ...current,
+                                      color
+                                    }))
+                                  }
+                                  style={{ backgroundColor: color }}
+                                  type="button"
+                                >
+                                  {labelDraft.color === color ? <Check className="size-4" /> : null}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </FormField>
+                      </div>
+                    </>
+                  ) : (
+                    <EmptyStateCard message="Choose a label or create a new one." />
+                  )}
+                </div>
               </div>
-            ) : (
-              <EmptyStateCard message="No labels yet. Add a few tags to make the board easier to scan." />
-            )}
-          </SurfaceCard>
+            </SurfaceCard>
+            {pendingLabelDelete ? (
+              <div
+                aria-hidden={false}
+                className="confirm-backdrop"
+                onClick={() => setPendingLabelDelete(null)}
+                role="presentation"
+              >
+                <SurfaceCard
+                  aria-labelledby="label-delete-title"
+                  aria-modal="true"
+                  className="confirm-dialog"
+                  onClick={(event) => event.stopPropagation()}
+                  role="dialog"
+                >
+                  <div className="label-delete-confirmation-copy">
+                    <strong id="label-delete-title">Delete {pendingLabelDelete.name}?</strong>
+                    <p>
+                      It will be removed from every task and recurring template that currently
+                      uses it.
+                    </p>
+                  </div>
+                  <div className="label-delete-confirmation-actions">
+                    <Button
+                      disabled={isLabelDeletePending}
+                      onClick={() => setPendingLabelDelete(null)}
+                      size="sm"
+                      type="button"
+                      variant="ghost"
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      disabled={isLabelDeletePending}
+                      onClick={() => {
+                        void handleLabelDeleteConfirm(pendingLabelDelete.id);
+                      }}
+                      size="sm"
+                      type="button"
+                      variant="destructive"
+                    >
+                      {isLabelDeletePending ? "Deleting..." : "Delete Label"}
+                    </Button>
+                  </div>
+                </SurfaceCard>
+              </div>
+            ) : null}
+          </>
         ) : null}
 
       </div>

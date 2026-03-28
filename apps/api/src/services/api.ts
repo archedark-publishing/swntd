@@ -189,6 +189,11 @@ export type CreateLabelInput = {
   name: string;
 };
 
+export type UpdateLabelInput = {
+  color?: string | null | undefined;
+  name?: string | undefined;
+};
+
 export type UpdateSettingsInput = {
   defaultCalendarExportKind?: "google" | "ics" | undefined;
   defaultTimezone?: string | undefined;
@@ -1133,6 +1138,88 @@ export async function createLabel(
       id: created.id,
       name: created.name,
       updatedAt: created.updatedAt
+    }
+  };
+}
+
+export async function updateLabel(
+  db: DatabaseClient,
+  actor: AuthenticatedActor,
+  labelId: string,
+  input: UpdateLabelInput
+) {
+  assertAdmin(actor);
+
+  const [current] = await db
+    .select()
+    .from(labels)
+    .where(and(eq(labels.householdId, actor.householdId), eq(labels.id, labelId)));
+
+  if (!current) {
+    throw new ApiError(404, "label_not_found", "Label not found.");
+  }
+
+  const nextName = input.name?.trim() ?? current.name;
+
+  if (nextName !== current.name) {
+    const [existing] = await db
+      .select({
+        id: labels.id
+      })
+      .from(labels)
+      .where(and(eq(labels.householdId, actor.householdId), eq(labels.name, nextName)));
+
+    if (existing) {
+      throw new ApiError(409, "label_exists", "A label with that name already exists.");
+    }
+  }
+
+  const [updated] = await db
+    .update(labels)
+    .set({
+      color: input.color === undefined ? current.color : input.color,
+      name: nextName,
+      updatedAt: new Date()
+    })
+    .where(eq(labels.id, current.id))
+    .returning();
+
+  const label = getRequiredRow(updated, "label_update_failed", "Label update failed.");
+
+  return {
+    item: {
+      color: label.color,
+      createdAt: label.createdAt,
+      id: label.id,
+      name: label.name,
+      updatedAt: label.updatedAt
+    }
+  };
+}
+
+export async function deleteLabel(
+  db: DatabaseClient,
+  actor: AuthenticatedActor,
+  labelId: string
+) {
+  assertAdmin(actor);
+
+  const [deleted] = await db
+    .delete(labels)
+    .where(and(eq(labels.householdId, actor.householdId), eq(labels.id, labelId)))
+    .returning();
+
+  if (!deleted) {
+    throw new ApiError(404, "label_not_found", "Label not found.");
+  }
+
+  return {
+    item: {
+      color: deleted.color,
+      createdAt: deleted.createdAt,
+      id: deleted.id,
+      name: deleted.name,
+      updatedAt: deleted.updatedAt
     }
   };
 }
