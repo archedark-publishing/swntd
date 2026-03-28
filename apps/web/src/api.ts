@@ -233,6 +233,24 @@ export async function downloadAttachment(url: string, filename: string) {
   URL.revokeObjectURL(objectUrl);
 }
 
+export async function loadAttachmentObjectUrl(url: string) {
+  const response = await fetch(url, {
+    headers: createHeaders()
+  });
+
+  if (!response.ok) {
+    throw new SwntdApiError(response.status, {
+      code: "attachment_preview_failed",
+      details: null,
+      message: "Attachment preview failed."
+    });
+  }
+
+  const blob = await response.blob();
+
+  return URL.createObjectURL(blob);
+}
+
 export const api = {
   addAttachmentLink(taskId: string, input: { name: string; url: string }) {
     return request<{ item: TaskDetail }>(`/api/v1/tasks/${taskId}/attachment-links`, {
@@ -268,6 +286,20 @@ export const api = {
         "content-type": "application/json"
       },
       method: "POST"
+    });
+  },
+  deleteLabel(labelId: string) {
+    return request<{ item: Label }>(`/api/v1/labels/${labelId}`, {
+      method: "DELETE"
+    });
+  },
+  deleteTask(taskId: string, expectedRevision: number) {
+    return request<{ item: { id: string } }>(`/api/v1/tasks/${taskId}`, {
+      body: JSON.stringify({ expectedRevision }),
+      headers: {
+        "content-type": "application/json"
+      },
+      method: "DELETE"
     });
   },
   createRecurringTemplate(input: {
@@ -429,6 +461,15 @@ export const api = {
         "content-type": "application/json"
       },
       method: "POST"
+    });
+  },
+  updateLabel(labelId: string, input: { color?: string | null; name?: string }) {
+    return request<{ item: Label }>(`/api/v1/labels/${labelId}`, {
+      body: JSON.stringify(input),
+      headers: {
+        "content-type": "application/json"
+      },
+      method: "PATCH"
     });
   },
   updateRecurringTemplate(

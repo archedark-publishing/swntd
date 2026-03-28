@@ -1,15 +1,80 @@
 import {
+  DndContext,
+  DragOverlay,
+  KeyboardSensor,
+  PointerSensor,
+  closestCorners,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type DragMoveEvent,
+  type DragOverEvent,
+  type DragEndEvent,
+  type UniqueIdentifier,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import {
+  type CSSProperties,
+  type ComponentType,
   startTransition,
   useDeferredValue,
   useEffect,
   useEffectEvent,
+  useMemo,
   useRef,
   useState
 } from "react";
 import {
+  Check,
+  CalendarDays,
+  CalendarPlus2,
+  Download,
+  ExternalLink,
+  FileImage,
+  Menu,
+  Paperclip,
+  Plus,
+  SendHorizontal,
+  Tag,
+  Trash2,
+  UserRound,
+  X
+} from "lucide-react";
+import {
+  AppNavigation,
+  EmptyStateCard,
+  InfoRow,
+  SectionHeading,
+  SurfaceCard,
+  SearchField,
+  SelectionListButton,
+  StatusMessageCard,
+} from "@/components/app-chrome";
+import {
+  ChoiceChip,
+  FormField,
+  FormInput,
+  FormSelect,
+  FormTextarea,
+  ToggleField
+} from "@/components/app-forms";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
+import { Toaster } from "@/components/ui/sonner";
+import { cn } from "@/lib/utils";
+import {
   api,
   downloadAttachment,
   isConflictError,
+  loadAttachmentObjectUrl,
   taskStatuses,
   type Actor,
   type Attachment,
@@ -27,9 +92,36 @@ import {
   buildGoogleCalendarUrl,
   downloadIcsFile
 } from "./calendar";
+import { toast } from "sonner";
 import "./styles.css";
 
-type ViewName = "archive" | "board" | "my-tasks" | "settings";
+type ViewName = "archive" | "board" | "recurring" | "settings";
+type SettingsPage = "general" | "household" | "labels";
+type TaskDetailControlId = "assignee" | "due" | "labels" | "status";
+const maxLabelNameLength = 16;
+
+const urlPattern = /https?:\/\/[^\s]+/gi;
+const labelPalette = [
+  "#4bce97",
+  "#1f845a",
+  "#f5cd47",
+  "#e2b203",
+  "#faa53d",
+  "#f87168",
+  "#c9372c",
+  "#9f8fef",
+  "#6e5dc6",
+  "#579dff",
+  "#1d7afc",
+  "#6cc3e0",
+  "#2898bd",
+  "#94c748",
+  "#5b7f24",
+  "#ca74cf",
+  "#ae4787",
+  "#8590a2",
+  "#626f86"
+] as const;
 
 type ChecklistDraftItem = {
   body: string;
@@ -72,6 +164,11 @@ type HouseholdUserDraft = {
   serviceKind: string;
 };
 
+type LabelDraft = {
+  color: string;
+  name: string;
+};
+
 type AppSnapshot = {
   activeTasks: TaskListItem[];
   actor: Actor | null;
@@ -96,19 +193,56 @@ const emptySnapshot: AppSnapshot = {
 
 const navItems: Array<{ id: ViewName; label: string }> = [
   { id: "board", label: "Board" },
-  { id: "my-tasks", label: "My Tasks" },
-  { id: "archive", label: "Archive" },
-  { id: "settings", label: "Settings" }
+  { id: "recurring", label: "Recurring" },
+  { id: "archive", label: "Archive" }
+];
+const settingsNavItems: Array<{ id: SettingsPage; label: string }> = [
+  { id: "general", label: "General" },
+  { id: "household", label: "Household" },
+  { id: "labels", label: "Labels" }
 ];
 
-function readViewFromHash(): ViewName {
-  const hash = window.location.hash.replace("#", "");
+function isSettingsPage(value: string | undefined): value is SettingsPage {
+  return value === "general" || value === "household" || value === "labels";
+}
 
-  if (hash === "my-tasks" || hash === "archive" || hash === "settings") {
-    return hash;
+function readRouteFromHash(): {
+  onlyMyTasks: boolean;
+  settingsPage: SettingsPage;
+  view: ViewName;
+} {
+  const hash = window.location.hash.replace(/^#/, "");
+  const [viewPart, subpagePart] = hash.split("/");
+
+  if (viewPart === "my-tasks") {
+    return { onlyMyTasks: true, settingsPage: "general", view: "board" };
   }
 
-  return "board";
+  if (viewPart === "archive") {
+    return { onlyMyTasks: false, settingsPage: "general", view: "archive" };
+  }
+
+  if (viewPart === "recurring") {
+    return { onlyMyTasks: false, settingsPage: "general", view: "recurring" };
+  }
+
+  if (viewPart === "settings") {
+    if (subpagePart === "recurring") {
+      return { onlyMyTasks: false, settingsPage: "general", view: "recurring" };
+    }
+
+    return {
+      onlyMyTasks: false,
+      settingsPage: isSettingsPage(subpagePart) ? subpagePart : "general",
+      view: "settings"
+    };
+  }
+
+  return { onlyMyTasks: false, settingsPage: "general", view: "board" };
+}
+
+function buildHashForRoute(view: ViewName, settingsPage: SettingsPage) {
+  return view === "settings" ? `settings/${settingsPage}` : view;
 }
 
 function createChecklistDraft(items: Array<{ body: string; isCompleted: boolean }>) {
@@ -143,6 +277,55 @@ function createTaskDraft(task?: TaskDetail | null): TaskDraft {
     labelIds: task.labels.map((label) => label.id),
     title: task.title
   };
+}
+
+function cleanDetectedUrl(rawUrl: string) {
+  return rawUrl.replace(/[),.;!?]+$/g, "");
+}
+
+function extractUrls(value: string) {
+  const matches = value.match(urlPattern) ?? [];
+  const seen = new Set<string>();
+  const urls: string[] = [];
+
+  for (const match of matches) {
+    const cleaned = cleanDetectedUrl(match);
+
+    if (!cleaned || seen.has(cleaned)) {
+      continue;
+    }
+
+    seen.add(cleaned);
+    urls.push(cleaned);
+  }
+
+  return urls;
+}
+
+function hasMeaningfulCommentText(value: string) {
+  return value.replace(urlPattern, " ").replace(/\s+/g, " ").trim().length > 0;
+}
+
+function buildTaskSavePayload(draft: TaskDraft) {
+  return {
+    aiAssistanceEnabled: draft.aiAssistanceEnabled,
+    assigneeUserId: draft.assigneeUserId || null,
+    checklistItems: draft.checklistItems
+      .filter((item) => item.body.trim())
+      .map((item) => ({
+        body: item.body.trim(),
+        isCompleted: item.isCompleted
+      })),
+    description: draft.description.trim(),
+    dueOn: draft.dueOn || null,
+    dueTime: draft.dueTime || null,
+    labelIds: [...draft.labelIds].sort(),
+    title: draft.title.trim()
+  };
+}
+
+function serializeTaskDraft(draft: TaskDraft) {
+  return JSON.stringify(buildTaskSavePayload(draft));
 }
 
 function createTemplateDraft(template?: RecurringTemplate | null): TemplateDraft {
@@ -201,6 +384,43 @@ function createHouseholdUserDraft(
   };
 }
 
+function createLabelDraft(label?: Label | null): LabelDraft {
+  if (!label) {
+    return {
+      color: "",
+      name: ""
+    };
+  }
+
+  return {
+    color: label.color ?? "",
+    name: label.name
+  };
+}
+
+function normalizeLabelDraft(draft: LabelDraft) {
+  return {
+    color: draft.color.trim() || "",
+    name: draft.name.trim().slice(0, maxLabelNameLength)
+  };
+}
+
+function serializeLabelDraft(draft: LabelDraft) {
+  return JSON.stringify(normalizeLabelDraft(draft));
+}
+
+function normalizeSettingsDraft(settings: Settings) {
+  return {
+    defaultCalendarExportKind: settings.defaultCalendarExportKind,
+    defaultTimezone: settings.defaultTimezone.trim(),
+    doneArchiveAfterDays: settings.doneArchiveAfterDays
+  };
+}
+
+function serializeSettingsDraft(settings: Settings) {
+  return JSON.stringify(normalizeSettingsDraft(settings));
+}
+
 function getTaskColumnOrder(tasks: TaskListItem[], status: TaskStatus) {
   return tasks
     .filter((task) => task.status === status)
@@ -234,11 +454,104 @@ function formatDate(dateValue: string | null, timeValue?: string | null) {
   }).format(date);
 }
 
+function formatDueControlValue(dateValue: string | null, timeValue?: string | null) {
+  if (!dateValue) {
+    return null;
+  }
+
+  const date = new Date(`${dateValue}T00:00:00`);
+
+  if (!timeValue) {
+    return new Intl.DateTimeFormat(undefined, {
+      day: "numeric",
+      month: "short"
+    }).format(date);
+  }
+
+  const [hour, minute] = timeValue.split(":");
+  date.setHours(Number(hour), Number(minute), 0, 0);
+
+  return new Intl.DateTimeFormat(undefined, {
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    month: "short"
+  }).format(date);
+}
+
+function formatRecurringScheduleMeta(template: Pick<
+  RecurringTemplate,
+  "nextOccurrenceOn" | "recurrenceCadence" | "recurrenceInterval"
+>) {
+  const unit =
+    template.recurrenceCadence === "daily"
+      ? template.recurrenceInterval === 1
+        ? "day"
+        : "days"
+      : template.recurrenceCadence === "weekly"
+        ? template.recurrenceInterval === 1
+          ? "week"
+          : "weeks"
+        : template.recurrenceInterval === 1
+          ? "month"
+          : "months";
+
+  const cadenceLabel =
+    template.recurrenceInterval === 1
+      ? `Every ${unit}`
+      : `Every ${template.recurrenceInterval} ${unit}`;
+
+  return `${cadenceLabel} · Next ${formatDueControlValue(template.nextOccurrenceOn)}`;
+}
+
+function getContrastingTextColor(color: string) {
+  const normalized = color.replace("#", "");
+
+  if (!/^[\da-f]{6}$/i.test(normalized)) {
+    return "rgb(47 33 22 / 0.88)";
+  }
+
+  const red = Number.parseInt(normalized.slice(0, 2), 16);
+  const green = Number.parseInt(normalized.slice(2, 4), 16);
+  const blue = Number.parseInt(normalized.slice(4, 6), 16);
+  const luminance = (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255;
+
+  return luminance > 0.62 ? "rgb(47 33 22 / 0.88)" : "rgb(255 250 241 / 0.98)";
+}
+
+function getLabelBadgeStyle(color: string | null): CSSProperties | undefined {
+  if (!color) {
+    return undefined;
+  }
+
+  return {
+    backgroundColor: color,
+    borderColor: color,
+    color: getContrastingTextColor(color)
+  };
+}
+
 function formatTimestamp(value: string) {
   return new Intl.DateTimeFormat(undefined, {
     dateStyle: "medium",
     timeStyle: "short"
   }).format(new Date(value));
+}
+
+function isImageAttachment(attachment: Attachment) {
+  return attachment.storageKind === "upload" && attachment.mimeType?.startsWith("image/");
+}
+
+function getFaviconUrl(externalUrl: string | null) {
+  if (!externalUrl) {
+    return null;
+  }
+
+  try {
+    return new URL("/favicon.ico", externalUrl).toString();
+  } catch {
+    return null;
+  }
 }
 
 function getStatusStep(status: TaskStatus, direction: -1 | 1) {
@@ -250,6 +563,10 @@ function getStatusStep(status: TaskStatus, direction: -1 | 1) {
   }
 
   return taskStatuses[nextIndex];
+}
+
+function isTaskStatus(value: string): value is TaskStatus {
+  return taskStatuses.includes(value as TaskStatus);
 }
 
 function formatRoleLabel(user: Pick<UserRef, "role" | "serviceKind">) {
@@ -289,8 +606,8 @@ function getAiAssistanceToggleLabel(users: UserRef[]) {
   const serviceActorName = getPrimaryServiceActorName(users);
 
   return serviceActorName
-    ? `Allow ${serviceActorName} to pick this up when assigned`
-    : "Allow the household assistant to pick this up when assigned";
+    ? `Let ${serviceActorName} help`
+    : "Let the household assistant help";
 }
 
 function buildFlashMessage(error: unknown) {
@@ -313,27 +630,58 @@ function normalizeApiError(error: unknown) {
   return null;
 }
 
+function showErrorToast(message: string, toastId?: string) {
+  toast.error(message, { id: toastId ?? `error:${message}` });
+}
+
 export function App() {
-  const [view, setView] = useState<ViewName>(() => readViewFromHash());
+  const initialRoute = readRouteFromHash();
+  const [view, setView] = useState<ViewName>(initialRoute.view);
+  const [onlyMyTasks, setOnlyMyTasks] = useState(initialRoute.onlyMyTasks);
+  const [settingsPage, setSettingsPage] = useState<SettingsPage>(initialRoute.settingsPage);
   const [snapshot, setSnapshot] = useState<AppSnapshot>(emptySnapshot);
   const [isBooting, setIsBooting] = useState(true);
-  const [isManualRefreshPending, setIsManualRefreshPending] = useState(false);
+  const [isNavOpen, setIsNavOpen] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [selectedTask, setSelectedTask] = useState<TaskDetail | null>(null);
   const [isTaskSheetOpen, setIsTaskSheetOpen] = useState(false);
   const [isCreatingTask, setIsCreatingTask] = useState(false);
-  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
+  const [editingTemplateKey, setEditingTemplateKey] = useState<string | "new" | null>(null);
+  const [editingLabelKey, setEditingLabelKey] = useState<string | "new" | null>(null);
   const [editingUserKey, setEditingUserKey] = useState<string | "new-admin" | "new-service" | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [archiveSearch, setArchiveSearch] = useState("");
   const deferredArchiveSearch = useDeferredValue(archiveSearch);
   const hasLoadedRef = useRef(false);
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
 
   useEffect(() => {
-    window.location.hash = view;
-  }, [view]);
+    const onHashChange = () => {
+      const nextRoute = readRouteFromHash();
+
+      setView(nextRoute.view);
+      setOnlyMyTasks(nextRoute.onlyMyTasks);
+      setSettingsPage(nextRoute.settingsPage);
+    };
+
+    window.addEventListener("hashchange", onHashChange);
+
+    return () => {
+      window.removeEventListener("hashchange", onHashChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isNavOpen && !isTaskSheetOpen && editingTemplateKey === null) {
+      return;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [editingTemplateKey, isNavOpen, isTaskSheetOpen]);
 
   const loadTaskDetail = useEffectEvent(async (taskId: string | null) => {
     if (!taskId) {
@@ -352,19 +700,15 @@ export function App() {
         return;
       }
 
-      setErrorMessage(buildFlashMessage(error));
+      showErrorToast(buildFlashMessage(error), "task-detail-error");
     }
   });
 
   const refreshApp = useEffectEvent(
-    async (options?: { background?: boolean; showSpinner?: boolean }) => {
+    async (options?: { background?: boolean }) => {
     if (refreshInFlightRef.current) {
       return refreshInFlightRef.current;
     }
-
-      if (options?.showSpinner) {
-        setIsManualRefreshPending(true);
-      }
 
       if (!options?.background && !hasLoadedRef.current) {
         setIsBooting(true);
@@ -422,12 +766,15 @@ export function App() {
           }
 
           hasLoadedRef.current = true;
-          setErrorMessage(null);
         } catch (error) {
-          setErrorMessage(buildFlashMessage(error));
+          if (!options?.background) {
+            showErrorToast(
+              buildFlashMessage(error),
+              "refresh-error"
+            );
+          }
         } finally {
           setIsBooting(false);
-          setIsManualRefreshPending(false);
           refreshInFlightRef.current = null;
         }
       })();
@@ -494,22 +841,28 @@ export function App() {
   async function runMutation<T>(
     action: () => Promise<T>,
     successMessage: string,
-    options?: { closeTaskSheet?: boolean }
+    options?: { closeTaskSheet?: boolean; silentSuccess?: boolean; skipRefresh?: boolean }
   ) {
     try {
       const result = await action();
-      setNotice(successMessage);
-      setErrorMessage(null);
+      if (!options?.silentSuccess) {
+        toast.success(successMessage);
+      }
 
       if (options?.closeTaskSheet) {
         setIsTaskSheetOpen(false);
         setIsCreatingTask(false);
       }
 
-      await refreshApp({ background: true });
+      if (!options?.skipRefresh) {
+        await refreshApp({ background: true });
+      }
       return result;
     } catch (error) {
-      setErrorMessage(buildFlashMessage(error));
+      showErrorToast(
+        buildFlashMessage(error),
+        isConflictError(error) ? "mutation-conflict" : undefined
+      );
 
       if (isConflictError(error)) {
         await refreshApp({ background: true });
@@ -519,57 +872,109 @@ export function App() {
     }
   }
 
+  function handleViewChange(nextView: ViewName) {
+    setView(nextView);
+    setOnlyMyTasks(false);
+
+    if (nextView === "recurring") {
+      setEditingTemplateKey(null);
+    }
+
+    const nextHash = buildHashForRoute(nextView, settingsPage);
+
+    if (window.location.hash !== `#${nextHash}`) {
+      window.location.hash = nextHash;
+    }
+
+    setIsNavOpen(false);
+  }
+
+  function handleSettingsPageChange(nextPage: SettingsPage) {
+    setView("settings");
+    setSettingsPage(nextPage);
+    const nextHash = buildHashForRoute("settings", nextPage);
+
+    if (window.location.hash !== `#${nextHash}`) {
+      window.location.hash = nextHash;
+    }
+    setIsNavOpen(false);
+  }
+
   function openTask(taskId: string) {
     setSelectedTaskId(taskId);
     setIsCreatingTask(false);
     setIsTaskSheetOpen(true);
   }
 
-  function openNewTask() {
-    setSelectedTaskId(null);
-    setSelectedTask(null);
-    setIsCreatingTask(true);
-    setIsTaskSheetOpen(true);
+  async function createTaskFromBoardTitle(title: string) {
+    const trimmedTitle = title.trim();
+
+    if (!trimmedTitle) {
+      return false;
+    }
+
+    const created = await runMutation(
+      () =>
+        api.createTask({
+          aiAssistanceEnabled: false,
+          assigneeUserId: null,
+          checklistItems: [],
+          description: "",
+          dueOn: null,
+          dueTime: null,
+          labelIds: [],
+          title: trimmedTitle
+        }),
+      "Task added to the ledger."
+    );
+
+    return Boolean(created);
   }
 
-  async function handleTaskSubmit(draft: TaskDraft) {
-    const payload = {
-      aiAssistanceEnabled: draft.aiAssistanceEnabled,
-      assigneeUserId: draft.assigneeUserId || null,
-      checklistItems: draft.checklistItems
-        .filter((item) => item.body.trim())
-        .map((item) => ({
-          body: item.body.trim(),
-          isCompleted: item.isCompleted
-        })),
-      description: draft.description.trim(),
-      dueOn: draft.dueOn || null,
-      dueTime: draft.dueTime || null,
-      labelIds: draft.labelIds,
-      title: draft.title.trim()
-    };
+  async function handleTaskSubmit(
+    draft: TaskDraft,
+    options?: { silentSuccess?: boolean }
+  ) {
+    const payload = buildTaskSavePayload(draft);
 
     if (isCreatingTask) {
-      await runMutation(async () => {
+      return runMutation(async () => {
         const created = await api.createTask(payload);
 
         setSelectedTaskId(created.item.id);
+        return created.item;
       }, "Task added to the ledger.", { closeTaskSheet: true });
-
-      return;
     }
 
     if (!selectedTask) {
-      return;
+      return null;
     }
 
-    await runMutation(
-      () =>
-        api.updateTask(selectedTask.id, {
+    return runMutation(
+      async () => {
+        const updated = await api.updateTask(selectedTask.id, {
           ...payload,
           expectedRevision: selectedTask.revision
-        }),
-      "Task details updated."
+        });
+
+        setSelectedTask(updated.item);
+        setSnapshot((current) => ({
+          ...current,
+          activeTasks: current.activeTasks.map((task) =>
+            task.id === updated.item.id ? updated.item : task
+          ),
+          archivedTasks: current.archivedTasks.map((task) =>
+            task.id === updated.item.id ? updated.item : task
+          )
+        }));
+
+        return updated.item;
+      },
+      "Task details updated.",
+      {
+        ...(options?.silentSuccess ? { silentSuccess: true } : {}),
+        skipRefresh: true
+      }
     );
   }
 
@@ -609,6 +1014,63 @@ export function App() {
     );
   }
 
+  async function handleTaskDrop(input: {
+    targetStatus: TaskStatus;
+    targetIndex: number;
+    taskId: string;
+  }) {
+    const task = activeTasks.find((entry) => entry.id === input.taskId);
+
+    if (!task) {
+      return;
+    }
+
+    const destinationTasks = getTaskColumnOrder(activeTasks, input.targetStatus);
+    const safeTargetIndex = Math.max(
+      0,
+      Math.min(input.targetIndex, destinationTasks.length)
+    );
+
+    if (task.status === input.targetStatus) {
+      const currentIndex = destinationTasks.findIndex((entry) => entry.id === task.id);
+
+      if (currentIndex < 0) {
+        return;
+      }
+
+      if (safeTargetIndex === currentIndex) {
+        return;
+      }
+
+      await runMutation(
+        () =>
+          api.reorderTask(task.id, {
+            expectedRevision: task.revision,
+            targetIndex: safeTargetIndex
+          }),
+        "Task order updated."
+      );
+
+      return;
+    }
+
+    await runMutation(async () => {
+      const transitioned = await api.transitionTask(task.id, {
+        expectedRevision: task.revision,
+        status: input.targetStatus
+      });
+
+      if (safeTargetIndex === 0) {
+        return transitioned;
+      }
+
+      return api.reorderTask(task.id, {
+        expectedRevision: transitioned.item.revision,
+        targetIndex: safeTargetIndex
+      });
+    }, `Moved "${task.title}" to ${input.targetStatus}.`);
+  }
+
   async function handleStatusChange(task: TaskDetail, status: TaskStatus) {
     await runMutation(
       () =>
@@ -635,48 +1097,101 @@ export function App() {
     );
   }
 
-  async function handleComment(task: TaskDetail, body: string) {
+  async function handleDeleteArchivedTask(task: TaskDetail) {
     await runMutation(
-      () => api.addComment(task.id, { body }),
-      "Comment added."
+      () => api.deleteTask(task.id, task.revision),
+      "Task deleted permanently.",
+      { closeTaskSheet: true }
     );
   }
 
-  async function handleAttachmentLink(task: TaskDetail, input: { name: string; url: string }) {
-    await runMutation(
-      () => api.addAttachmentLink(task.id, input),
-      "Link attached."
+  async function handleActivitySubmit(
+    task: TaskDetail,
+    input: { body: string; files: File[]; links: string[] }
+  ) {
+    const trimmedBody = input.body.trim();
+    const links = Array.from(
+      new Set(input.links.map((link) => cleanDetectedUrl(link)).filter(Boolean))
     );
-  }
+    const shouldCreateComment = hasMeaningfulCommentText(trimmedBody);
 
-  async function handleAttachmentUpload(task: TaskDetail, file: File) {
-    await runMutation(
-      () => api.uploadAttachment(task.id, file),
-      "File attached."
-    );
+    if (!shouldCreateComment && input.files.length === 0 && links.length === 0) {
+      return false;
+    }
+
+    const result = await runMutation(async () => {
+      if (shouldCreateComment) {
+        await api.addComment(task.id, { body: trimmedBody });
+      }
+
+      for (const file of input.files) {
+        await api.uploadAttachment(task.id, file);
+      }
+
+      for (const link of links) {
+        await api.addAttachmentLink(task.id, {
+          name: new URL(link).hostname.replace(/^www\./, ""),
+          url: link
+        });
+      }
+    }, shouldCreateComment ? "Activity added." : "Attachments added.");
+
+    return result !== null;
   }
 
   async function handleSettingsSave(nextSettings: Settings) {
-    await runMutation(
+    const saved = await runMutation(
       () =>
         api.updateSettings({
           defaultCalendarExportKind: nextSettings.defaultCalendarExportKind,
           defaultTimezone: nextSettings.defaultTimezone,
           doneArchiveAfterDays: nextSettings.doneArchiveAfterDays
         }),
-      "Household settings saved."
+      "Household settings saved.",
+      { silentSuccess: true }
     );
+
+    return saved !== null;
   }
 
-  async function handleLabelCreate(input: { color: string; name: string }) {
-    await runMutation(
-      () =>
-        api.createLabel({
-          color: input.color.trim() || null,
-          name: input.name.trim()
-        }),
-      "Label added."
+  async function handleLabelSave(labelId: string | null, draft: LabelDraft) {
+    const payload = {
+      color: draft.color.trim() || null,
+      name: draft.name.trim().slice(0, maxLabelNameLength)
+    };
+
+    if (!payload.name) {
+      return null;
+    }
+
+    if (labelId) {
+      const updated = await runMutation(
+        () => api.updateLabel(labelId, payload),
+        "Label updated.",
+        { silentSuccess: true }
+      );
+
+      return updated?.item ?? null;
+    }
+
+    const created = await runMutation(() => api.createLabel(payload), "Label added.", {
+      silentSuccess: true
+    });
+
+    if (created?.item) {
+      setEditingLabelKey(created.item.id);
+    }
+
+    return created?.item ?? null;
+  }
+
+  async function handleLabelDelete(labelId: string) {
+    const removed = await runMutation(
+      () => api.deleteLabel(labelId),
+      "Label removed."
     );
+
+    return removed !== null;
   }
 
   async function handleTemplateSave(draft: TemplateDraft) {
@@ -696,16 +1211,20 @@ export function App() {
       title: draft.title.trim()
     };
 
-    if (editingTemplateId) {
+    if (editingTemplateKey && editingTemplateKey !== "new") {
       await runMutation(
-        () => api.updateRecurringTemplate(editingTemplateId, payload),
+        () => api.updateRecurringTemplate(editingTemplateKey, payload),
         "Recurring template updated."
       );
     } else {
-      await runMutation(
+      const created = await runMutation(
         () => api.createRecurringTemplate(payload),
         "Recurring template added."
       );
+
+      if (created) {
+        setEditingTemplateKey(created.item.id);
+      }
     }
   }
 
@@ -803,160 +1322,143 @@ export function App() {
       : editingUserKey === "new-admin"
         ? "admin"
         : selectedHouseholdUser?.role ?? "admin";
+  const selectedLabel =
+    editingLabelKey && editingLabelKey !== "new"
+      ? snapshot.labels.find((label) => label.id === editingLabelKey) ?? null
+      : null;
 
   return (
     <main className="app-shell">
       <div className="grain" />
-      <header className="masthead">
-        <div>
-          <p className="eyebrow">Household Ledger</p>
-          <h1>S#!% We Need To Do</h1>
-          <p className="subtitle">
-            A shared board for chores, errands, recurring rituals, and the small
-            domestic plot twists that keep a household moving.
-          </p>
-        </div>
-        <div className="masthead-actions">
-          <button
-            className="secondary-button"
-            onClick={() => {
-              startTransition(() => {
-                void refreshApp({ background: true, showSpinner: true });
-              });
-            }}
-            type="button"
-          >
-            {isManualRefreshPending ? "Refreshing..." : "Refresh"}
-          </button>
-          {canAdmin ? (
-            <button className="primary-button" onClick={openNewTask} type="button">
-              New Task
-            </button>
+      <div className="app-frame">
+        <AppNavigation
+          actorDisplayName={snapshot.actor?.displayName ?? "Loading..."}
+          actorRoleLabel={snapshot.actor ? formatRoleLabel(snapshot.actor) : "guest"}
+          isOpen={isNavOpen}
+          mainItems={navItems.map((item) => ({ id: item.id, label: item.label }))}
+          onClose={() => setIsNavOpen(false)}
+          onSelectMain={(itemId) => handleViewChange(itemId as ViewName)}
+          selectedMain={view}
+        />
+
+        <div className="app-content">
+          <div className="mobile-nav-row">
+            <Button
+              className="nav-drawer-trigger rounded-full bg-white/70 shadow-sm hover:bg-white"
+              onClick={() => setIsNavOpen(true)}
+              size="icon"
+              type="button"
+              variant="outline"
+            >
+              <Menu className="size-4" />
+              <span className="sr-only">Open navigation</span>
+            </Button>
+          </div>
+
+          {isBooting ? (
+            <StatusMessageCard
+              description="Fetching the latest board state, settings, and household cast."
+              title="Opening the ledger..."
+            />
           ) : null}
-          <div className="actor-chip">
-            <strong>{snapshot.actor?.displayName ?? "Loading..."}</strong>
-            <span>{snapshot.actor ? formatRoleLabel(snapshot.actor) : "guest"}</span>
-          </div>
-        </div>
-      </header>
 
-      <nav aria-label="Primary views" className="view-nav">
-        {navItems.map((item) => (
-          <button
-            className={item.id === view ? "nav-pill nav-pill-active" : "nav-pill"}
-            key={item.id}
-            onClick={() => setView(item.id)}
-            type="button"
-          >
-            {item.label}
-          </button>
-        ))}
-      </nav>
+          {!isBooting && view === "board" ? (
+            <BoardView
+              aiAssistanceLabel={getAiAssistanceLabel(snapshot.users)}
+              allTasks={activeTasks}
+              canAdmin={canAdmin}
+              isFilteredToActor={onlyMyTasks}
+              onCreateTask={createTaskFromBoardTitle}
+              onDropTask={handleTaskDrop}
+              onOpenTask={openTask}
+              onQuickMove={handleQuickMove}
+              onReorder={handleReorder}
+              onToggleActorFilter={() => setOnlyMyTasks((current) => !current)}
+              visibleTasks={onlyMyTasks ? myTasks : activeTasks}
+            />
+          ) : null}
 
-      {notice ? (
-        <div aria-live="polite" className="notice-banner">
-          <span>{notice}</span>
-          <button onClick={() => setNotice(null)} type="button">
-            Dismiss
-          </button>
-        </div>
-      ) : null}
-
-      {errorMessage ? (
-        <div aria-live="polite" className="error-banner">
-          <span>{errorMessage}</span>
-          <button onClick={() => setErrorMessage(null)} type="button">
-            Dismiss
-          </button>
-        </div>
-      ) : null}
-
-      {isBooting ? (
-        <section className="status-panel">
-          <h2>Opening the ledger...</h2>
-          <p>Fetching the latest board state, settings, and household cast.</p>
-        </section>
-      ) : null}
-
-      {!isBooting && view === "board" ? (
-        <BoardView
-          aiAssistanceLabel={getAiAssistanceLabel(snapshot.users)}
-          tasks={activeTasks}
-          onOpenTask={openTask}
-          onQuickMove={handleQuickMove}
-          onReorder={handleReorder}
-        />
-      ) : null}
-
-      {!isBooting && view === "my-tasks" ? (
-        <TaskListView
-          aiAssistanceLabel={getAiAssistanceLabel(snapshot.users)}
-          description="Work with your name on it, with quick status moves and a clean shortlist."
-          emptyMessage="Nothing is assigned to you right now."
-          onOpenTask={openTask}
-          onQuickMove={handleQuickMove}
-          onReorder={handleReorder}
-          tasks={myTasks}
-          title="My Tasks"
-        />
-      ) : null}
-
-      {!isBooting && view === "archive" ? (
-        <section className="panel-stack">
-          <div className="section-header">
-            <div>
-              <p className="eyebrow">History</p>
-              <h2>Archive</h2>
-            </div>
-            <label className="search-field">
-              <span>Search archive</span>
-              <input
-                onChange={(event) => setArchiveSearch(event.target.value)}
-                placeholder="Search titles or notes"
-                type="search"
-                value={archiveSearch}
+          {!isBooting && view === "archive" ? (
+            <section className="panel-stack">
+              <SectionHeading
+                actions={
+                  <SearchField
+                    label="Search archive"
+                    onChange={setArchiveSearch}
+                    placeholder="Search titles or notes"
+                    value={archiveSearch}
+                  />
+                }
+                eyebrow="History"
+                title="Archive"
               />
-            </label>
-          </div>
-          <TaskListView
-            aiAssistanceLabel={getAiAssistanceLabel(snapshot.users)}
-            description="A place for finished errands, closed loops, and things you only need to remember once in a while."
-            emptyMessage="Nothing has been archived yet."
-            onOpenTask={openTask}
-            onQuickMove={() => Promise.resolve()}
-            onReorder={() => Promise.resolve()}
-            tasks={archivedTasks}
-            title="Archive"
-          />
-        </section>
-      ) : null}
+              <TaskListView
+                aiAssistanceLabel={getAiAssistanceLabel(snapshot.users)}
+                description="A place for finished errands, closed loops, and things you only need to remember once in a while."
+                emptyMessage="Nothing has been archived yet."
+                onOpenTask={openTask}
+                onQuickMove={() => Promise.resolve()}
+                onReorder={() => Promise.resolve()}
+                showHeader={false}
+                tasks={archivedTasks}
+                title="Archive"
+              />
+            </section>
+          ) : null}
 
-      {!isBooting && view === "settings" ? (
-        <SettingsView
-          canAdmin={canAdmin}
-          labels={snapshot.labels}
-          onCreateLabel={handleLabelCreate}
-          onIssueServiceToken={handleServiceTokenIssue}
-          onRemoveUser={handleHouseholdUserRemove}
-          onRevokeServiceToken={handleServiceTokenRevoke}
-          onSaveSettings={handleSettingsSave}
-          onSaveTemplate={handleTemplateSave}
-          onSaveUser={handleHouseholdUserSave}
-          onSelectTemplate={(templateId) => setEditingTemplateId(templateId)}
-          onSelectUser={setEditingUserKey}
-          recurringTemplates={snapshot.recurringTemplates}
-          selectedTemplate={
-            snapshot.recurringTemplates.find(
-              (template) => template.id === editingTemplateId
-            ) ?? null
-          }
-          selectedUser={selectedHouseholdUser}
-          serviceTokensByUserId={snapshot.serviceTokensByUserId}
-          settings={snapshot.settings}
-          userEditorMode={householdUserEditorMode}
-          users={snapshot.users}
-        />
-      ) : null}
+          {!isBooting && view === "recurring" ? (
+            <RecurringView
+              canAdmin={canAdmin}
+              isTemplateEditorOpen={editingTemplateKey !== null}
+              labels={snapshot.labels}
+              onSaveTemplate={handleTemplateSave}
+              onSelectTemplate={(templateKey) => {
+                setEditingTemplateKey(templateKey);
+                setIsNavOpen(false);
+              }}
+              recurringTemplates={snapshot.recurringTemplates}
+              selectedTemplate={
+                editingTemplateKey && editingTemplateKey !== "new"
+                  ? snapshot.recurringTemplates.find(
+                      (template) => template.id === editingTemplateKey
+                    ) ?? null
+                  : null
+              }
+              users={snapshot.users}
+            />
+          ) : null}
+
+          {!isBooting && view === "settings" ? (
+            <SettingsView
+              activePage={settingsPage}
+              canAdmin={canAdmin}
+              isLabelEditorOpen={editingLabelKey !== null}
+              labels={snapshot.labels}
+              onDeleteLabel={handleLabelDelete}
+              onIssueServiceToken={handleServiceTokenIssue}
+              onRemoveUser={handleHouseholdUserRemove}
+              onRevokeServiceToken={handleServiceTokenRevoke}
+              onSaveLabel={handleLabelSave}
+              onSaveSettings={handleSettingsSave}
+              onSaveUser={handleHouseholdUserSave}
+              onSelectLabel={setEditingLabelKey}
+              onSelectPage={handleSettingsPageChange}
+              onSelectUser={(userKey) => {
+                setEditingUserKey(userKey);
+                setSettingsPage("household");
+              }}
+              selectedLabel={selectedLabel}
+              selectedLabelKey={editingLabelKey}
+              isUserEditorOpen={editingUserKey !== null}
+              selectedUser={selectedHouseholdUser}
+              serviceTokensByUserId={snapshot.serviceTokensByUserId}
+              settings={snapshot.settings}
+              userEditorMode={householdUserEditorMode}
+              users={snapshot.users}
+            />
+          ) : null}
+        </div>
+      </div>
 
       <TaskSheet
         aiAssistanceToggleLabel={getAiAssistanceToggleLabel(snapshot.users)}
@@ -964,8 +1466,7 @@ export function App() {
         isOpen={isTaskSheetOpen}
         isSavingDisabled={!canAdmin}
         labels={snapshot.labels}
-        onAddAttachmentLink={handleAttachmentLink}
-        onAddComment={handleComment}
+        onSubmitActivity={handleActivitySubmit}
         onArchive={handleArchive}
         onCalendarAction={(task, calendarKind) => {
           if (!snapshot.settings) {
@@ -988,6 +1489,7 @@ export function App() {
           setIsTaskSheetOpen(false);
           setIsCreatingTask(false);
         }}
+        onDeleteArchivedTask={handleDeleteArchivedTask}
         onDownloadAttachment={async (attachment) => {
           if (!attachment.downloadUrl) {
             return;
@@ -996,64 +1498,560 @@ export function App() {
           try {
             await downloadAttachment(attachment.downloadUrl, attachment.originalName);
           } catch (error) {
-            setErrorMessage(buildFlashMessage(error));
+            showErrorToast(buildFlashMessage(error), "attachment-download-error");
           }
         }}
         onSave={handleTaskSubmit}
         onStatusChange={handleStatusChange}
         onUnarchive={handleUnarchive}
-        onUploadAttachment={handleAttachmentUpload}
         settings={snapshot.settings}
         task={selectedTask}
         users={snapshot.users}
         variant={isCreatingTask ? "create" : "detail"}
       />
+      <Toaster />
     </main>
   );
 }
 
 function BoardView(props: {
   aiAssistanceLabel: string;
+  allTasks: TaskListItem[];
+  canAdmin: boolean;
+  isFilteredToActor: boolean;
+  onCreateTask: (title: string) => Promise<boolean>;
+  onDropTask: (input: {
+    targetIndex: number;
+    targetStatus: TaskStatus;
+    taskId: string;
+  }) => Promise<void>;
   onOpenTask: (taskId: string) => void;
   onQuickMove: (task: TaskListItem, direction: -1 | 1) => Promise<void>;
   onReorder: (task: TaskListItem, direction: -1 | 1) => Promise<void>;
-  tasks: TaskListItem[];
+  onToggleActorFilter: () => void;
+  visibleTasks: TaskListItem[];
 }) {
-  return (
-    <section className="board-grid">
-      {taskStatuses.map((status) => {
-        const tasks = getTaskColumnOrder(props.tasks, status);
+  const [activeTaskId, setActiveTaskId] = useState<UniqueIdentifier | null>(null);
+  const [dragProjection, setDragProjection] = useState<{
+    targetIndex: number;
+    targetStatus: TaskStatus;
+  } | null>(null);
+  const [inlineTaskTitle, setInlineTaskTitle] = useState("");
+  const [isInlineTaskOpen, setIsInlineTaskOpen] = useState(false);
+  const [isInlineTaskPending, setIsInlineTaskPending] = useState(false);
+  const boardScrollRef = useRef<HTMLDivElement | null>(null);
+  const edgeScrollLockRef = useRef<"left" | "right" | null>(null);
+  const taskNodeMapRef = useRef(new Map<string, HTMLDivElement>());
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8
+      }
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates
+    })
+  );
+  const activeTask =
+    activeTaskId === null
+      ? null
+      : props.allTasks.find((task) => task.id === activeTaskId) ?? null;
 
-        return (
-          <article className="board-column" key={status}>
-            <header className="column-header">
-              <div>
-                <p className="eyebrow">Status</p>
-                <h2>{status}</h2>
-              </div>
-              <span className="count-pill">{tasks.length}</span>
-            </header>
-            <div className="column-stack">
-              {tasks.length === 0 ? (
-                <div className="empty-card">Nothing resting here.</div>
-              ) : null}
-              {tasks.map((task, index) => (
-                <TaskCard
-                  aiAssistanceLabel={props.aiAssistanceLabel}
-                  index={index}
-                  key={task.id}
-                  onOpen={props.onOpenTask}
-                  onQuickMove={props.onQuickMove}
-                  onReorder={props.onReorder}
-                  task={task}
-                  total={tasks.length}
-                />
-              ))}
+  async function commitInlineTask() {
+    if (isInlineTaskPending) {
+      return;
+    }
+
+    const title = inlineTaskTitle.trim();
+
+    if (!title) {
+      setInlineTaskTitle("");
+      setIsInlineTaskOpen(false);
+      return;
+    }
+
+    setIsInlineTaskPending(true);
+
+    const created = await props.onCreateTask(title);
+
+    setIsInlineTaskPending(false);
+
+    if (created) {
+      setInlineTaskTitle("");
+      setIsInlineTaskOpen(false);
+    }
+  }
+
+  function setTaskNode(taskId: string, node: HTMLDivElement | null) {
+    if (!node) {
+      taskNodeMapRef.current.delete(taskId);
+      return;
+    }
+
+    taskNodeMapRef.current.set(taskId, node);
+  }
+
+  function handleBoardEdgeScroll(event: DragMoveEvent | DragOverEvent | DragEndEvent) {
+    const boardScrollNode = boardScrollRef.current;
+
+    if (!boardScrollNode || boardScrollNode.scrollWidth <= boardScrollNode.clientWidth + 4) {
+      edgeScrollLockRef.current = null;
+      return;
+    }
+
+    const translated = event.active.rect.current.translated;
+
+    if (!translated) {
+      edgeScrollLockRef.current = null;
+      return;
+    }
+
+    const pointerX = translated.left + translated.width / 2;
+    const rect = boardScrollNode.getBoundingClientRect();
+    const edgeThreshold = Math.min(72, rect.width * 0.18);
+    let direction: "left" | "right" | null = null;
+
+    if (pointerX <= rect.left + edgeThreshold) {
+      direction = "left";
+    } else if (pointerX >= rect.right - edgeThreshold) {
+      direction = "right";
+    }
+
+    if (!direction) {
+      edgeScrollLockRef.current = null;
+      return;
+    }
+
+    if (edgeScrollLockRef.current === direction) {
+      return;
+    }
+
+    const boardGridNode = boardScrollNode.querySelector<HTMLElement>(".board-grid");
+    const firstColumn = boardScrollNode.querySelector<HTMLElement>(".board-column");
+    const gap = boardGridNode
+      ? Number.parseFloat(getComputedStyle(boardGridNode).columnGap || "0")
+      : 0;
+    const step = firstColumn
+      ? firstColumn.getBoundingClientRect().width + gap
+      : boardScrollNode.clientWidth * 0.82;
+
+    boardScrollNode.scrollBy({
+      behavior: "smooth",
+      left: direction === "left" ? -step : step
+    });
+    edgeScrollLockRef.current = direction;
+  }
+
+  function getProjectedIndex(taskId: string, status: TaskStatus, activeMidpoint: number | null) {
+    const tasks = getTaskColumnOrder(
+      props.visibleTasks.filter((entry) => entry.id !== taskId),
+      status
+    );
+
+    if (tasks.length === 0) {
+      return 0;
+    }
+
+    if (activeMidpoint === null) {
+      return tasks.length;
+    }
+
+    for (const [index, task] of tasks.entries()) {
+      const node = taskNodeMapRef.current.get(task.id);
+
+      if (!node) {
+        continue;
+      }
+
+      const rect = node.getBoundingClientRect();
+      const midpoint = rect.top + rect.height / 2;
+
+      if (activeMidpoint < midpoint) {
+        return index;
+      }
+    }
+
+    return tasks.length;
+  }
+
+  function resolveDragProjection(event: DragMoveEvent | DragOverEvent | DragEndEvent) {
+    const taskId = String(event.active.id);
+    const task = props.allTasks.find((entry) => entry.id === taskId);
+
+    if (!task || !event.over) {
+      return null;
+    }
+
+    const overId = String(event.over.id);
+    const activeMidpoint = event.active.rect.current.translated
+      ? event.active.rect.current.translated.top +
+        event.active.rect.current.translated.height / 2
+      : null;
+
+    if (overId.startsWith("column:")) {
+      const status = overId.replace("column:", "");
+
+      if (!isTaskStatus(status)) {
+        return null;
+      }
+
+      return {
+        targetIndex: getProjectedIndex(taskId, status, activeMidpoint),
+        targetStatus: status
+      };
+    }
+
+    const overTask = props.visibleTasks.find((entry) => entry.id === overId);
+
+    if (!overTask) {
+      return null;
+    }
+
+    return {
+      targetIndex: getProjectedIndex(taskId, overTask.status, activeMidpoint),
+      targetStatus: overTask.status
+    };
+  }
+
+  return (
+    <section className="panel-stack">
+      <SectionHeading
+        actions={
+          <button
+            aria-checked={props.isFilteredToActor}
+            className={cn(
+              "board-filter-toggle",
+              props.isFilteredToActor && "board-filter-toggle-active"
+            )}
+            onClick={props.onToggleActorFilter}
+            role="switch"
+            type="button"
+          >
+            <span className="board-filter-toggle-track" aria-hidden="true">
+              <span className="board-filter-toggle-thumb" />
+            </span>
+            <span className="board-filter-toggle-label">Only My Tasks</span>
+          </button>
+        }
+        eyebrow="Chore Board"
+        title="The S#!% List"
+      />
+      <DndContext
+        autoScroll={false}
+        collisionDetection={closestCorners}
+        onDragCancel={() => {
+          setActiveTaskId(null);
+          setDragProjection(null);
+          edgeScrollLockRef.current = null;
+        }}
+        onDragMove={(event: DragMoveEvent) => {
+          handleBoardEdgeScroll(event);
+          setDragProjection(resolveDragProjection(event));
+        }}
+        onDragOver={(event: DragOverEvent) => {
+          handleBoardEdgeScroll(event);
+          setDragProjection(resolveDragProjection(event));
+        }}
+        onDragEnd={(event: DragEndEvent) => {
+          const nextProjection = resolveDragProjection(event) ?? dragProjection;
+
+          setActiveTaskId(null);
+          setDragProjection(null);
+          edgeScrollLockRef.current = null;
+
+          if (!props.canAdmin || !nextProjection) {
+            return;
+          }
+
+          const taskId = String(event.active.id);
+
+          void props.onDropTask({
+            targetIndex: nextProjection.targetIndex,
+            targetStatus: nextProjection.targetStatus,
+            taskId
+          });
+        }}
+        onDragStart={(event) => {
+          const nextActiveId = event.active.id;
+          const task = props.visibleTasks.find((entry) => entry.id === nextActiveId);
+
+          setActiveTaskId(nextActiveId);
+
+          if (!task) {
+            setDragProjection(null);
+            return;
+          }
+
+          const sourceTasks = getTaskColumnOrder(props.visibleTasks, task.status);
+          const sourceIndex = sourceTasks.findIndex((entry) => entry.id === task.id);
+
+          setDragProjection(
+            sourceIndex < 0
+              ? null
+              : {
+                  targetIndex: sourceIndex,
+                  targetStatus: task.status
+                }
+          );
+        }}
+        sensors={sensors}
+      >
+        <div className="board-scroll" ref={boardScrollRef}>
+          <div className="board-grid">
+            {taskStatuses.map((status) => {
+              const tasks = getTaskColumnOrder(
+                props.visibleTasks.filter((task) => task.id !== activeTaskId),
+                status
+              );
+              const renderItems: Array<
+                | { kind: "placeholder"; task: TaskListItem }
+                | { kind: "task"; task: TaskListItem }
+              > = tasks.map((task) => ({
+                kind: "task" as const,
+                task
+              }));
+
+              if (activeTask && dragProjection?.targetStatus === status) {
+                renderItems.splice(
+                  Math.max(0, Math.min(dragProjection.targetIndex, renderItems.length)),
+                  0,
+                  {
+                    kind: "placeholder",
+                    task: activeTask
+                  }
+                );
+              }
+
+              return (
+              <BoardColumn
+                aiAssistanceLabel={props.aiAssistanceLabel}
+                canAdmin={props.canAdmin}
+                inlineTaskTitle={inlineTaskTitle}
+                isInlineTaskOpen={isInlineTaskOpen}
+                isInlineTaskPending={isInlineTaskPending}
+                items={renderItems}
+                key={status}
+                onChangeInlineTaskTitle={setInlineTaskTitle}
+                onCommitInlineTask={() => {
+                  void commitInlineTask();
+                }}
+                onCreateTask={() => {
+                  setInlineTaskTitle("");
+                  setIsInlineTaskOpen(true);
+                }}
+                onDismissInlineTask={() => {
+                  if (isInlineTaskPending) {
+                    return;
+                  }
+
+                  setInlineTaskTitle("");
+                  setIsInlineTaskOpen(false);
+                }}
+                onOpenTask={props.onOpenTask}
+                onQuickMove={props.onQuickMove}
+                onReorder={props.onReorder}
+                onRegisterTaskNode={setTaskNode}
+                status={status}
+                taskCount={getTaskColumnOrder(props.visibleTasks, status).length}
+              />
+              );
+            })}
+          </div>
+        </div>
+        <DragOverlay>
+          {activeTask ? (
+            <div className="task-drag-overlay">
+              <TaskCard
+                aiAssistanceLabel={props.aiAssistanceLabel}
+                allowManualReorder={false}
+                hideActions
+                index={0}
+                isDragging
+                onOpen={() => undefined}
+                onQuickMove={() => Promise.resolve()}
+                onReorder={() => Promise.resolve()}
+                task={activeTask}
+                total={1}
+              />
             </div>
-          </article>
-        );
-      })}
+          ) : null}
+        </DragOverlay>
+      </DndContext>
     </section>
+  );
+}
+
+function BoardColumn(props: {
+  aiAssistanceLabel: string;
+  canAdmin: boolean;
+  inlineTaskTitle: string;
+  isInlineTaskOpen: boolean;
+  isInlineTaskPending: boolean;
+  items: Array<
+    | { kind: "placeholder"; task: TaskListItem }
+    | { kind: "task"; task: TaskListItem }
+  >;
+  onChangeInlineTaskTitle: (value: string) => void;
+  onCommitInlineTask: () => void;
+  onCreateTask: () => void;
+  onDismissInlineTask: () => void;
+  onOpenTask: (taskId: string) => void;
+  onQuickMove: (task: TaskListItem, direction: -1 | 1) => Promise<void>;
+  onRegisterTaskNode: (taskId: string, node: HTMLDivElement | null) => void;
+  onReorder: (task: TaskListItem, direction: -1 | 1) => Promise<void>;
+  status: TaskStatus;
+  taskCount: number;
+}) {
+  const { setNodeRef } = useDroppable({
+    id: `column:${props.status}`
+  });
+
+  return (
+    <SurfaceCard className="board-column gap-0 py-0" key={props.status}>
+      <header className="column-header">
+        <div className="column-header-main">
+          <p className="column-label">{props.status}</p>
+          <Badge className="count-pill" variant="secondary">
+            {props.taskCount}
+          </Badge>
+        </div>
+        {props.canAdmin && props.status === "To Do" ? (
+          <Button
+            className="column-add-button"
+            onClick={props.onCreateTask}
+            size="icon"
+            type="button"
+            variant="outline"
+          >
+            <Plus className="size-4" />
+            <span className="sr-only">New Task</span>
+          </Button>
+        ) : null}
+      </header>
+      <SortableContext
+        items={props.items
+          .filter((item) => item.kind === "task")
+          .map((item) => item.task.id)}
+        strategy={verticalListSortingStrategy}
+      >
+        <div className="column-stack" ref={setNodeRef}>
+          {props.status === "To Do" && props.isInlineTaskOpen ? (
+            <InlineTaskComposer
+              isPending={props.isInlineTaskPending}
+              onBlur={props.onCommitInlineTask}
+              onCancel={props.onDismissInlineTask}
+              onChange={props.onChangeInlineTaskTitle}
+              title={props.inlineTaskTitle}
+            />
+          ) : null}
+          {props.items.length === 0 && !(props.status === "To Do" && props.isInlineTaskOpen) ? (
+            <EmptyStateCard message="Nothing resting here." />
+          ) : null}
+          {props.items.map((item, index) =>
+            item.kind === "placeholder" ? (
+              <TaskCard
+                aiAssistanceLabel={props.aiAssistanceLabel}
+                allowManualReorder={false}
+                hideActions
+                index={index}
+                isPlaceholder
+                key={`placeholder:${item.task.id}:${props.status}:${index}`}
+                onOpen={() => undefined}
+                onQuickMove={() => Promise.resolve()}
+                onReorder={() => Promise.resolve()}
+                task={item.task}
+                total={props.items.length}
+              />
+            ) : (
+              <SortableTaskCard
+                aiAssistanceLabel={props.aiAssistanceLabel}
+                canDrag={props.canAdmin}
+                index={index}
+                key={item.task.id}
+                onOpen={props.onOpenTask}
+                onQuickMove={props.onQuickMove}
+                onRegisterNode={props.onRegisterTaskNode}
+                onReorder={props.onReorder}
+                task={item.task}
+                total={props.items.length}
+              />
+            )
+          )}
+        </div>
+      </SortableContext>
+    </SurfaceCard>
+  );
+}
+
+function InlineTaskComposer(props: {
+  isPending: boolean;
+  onBlur: () => void;
+  onCancel: () => void;
+  onChange: (value: string) => void;
+  title: string;
+}) {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  return (
+    <SurfaceCard className="task-card task-card-composer gap-0 py-0">
+      <div className="task-card-main task-card-main-composer">
+        <input
+          className="task-inline-input"
+          disabled={props.isPending}
+          onBlur={props.onBlur}
+          onChange={(event) => props.onChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              inputRef.current?.blur();
+              return;
+            }
+
+            if (event.key === "Escape") {
+              event.preventDefault();
+              props.onCancel();
+            }
+          }}
+          placeholder="What needs doing?"
+          ref={inputRef}
+          value={props.title}
+        />
+      </div>
+    </SurfaceCard>
+  );
+}
+
+function SortableTaskCard(
+  props: {
+    canDrag: boolean;
+    onRegisterNode: (taskId: string, node: HTMLDivElement | null) => void;
+  } & Omit<TaskCardProps, "allowManualReorder">
+) {
+  const { attributes, isDragging, listeners, setNodeRef, transform, transition } = useSortable({
+    disabled: !props.canDrag,
+    id: props.task.id
+  });
+
+  return (
+    <div
+      className={cn("task-sortable-shell", isDragging && "task-sortable-shell-dragging")}
+      ref={(node) => {
+        setNodeRef(node);
+        props.onRegisterNode(props.task.id, node);
+      }}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition
+      }}
+      {...attributes}
+      {...listeners}
+    >
+      <TaskCard {...props} allowManualReorder={false} isDragging={isDragging} />
+    </div>
   );
 }
 
@@ -1064,21 +2062,22 @@ function TaskListView(props: {
   onOpenTask: (taskId: string) => void;
   onQuickMove: (task: TaskListItem, direction: -1 | 1) => Promise<void>;
   onReorder: (task: TaskListItem, direction: -1 | 1) => Promise<void>;
+  showHeader?: boolean;
   tasks: TaskListItem[];
   title: string;
 }) {
   return (
     <section className="panel-stack">
-      <div className="section-header">
-        <div>
-          <p className="eyebrow">Focused View</p>
-          <h2>{props.title}</h2>
-        </div>
-        <p className="section-copy">{props.description}</p>
-      </div>
-      <div className="list-surface">
+      {props.showHeader === false ? null : (
+        <SectionHeading
+          description={props.description}
+          eyebrow="Focused View"
+          title={props.title}
+        />
+      )}
+      <SurfaceCard className="list-surface gap-0 py-0">
         {props.tasks.length === 0 ? (
-          <div className="empty-card">{props.emptyMessage}</div>
+          <EmptyStateCard message={props.emptyMessage} />
         ) : null}
         {props.tasks.map((task, index) => (
           <TaskCard
@@ -1092,91 +2091,128 @@ function TaskListView(props: {
             total={props.tasks.length}
           />
         ))}
-      </div>
+      </SurfaceCard>
     </section>
   );
 }
 
-function TaskCard(props: {
+type TaskCardProps = {
   aiAssistanceLabel: string;
+  allowManualReorder?: boolean;
+  hideActions?: boolean;
   index: number;
+  isDragging?: boolean;
+  isPlaceholder?: boolean;
   onOpen: (taskId: string) => void;
   onQuickMove: (task: TaskListItem, direction: -1 | 1) => Promise<void>;
   onReorder: (task: TaskListItem, direction: -1 | 1) => Promise<void>;
   task: TaskListItem;
   total: number;
-}) {
-  const previousStatus = getStatusStep(props.task.status, -1);
-  const nextStatus = getStatusStep(props.task.status, 1);
+};
+
+function TaskCard(props: TaskCardProps) {
+  const taskDescription = props.task.description.trim();
+  const hasChecklist = props.task.checklistProgress.total > 0;
+  const hasComments = props.task.commentCount > 0;
+  const hasAttachments = props.task.attachmentCount > 0;
+  const allowManualReorder = props.allowManualReorder ?? true;
+  const hideActions = props.hideActions ?? false;
+  const isPlaceholder = props.isPlaceholder ?? false;
 
   return (
-    <article className="task-card">
-      <button className="task-card-main" onClick={() => props.onOpen(props.task.id)} type="button">
+    <SurfaceCard
+      className={cn(
+        "task-card gap-0 py-0",
+        props.isDragging && "task-card-dragging",
+        isPlaceholder && "task-card-placeholder"
+      )}
+    >
+      <button
+        className={cn("task-card-main", isPlaceholder && "task-card-main-placeholder")}
+        disabled={isPlaceholder}
+        onClick={() => props.onOpen(props.task.id)}
+        type="button"
+      >
         <div className="task-card-header">
           <h3>{props.task.title}</h3>
-          <span className={props.task.aiAssistanceEnabled ? "assist-badge assist-on" : "assist-badge"}>
-            {props.task.aiAssistanceEnabled ? props.aiAssistanceLabel : "Human only"}
-          </span>
+          {props.task.aiAssistanceEnabled ? (
+            <Badge className="assist-badge assist-on" variant="secondary">
+              {props.aiAssistanceLabel}
+            </Badge>
+          ) : null}
         </div>
-        <p>{props.task.description || "No notes yet."}</p>
+        {taskDescription ? <p>{taskDescription}</p> : null}
         <div className="task-meta">
-          <span>{props.task.assignee?.displayName ?? "Unassigned"}</span>
-          <span>{formatDate(props.task.dueOn, props.task.dueTime)}</span>
+          <Badge className="task-meta-pill" variant="outline">
+            {props.task.assignee?.displayName ?? "Unassigned"}
+          </Badge>
+          {props.task.dueOn ? (
+            <Badge className="task-meta-pill" variant="outline">
+              {formatDate(props.task.dueOn, props.task.dueTime)}
+            </Badge>
+          ) : null}
         </div>
-        <div className="task-indicators">
-          <span>{props.task.checklistProgress.completed}/{props.task.checklistProgress.total} checklist</span>
-          <span>{props.task.commentCount} comments</span>
-          <span>{props.task.attachmentCount} attachments</span>
-        </div>
-        <div className="label-row">
-          {props.task.labels.map((label) => (
-            <span className="label-pill" key={label.id}>
-              {label.name}
-            </span>
-          ))}
-        </div>
+        {hasChecklist || hasComments || hasAttachments ? (
+          <div className="task-indicators">
+            {hasChecklist ? (
+              <Badge className="task-indicator-pill" variant="secondary">
+                {props.task.checklistProgress.completed}/{props.task.checklistProgress.total} checklist
+              </Badge>
+            ) : null}
+            {hasComments ? (
+              <Badge className="task-indicator-pill" variant="secondary">
+                {props.task.commentCount} comments
+              </Badge>
+            ) : null}
+            {hasAttachments ? (
+              <Badge className="task-indicator-pill" variant="secondary">
+                {props.task.attachmentCount} attachments
+              </Badge>
+            ) : null}
+          </div>
+        ) : null}
+        {props.task.labels.length > 0 ? (
+          <div className="label-row">
+            {props.task.labels.map((label) => (
+              <Badge
+                className="label-pill"
+                key={label.id}
+                style={getLabelBadgeStyle(label.color)}
+                variant="outline"
+              >
+                {label.name}
+              </Badge>
+            ))}
+          </div>
+        ) : null}
       </button>
-      {!props.task.archivedAt ? (
+      {!props.task.archivedAt && !hideActions && allowManualReorder ? (
         <div className="card-actions">
-          <button
+          <Button
             disabled={props.index === 0}
             onClick={() => {
               void props.onReorder(props.task, -1);
             }}
+            size="sm"
             type="button"
+            variant="ghost"
           >
             Move Up
-          </button>
-          <button
+          </Button>
+          <Button
             disabled={props.index === props.total - 1}
             onClick={() => {
               void props.onReorder(props.task, 1);
             }}
+            size="sm"
             type="button"
+            variant="ghost"
           >
             Move Down
-          </button>
-          <button
-            disabled={!previousStatus}
-            onClick={() => {
-              void props.onQuickMove(props.task, -1);
-            }}
-            type="button"
-          >
-            Back
-          </button>
-          <button
-            disabled={!nextStatus}
-            onClick={() => {
-              void props.onQuickMove(props.task, 1);
-            }}
-            type="button"
-          >
-            Advance
-          </button>
+          </Button>
         </div>
       ) : null}
-    </article>
+    </SurfaceCard>
   );
 }
 
@@ -1186,48 +2222,242 @@ function TaskSheet(props: {
   isOpen: boolean;
   isSavingDisabled: boolean;
   labels: Label[];
-  onAddAttachmentLink: (task: TaskDetail, input: { name: string; url: string }) => Promise<void>;
-  onAddComment: (task: TaskDetail, body: string) => Promise<void>;
   onArchive: (task: TaskDetail) => Promise<void>;
   onCalendarAction: (task: TaskDetail, kind: "google" | "ics") => void;
   onClose: () => void;
+  onDeleteArchivedTask: (task: TaskDetail) => Promise<void>;
   onDownloadAttachment: (attachment: Attachment) => Promise<void>;
-  onSave: (draft: TaskDraft) => Promise<void>;
+  onSave: (
+    draft: TaskDraft,
+    options?: { silentSuccess?: boolean }
+  ) => Promise<TaskDetail | null>;
   onStatusChange: (task: TaskDetail, status: TaskStatus) => Promise<void>;
+  onSubmitActivity: (
+    task: TaskDetail,
+    input: { body: string; files: File[]; links: string[] }
+  ) => Promise<boolean>;
   onUnarchive: (task: TaskDetail) => Promise<void>;
-  onUploadAttachment: (task: TaskDetail, file: File) => Promise<void>;
   settings: Settings | null;
   task: TaskDetail | null;
   users: UserRef[];
   variant: "create" | "detail";
 }) {
   const [draft, setDraft] = useState<TaskDraft>(() => createTaskDraft(null));
+  const [activeControl, setActiveControl] = useState<TaskDetailControlId | null>(null);
   const [commentBody, setCommentBody] = useState("");
-  const [linkDraft, setLinkDraft] = useState({ name: "", url: "" });
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
+  const [pendingActivityFiles, setPendingActivityFiles] = useState<File[]>([]);
+  const [ignoredParsedLinks, setIgnoredParsedLinks] = useState<string[]>([]);
+  const lastServerDraftKeyRef = useRef(serializeTaskDraft(createTaskDraft(null)));
+  const currentTaskIdRef = useRef<string | null>(null);
+  const activityFileInputRef = useRef<HTMLInputElement | null>(null);
+  const titleInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const resizeTitleInput = useEffectEvent(() => {
+    const node = titleInputRef.current;
+
+    if (!node) {
+      return;
+    }
+
+    node.style.height = "0px";
+    node.style.height = `${node.scrollHeight}px`;
+  });
+  const submitAutosave = useEffectEvent(async (nextDraft: TaskDraft) => {
+    const savedTask = await props.onSave(nextDraft, { silentSuccess: true });
+
+    if (!savedTask) {
+      return;
+    }
+
+    lastServerDraftKeyRef.current = serializeTaskDraft(createTaskDraft(savedTask));
+  });
 
   useEffect(() => {
-    setDraft(createTaskDraft(props.variant === "detail" ? props.task : null));
-    setCommentBody("");
-    setLinkDraft({ name: "", url: "" });
+    const nextDraft = createTaskDraft(props.variant === "detail" ? props.task : null);
+    const nextDraftKey = serializeTaskDraft(nextDraft);
+    const isNewTask = currentTaskIdRef.current !== props.task?.id;
+
+    if (props.variant === "detail") {
+      setDraft((current) => {
+        const currentDraftKey = serializeTaskDraft(current);
+
+        if (isNewTask || currentDraftKey === lastServerDraftKeyRef.current) {
+          return nextDraft;
+        }
+
+        return current;
+      });
+
+      currentTaskIdRef.current = props.task?.id ?? null;
+      lastServerDraftKeyRef.current = nextDraftKey;
+
+      if (isNewTask) {
+        setActiveControl(null);
+        setCommentBody("");
+        setIsDeleteConfirmOpen(false);
+        setPendingActivityFiles([]);
+        setIgnoredParsedLinks([]);
+      }
+    } else {
+      currentTaskIdRef.current = null;
+      lastServerDraftKeyRef.current = nextDraftKey;
+      setDraft(nextDraft);
+      setActiveControl(null);
+      setCommentBody("");
+      setIsDeleteConfirmOpen(false);
+      setPendingActivityFiles([]);
+      setIgnoredParsedLinks([]);
+    }
   }, [props.task, props.variant]);
+
+  useEffect(() => {
+    if (props.variant !== "detail") {
+      return;
+    }
+
+    resizeTitleInput();
+  }, [draft.title, props.variant, resizeTitleInput]);
+
+  const detectedLinks = useMemo(() => extractUrls(commentBody), [commentBody]);
+  const parsedLinks = useMemo(
+    () => detectedLinks.filter((link) => !ignoredParsedLinks.includes(link)),
+    [detectedLinks, ignoredParsedLinks]
+  );
+
+  useEffect(() => {
+    setIgnoredParsedLinks((current) => {
+      const next = current.filter((link) => detectedLinks.includes(link));
+
+      if (next.length === current.length && next.every((link, index) => link === current[index])) {
+        return current;
+      }
+
+      return next;
+    });
+  }, [detectedLinks]);
+
+  useEffect(() => {
+    if (props.variant !== "detail" || !props.task || props.isSavingDisabled) {
+      return;
+    }
+
+    const serverDraftKey = serializeTaskDraft(createTaskDraft(props.task));
+    const currentDraftKey = serializeTaskDraft(draft);
+
+    if (currentDraftKey === serverDraftKey || !draft.title.trim()) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      void submitAutosave(draft);
+    }, 700);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [draft, props.isSavingDisabled, props.task, props.variant, submitAutosave]);
 
   if (!props.isOpen) {
     return null;
   }
 
   const currentTask = props.variant === "detail" ? props.task : null;
+  const selectedLabels = props.labels.filter((label) => draft.labelIds.includes(label.id));
+  const hasUnsavedChanges =
+    props.variant === "detail" &&
+    !!currentTask &&
+    draft.title.trim().length > 0 &&
+    serializeTaskDraft(draft) !== serializeTaskDraft(createTaskDraft(currentTask));
+
+  function handleClose() {
+    if (hasUnsavedChanges) {
+      void props.onSave(draft, { silentSuccess: true });
+    }
+
+    setIsDeleteConfirmOpen(false);
+    props.onClose();
+  }
+
+  async function handleActivitySubmit() {
+    if (!currentTask) {
+      return;
+    }
+
+    const didSubmit = await props.onSubmitActivity(currentTask, {
+      body: commentBody,
+      files: pendingActivityFiles,
+      links: parsedLinks
+    });
+
+    if (!didSubmit) {
+      return;
+    }
+
+    setCommentBody("");
+    setPendingActivityFiles([]);
+    setIgnoredParsedLinks([]);
+
+    if (activityFileInputRef.current) {
+      activityFileInputRef.current.value = "";
+    }
+  }
 
   return (
     <div className="sheet-backdrop" role="presentation">
       <aside aria-label="Task details" className="sheet-panel">
         <header className="sheet-header">
-          <div>
+          <div className="sheet-header-copy">
             <p className="eyebrow">{props.variant === "create" ? "New Task" : "Task Detail"}</p>
-            <h2>{props.variant === "create" ? "Add Something to the Board" : currentTask?.title}</h2>
+            {props.variant === "create" ? (
+              <h2>Add Something to the Board</h2>
+            ) : (
+              <textarea
+                className="sheet-title-input"
+                disabled={props.isSavingDisabled}
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    title: event.target.value
+                  }))
+                }
+                onInput={() => resizeTitleInput()}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                  }
+                }}
+                placeholder="What needs doing?"
+                ref={titleInputRef}
+                rows={1}
+                value={draft.title}
+              />
+            )}
+            {currentTask ? (
+              <TaskDetailControlGrid
+                activeControl={activeControl}
+                canEdit={!props.isSavingDisabled}
+                currentTask={currentTask}
+                draft={draft}
+                labels={props.labels}
+                onCalendarAction={props.onCalendarAction}
+                onChangeDraft={setDraft}
+                onStatusChange={props.onStatusChange}
+                onToggleControl={(control) =>
+                  setActiveControl((current) => (current === control ? null : control))
+                }
+                settings={props.settings}
+                users={props.users}
+              />
+            ) : (
+              <p className="section-copy">
+                Capture the errand, chore, or recurring ritual with enough context for anyone in the household to pick it up.
+              </p>
+            )}
           </div>
-          <button className="secondary-button" onClick={props.onClose} type="button">
-            Close
-          </button>
+          <Button className="rounded-full" onClick={handleClose} size="icon" type="button" variant="outline">
+            <X className="size-4" />
+            <span className="sr-only">Close</span>
+          </Button>
         </header>
 
         <div className="sheet-body">
@@ -1235,271 +2465,620 @@ function TaskSheet(props: {
             aiAssistanceToggleLabel={props.aiAssistanceToggleLabel}
             canEdit={!props.isSavingDisabled}
             draft={draft}
-            labels={props.labels}
             onChange={setDraft}
             onSubmit={() => {
               void props.onSave(draft);
             }}
-            submitLabel={props.variant === "create" ? "Create Task" : "Save Changes"}
+            variant={props.variant}
+            showSubmitButton={props.variant === "create"}
+            showTitleField={props.variant === "create"}
+            submitLabel="Create Task"
             users={props.users}
           />
 
+          {currentTask ? <Separator className="bg-border/50" /> : null}
+
           {currentTask ? (
             <section className="sheet-section">
-              <div className="section-header compact">
-                <div>
-                  <p className="eyebrow">Status</p>
-                  <h3>Move the card</h3>
-                </div>
-                <div className="status-row">
-                  {taskStatuses.map((status) => (
+              {selectedLabels.length > 0 ? (
+                <div className="detail-labels-wrap">
+                  {selectedLabels.map((label) => (
                     <button
-                      className={
-                        currentTask.status === status
-                          ? "status-button status-button-active"
-                          : "status-button"
+                      className="detail-label-chip"
+                      key={label.id}
+                      style={getLabelBadgeStyle(label.color)}
+                      onClick={() =>
+                        setDraft((current) => ({
+                          ...current,
+                          labelIds: current.labelIds.filter((entry) => entry !== label.id)
+                        }))
                       }
-                      key={status}
-                      onClick={() => {
-                        void props.onStatusChange(currentTask, status);
-                      }}
                       type="button"
                     >
-                      {status}
+                      <span>{label.name}</span>
+                      <span aria-hidden="true">x</span>
                     </button>
                   ))}
                 </div>
-              </div>
-              <div className="sheet-actions">
-                {currentTask.archivedAt ? (
-                  <button
-                    className="secondary-button"
-                    onClick={() => {
-                      void props.onUnarchive(currentTask);
-                    }}
-                    type="button"
-                  >
-                    Restore from Archive
-                  </button>
-                ) : (
-                  <button
-                    className="secondary-button"
-                    onClick={() => {
-                      void props.onArchive(currentTask);
-                    }}
-                    type="button"
-                  >
-                    Archive Task
-                  </button>
-                )}
-                {currentTask.dueOn && props.settings ? (
-                  <CalendarActions
-                    currentTask={currentTask}
-                    onCalendarAction={props.onCalendarAction}
-                    settings={props.settings}
-                  />
-                ) : null}
-              </div>
+              ) : null}
             </section>
           ) : null}
 
           {currentTask ? (
-            <>
-              <section className="sheet-section">
-                <div className="section-header compact">
-                  <div>
-                    <p className="eyebrow">Comments</p>
-                    <h3>Conversation</h3>
-                  </div>
-                </div>
-                <div className="timeline">
-                  {currentTask.comments.length === 0 ? (
-                    <div className="empty-card">No comments yet.</div>
-                  ) : null}
-                  {currentTask.comments.map((comment) => (
-                    <article className="timeline-entry" key={comment.id}>
-                      <div className="timeline-meta">
-                        <strong>{comment.author.displayName}</strong>
-                        <span>{formatTimestamp(comment.createdAt)}</span>
-                      </div>
-                      <p>{comment.body}</p>
-                    </article>
-                  ))}
-                </div>
-                <label className="stack-field">
-                  <span>Add a comment</span>
-                  <textarea
+            <section className="sheet-section">
+              <p className="eyebrow">Notes</p>
+              <div className="activity-composer">
+                <div className="activity-input-shell">
+                  <FormTextarea
+                    className="activity-textarea"
                     onChange={(event) => setCommentBody(event.target.value)}
                     placeholder="Leave a note for the household."
                     rows={3}
                     value={commentBody}
                   />
-                </label>
-                <button
-                  className="secondary-button"
-                  onClick={() => {
-                    if (!commentBody.trim()) {
-                      return;
-                    }
+                  <div className="activity-composer-actions">
+                    <input
+                      accept=".csv,.heic,.jpeg,.jpg,.json,.md,.pdf,.png,.txt,.webp"
+                      className="sr-only"
+                      multiple
+                      onChange={(event) => {
+                        const files = Array.from(event.target.files ?? []);
 
-                    void props.onAddComment(currentTask, commentBody.trim());
-                    setCommentBody("");
-                  }}
-                  type="button"
-                >
-                  Add Comment
-                </button>
-              </section>
+                        if (files.length === 0) {
+                          return;
+                        }
 
-              <section className="sheet-section">
-                <div className="section-header compact">
-                  <div>
-                    <p className="eyebrow">Attachments</p>
-                    <h3>Files and links</h3>
+                        setPendingActivityFiles((current) => [...current, ...files]);
+                      }}
+                      ref={activityFileInputRef}
+                      type="file"
+                    />
+                    <Button
+                      className="activity-icon-button"
+                      onClick={() => activityFileInputRef.current?.click()}
+                      size="icon"
+                      type="button"
+                      variant="ghost"
+                    >
+                      <Paperclip className="size-4" />
+                      <span className="sr-only">Attach file</span>
+                    </Button>
+                    <Button
+                      className="activity-icon-button"
+                      disabled={
+                        !commentBody.trim() &&
+                        pendingActivityFiles.length === 0 &&
+                        parsedLinks.length === 0
+                      }
+                      onClick={() => {
+                        void handleActivitySubmit();
+                      }}
+                      size="icon"
+                      type="button"
+                      variant="ghost"
+                    >
+                      <SendHorizontal className="size-4" />
+                      <span className="sr-only">Post update</span>
+                    </Button>
                   </div>
                 </div>
-                <div className="attachment-list">
-                  {currentTask.attachments.length === 0 ? (
-                    <div className="empty-card">No attachments yet.</div>
-                  ) : null}
-                  {currentTask.attachments.map((attachment) => (
-                    <article className="attachment-row" key={attachment.id}>
-                      <div>
-                        <strong>{attachment.originalName}</strong>
-                        <p>
-                          Added by {attachment.uploadedBy.displayName} on{" "}
-                          {formatTimestamp(attachment.createdAt)}
-                        </p>
+                {pendingActivityFiles.length > 0 || parsedLinks.length > 0 ? (
+                  <div className="activity-chip-row">
+                    {pendingActivityFiles.map((file, index) => (
+                      <button
+                        className="detail-label-chip"
+                        key={`${file.name}-${file.size}-${index}`}
+                        onClick={() =>
+                          setPendingActivityFiles((current) =>
+                            current.filter((_, currentIndex) => currentIndex !== index)
+                          )
+                        }
+                        type="button"
+                      >
+                        <span>{file.name}</span>
+                        <span aria-hidden="true">x</span>
+                      </button>
+                    ))}
+                    {parsedLinks.map((link) => (
+                      <button
+                        className="detail-label-chip"
+                        key={link}
+                        onClick={() =>
+                          setIgnoredParsedLinks((current) => [...current, link])
+                        }
+                        type="button"
+                      >
+                        <span>{link}</span>
+                        <span aria-hidden="true">x</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+
+              {currentTask.comments.length > 0 ? (
+                <div className="timeline">
+                  {currentTask.comments.map((comment) => (
+                    <SurfaceCard className="timeline-entry gap-2 py-4" key={comment.id}>
+                      <div className="timeline-meta">
+                        <strong>{comment.author.displayName}</strong>
+                        <span>{formatTimestamp(comment.createdAt)}</span>
                       </div>
-                      {attachment.storageKind === "upload" ? (
-                        <button
-                          className="secondary-button"
-                          onClick={() => {
-                            void props.onDownloadAttachment(attachment);
-                          }}
-                          type="button"
-                        >
-                          Download
-                        </button>
-                      ) : (
+                      <p>{comment.body}</p>
+                    </SurfaceCard>
+                  ))}
+                </div>
+              ) : null}
+            </section>
+          ) : null}
+
+          {currentTask && currentTask.attachments.length > 0 ? (
+            <section className="sheet-section">
+              <p className="eyebrow">Attachments</p>
+              <div className="attachment-list">
+                {currentTask.attachments.map((attachment) => (
+                  <div className="attachment-row" key={attachment.id}>
+                    <AttachmentPreview attachment={attachment} />
+                    <div className="attachment-copy">
+                      <strong>{attachment.originalName}</strong>
+                      <p className="attachment-meta">
+                        Added by {attachment.uploadedBy.displayName} on{" "}
+                        {formatTimestamp(attachment.createdAt)}
+                      </p>
+                    </div>
+                    {attachment.storageKind === "upload" ? (
+                      <Button
+                        className="attachment-action"
+                        onClick={() => {
+                          void props.onDownloadAttachment(attachment);
+                        }}
+                        size="icon"
+                        type="button"
+                        variant="ghost"
+                      >
+                        <Download className="size-4" />
+                        <span className="sr-only">Download attachment</span>
+                      </Button>
+                    ) : (
+                      <Button asChild className="attachment-action" size="icon" variant="ghost">
                         <a
-                          className="secondary-link"
                           href={attachment.externalUrl ?? "#"}
                           rel="noreferrer"
                           target="_blank"
                         >
-                          Open Link
+                          <ExternalLink className="size-4" />
+                          <span className="sr-only">Open attachment link</span>
                         </a>
-                      )}
-                    </article>
-                  ))}
-                </div>
-                <div className="sheet-actions">
-                  <label className="file-input">
-                    <span>Upload file</span>
-                    <input
-                      accept=".csv,.heic,.jpeg,.jpg,.json,.md,.pdf,.png,.txt,.webp"
-                      onChange={(event) => {
-                        const file = event.target.files?.[0];
+                      </Button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </section>
+          ) : null}
 
-                        if (!file) {
-                          return;
-                        }
-
-                        void props.onUploadAttachment(currentTask, file);
-                        event.currentTarget.value = "";
+          {currentTask ? (
+            <section className="sheet-section">
+              <div className="sheet-actions detail-actions">
+                {currentTask.archivedAt ? (
+                  <>
+                    <Button
+                      onClick={() => {
+                        void props.onUnarchive(currentTask);
                       }}
-                      type="file"
-                    />
-                  </label>
-                  <label className="stack-field compact-field">
-                    <span>Link label</span>
-                    <input
-                      onChange={(event) =>
-                        setLinkDraft((current) => ({
-                          ...current,
-                          name: event.target.value
-                        }))
-                      }
-                      placeholder="Reference note"
-                      value={linkDraft.name}
-                    />
-                  </label>
-                  <label className="stack-field compact-field">
-                    <span>URL</span>
-                    <input
-                      onChange={(event) =>
-                        setLinkDraft((current) => ({
-                          ...current,
-                          url: event.target.value
-                        }))
-                      }
-                      placeholder="https://example.com"
-                      type="url"
-                      value={linkDraft.url}
-                    />
-                  </label>
-                  <button
-                    className="secondary-button"
+                      size="sm"
+                      type="button"
+                      variant="outline"
+                    >
+                      Restore from Archive
+                    </Button>
+                    <Button
+                      onClick={() => {
+                        setIsDeleteConfirmOpen(true);
+                      }}
+                      size="sm"
+                      type="button"
+                      variant="destructive"
+                    >
+                      Delete Task
+                    </Button>
+                  </>
+                ) : (
+                  <Button
                     onClick={() => {
-                      if (!linkDraft.name.trim() || !linkDraft.url.trim()) {
-                        return;
-                      }
-
-                      void props.onAddAttachmentLink(currentTask, {
-                        name: linkDraft.name.trim(),
-                        url: linkDraft.url.trim()
-                      });
-                      setLinkDraft({ name: "", url: "" });
+                      void props.onArchive(currentTask);
                     }}
+                    size="sm"
                     type="button"
+                    variant="outline"
                   >
-                    Attach Link
-                  </button>
-                </div>
-              </section>
-            </>
+                    Archive Task
+                  </Button>
+                )}
+              </div>
+            </section>
           ) : null}
         </div>
+        {currentTask && isDeleteConfirmOpen ? (
+          <div
+            aria-hidden={false}
+            className="confirm-backdrop"
+            onClick={() => setIsDeleteConfirmOpen(false)}
+            role="presentation"
+          >
+            <SurfaceCard
+              aria-labelledby="task-delete-title"
+              aria-modal="true"
+              className="confirm-dialog"
+              onClick={(event) => event.stopPropagation()}
+              role="dialog"
+            >
+              <div className="label-delete-confirmation-copy">
+                <strong id="task-delete-title">Delete {currentTask.title}?</strong>
+                <p>
+                  This archived task will be removed permanently, including its notes,
+                  attachments, and checklist history.
+                </p>
+              </div>
+              <div className="label-delete-confirmation-actions">
+                <Button
+                  onClick={() => setIsDeleteConfirmOpen(false)}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={() => {
+                    setIsDeleteConfirmOpen(false);
+                    void props.onDeleteArchivedTask(currentTask);
+                  }}
+                  size="sm"
+                  type="button"
+                  variant="destructive"
+                >
+                  Delete Task
+                </Button>
+              </div>
+            </SurfaceCard>
+          </div>
+        ) : null}
       </aside>
     </div>
   );
 }
 
-function CalendarActions(props: {
+function TaskDetailControlGrid(props: {
+  activeControl: TaskDetailControlId | null;
+  canEdit: boolean;
   currentTask: TaskDetail;
+  draft: TaskDraft;
+  labels: Label[];
   onCalendarAction: (task: TaskDetail, kind: "google" | "ics") => void;
-  settings: Settings;
+  onChangeDraft: (draft: TaskDraft | ((current: TaskDraft) => TaskDraft)) => void;
+  onStatusChange: (task: TaskDetail, status: TaskStatus) => Promise<void>;
+  onToggleControl: (control: TaskDetailControlId) => void;
+  settings: Settings | null;
+  users: UserRef[];
 }) {
+  const selectedLabels = props.labels.filter((label) =>
+    props.draft.labelIds.includes(label.id)
+  );
+  const assigneeLabel =
+    props.users.find((user) => user.id === props.draft.assigneeUserId)?.displayName ??
+    null;
+  const dueLabel = props.draft.dueOn
+    ? formatDueControlValue(props.draft.dueOn, props.draft.dueTime || null)
+    : null;
+  const labelValue =
+    selectedLabels.length === 0
+      ? null
+      : selectedLabels.length === 1
+        ? selectedLabels[0]?.name ?? null
+        : `${selectedLabels.length} labels`;
+
   return (
-    <>
-      <button
-        className="secondary-button"
-        onClick={() =>
-          props.onCalendarAction(
-            props.currentTask,
-            props.settings.defaultCalendarExportKind
-          )
+    <div className="detail-controls-shell">
+      <div className="detail-controls-grid">
+        <DetailControlButton
+          active={props.activeControl === "status"}
+          disabled={!props.canEdit}
+          onClick={() => props.onToggleControl("status")}
+          value={props.currentTask.status}
+        />
+        <DetailControlButton
+          active={props.activeControl === "assignee"}
+          disabled={!props.canEdit}
+          emptyIcon={UserRound}
+          onClick={() => props.onToggleControl("assignee")}
+          value={assigneeLabel}
+        />
+        <DetailControlButton
+          active={props.activeControl === "labels"}
+          disabled={!props.canEdit}
+          emptyIcon={Tag}
+          onClick={() => props.onToggleControl("labels")}
+          value={labelValue}
+        />
+        <DetailControlButton
+          active={props.activeControl === "due"}
+          disabled={!props.canEdit}
+          emptyIcon={CalendarDays}
+          onClick={() => props.onToggleControl("due")}
+          value={dueLabel}
+        />
+        <DetailControlButton
+          active={false}
+          disabled={!props.currentTask.dueOn || !props.settings}
+          emptyIcon={CalendarPlus2}
+          onClick={() => {
+            if (!props.settings || !props.currentTask.dueOn) {
+              return;
+            }
+
+            props.onCalendarAction(
+              props.currentTask,
+              props.settings.defaultCalendarExportKind
+            );
+          }}
+          value={null}
+        />
+      </div>
+
+      {props.activeControl === "status" ? (
+        <div className="detail-control-panel">
+          <div className="detail-control-options">
+            {taskStatuses.map((status) => (
+              <Button
+                className="rounded-full"
+                disabled={!props.canEdit}
+                key={status}
+                onClick={() => {
+                  void props.onStatusChange(props.currentTask, status);
+                  props.onToggleControl("status");
+                }}
+                size="sm"
+                type="button"
+                variant={props.currentTask.status === status ? "default" : "outline"}
+              >
+                {status}
+              </Button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {props.activeControl === "assignee" ? (
+        <div className="detail-control-panel">
+          <div className="detail-control-options">
+            <Button
+              className="rounded-full"
+              disabled={!props.canEdit}
+              onClick={() => {
+                props.onChangeDraft((current) => ({
+                  ...current,
+                  assigneeUserId: ""
+                }));
+                props.onToggleControl("assignee");
+              }}
+              size="sm"
+              type="button"
+              variant={!props.draft.assigneeUserId ? "default" : "outline"}
+            >
+              Unassigned
+            </Button>
+            {props.users
+              .filter((user) => !user.deactivatedAt)
+              .map((user) => (
+                <Button
+                  className="rounded-full"
+                  disabled={!props.canEdit}
+                  key={user.id}
+                  onClick={() => {
+                    props.onChangeDraft((current) => ({
+                      ...current,
+                      assigneeUserId: user.id
+                    }));
+                    props.onToggleControl("assignee");
+                  }}
+                  size="sm"
+                  type="button"
+                  variant={props.draft.assigneeUserId === user.id ? "default" : "outline"}
+                >
+                  {user.displayName}
+                </Button>
+              ))}
+          </div>
+        </div>
+      ) : null}
+
+      {props.activeControl === "due" ? (
+        <div className="detail-control-panel detail-control-panel-grid">
+          <FormField label="Due date">
+            <FormInput
+              disabled={!props.canEdit}
+              onChange={(event) =>
+                props.onChangeDraft((current) => ({
+                  ...current,
+                  dueOn: event.target.value
+                }))
+              }
+              type="date"
+              value={props.draft.dueOn}
+            />
+          </FormField>
+          <FormField label="Due time">
+            <FormInput
+              disabled={!props.canEdit || !props.draft.dueOn}
+              onChange={(event) =>
+                props.onChangeDraft((current) => ({
+                  ...current,
+                  dueTime: event.target.value
+                }))
+              }
+              type="time"
+              value={props.draft.dueTime}
+            />
+          </FormField>
+          <div className="detail-control-actions">
+            <Button
+              disabled={!props.canEdit || (!props.draft.dueOn && !props.draft.dueTime)}
+              onClick={() =>
+                props.onChangeDraft((current) => ({
+                  ...current,
+                  dueOn: "",
+                  dueTime: ""
+                }))
+              }
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              Clear Due
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
+      {props.activeControl === "labels" ? (
+        <div className="detail-control-panel">
+          <div className="checkbox-grid">
+            {props.labels.map((label) => (
+              <ChoiceChip
+                checked={props.draft.labelIds.includes(label.id)}
+                disabled={!props.canEdit}
+                key={label.id}
+                label={label.name}
+                onCheckedChange={(checked) =>
+                  props.onChangeDraft((current) => ({
+                    ...current,
+                    labelIds:
+                      checked === true
+                        ? [...current.labelIds, label.id]
+                        : current.labelIds.filter((entry) => entry !== label.id)
+                  }))
+                }
+              />
+            ))}
+            {props.labels.length === 0 ? (
+              <EmptyStateCard message="Create labels in Settings to use them here." />
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function AttachmentPreview(props: {
+  attachment: Attachment;
+}) {
+  const [imageObjectUrl, setImageObjectUrl] = useState<string | null>(null);
+  const [hasPreviewError, setHasPreviewError] = useState(false);
+  const faviconUrl = getFaviconUrl(props.attachment.externalUrl);
+
+  useEffect(() => {
+    if (!isImageAttachment(props.attachment) || !props.attachment.downloadUrl) {
+      setImageObjectUrl(null);
+      setHasPreviewError(false);
+      return;
+    }
+
+    let isActive = true;
+    let objectUrlToRevoke: string | null = null;
+
+    setHasPreviewError(false);
+
+    void loadAttachmentObjectUrl(props.attachment.downloadUrl)
+      .then((objectUrl) => {
+        if (!isActive) {
+          URL.revokeObjectURL(objectUrl);
+          return;
         }
-        type="button"
-      >
-        Add to Calendar
-      </button>
-      <button
-        className="secondary-button"
-        onClick={() =>
-          props.onCalendarAction(
-            props.currentTask,
-            props.settings.defaultCalendarExportKind === "google"
-              ? "ics"
-              : "google"
-          )
+
+        objectUrlToRevoke = objectUrl;
+        setImageObjectUrl(objectUrl);
+      })
+      .catch(() => {
+        if (!isActive) {
+          return;
         }
-        type="button"
-      >
-        Use {props.settings.defaultCalendarExportKind === "google" ? "ICS" : "Google"} Instead
-      </button>
-    </>
+
+        setImageObjectUrl(null);
+        setHasPreviewError(true);
+      });
+
+    return () => {
+      isActive = false;
+
+      if (objectUrlToRevoke) {
+        URL.revokeObjectURL(objectUrlToRevoke);
+      }
+    };
+  }, [props.attachment]);
+
+  if (imageObjectUrl && !hasPreviewError) {
+    return (
+      <span className="attachment-preview" aria-hidden="true">
+        <img alt="" className="attachment-preview-image" src={imageObjectUrl} />
+      </span>
+    );
+  }
+
+  if (props.attachment.storageKind === "external_link" && faviconUrl && !hasPreviewError) {
+    return (
+      <span className="attachment-preview" aria-hidden="true">
+        <img
+          alt=""
+          className="attachment-preview-favicon"
+          onError={() => setHasPreviewError(true)}
+          src={faviconUrl}
+        />
+      </span>
+    );
+  }
+
+  return (
+    <span className="attachment-preview attachment-preview-fallback" aria-hidden="true">
+      {isImageAttachment(props.attachment) ? (
+        <FileImage className="size-4" />
+      ) : props.attachment.storageKind === "external_link" ? (
+        <ExternalLink className="size-4" />
+      ) : (
+        <Paperclip className="size-4" />
+      )}
+    </span>
+  );
+}
+
+function DetailControlButton(props: {
+  active: boolean;
+  disabled?: boolean;
+  emptyIcon?: ComponentType<{ className?: string }>;
+  onClick: () => void;
+  value: string | null;
+}) {
+  const EmptyIcon = props.emptyIcon;
+
+  return (
+    <button
+      className={cn(
+        "detail-control-button",
+        props.active && "detail-control-button-active"
+      )}
+      disabled={props.disabled}
+      onClick={props.onClick}
+      type="button"
+    >
+      {props.value ? (
+        <span className="detail-control-value">{props.value}</span>
+      ) : EmptyIcon ? (
+        <span className="detail-control-icon-wrap">
+          <EmptyIcon className="detail-control-icon" />
+        </span>
+      ) : null}
+    </button>
   );
 }
 
@@ -1507,33 +3086,69 @@ function TaskForm(props: {
   aiAssistanceToggleLabel: string;
   canEdit: boolean;
   draft: TaskDraft;
-  labels: Label[];
   onChange: (draft: TaskDraft) => void;
   onSubmit: () => void;
+  showSubmitButton: boolean;
+  showTitleField: boolean;
   submitLabel: string;
   users: UserRef[];
+  variant: "create" | "detail";
 }) {
+  const checklistInputMapRef = useRef(new Map<string, HTMLInputElement>());
+  const pendingChecklistFocusIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const pendingId = pendingChecklistFocusIdRef.current;
+
+    if (!pendingId) {
+      return;
+    }
+
+    const input = checklistInputMapRef.current.get(pendingId);
+
+    if (!input) {
+      return;
+    }
+
+    input.focus();
+    pendingChecklistFocusIdRef.current = null;
+  }, [props.draft.checklistItems]);
+
   return (
     <section className="sheet-section">
       <div className="form-grid">
-        <label className="stack-field wide">
-          <span>Title</span>
-          <input
+        {props.showTitleField ? (
+          <FormField className="wide" label="Title">
+            <FormInput
+              disabled={!props.canEdit}
+              onChange={(event) =>
+                props.onChange({
+                  ...props.draft,
+                  title: event.target.value
+                })
+              }
+              placeholder="What needs doing?"
+              value={props.draft.title}
+            />
+          </FormField>
+        ) : null}
+
+        {props.variant === "detail" ? (
+          <ToggleField
+            checked={props.draft.aiAssistanceEnabled}
             disabled={!props.canEdit}
-            onChange={(event) =>
+            label={props.aiAssistanceToggleLabel}
+            onCheckedChange={(value) =>
               props.onChange({
                 ...props.draft,
-                title: event.target.value
+                aiAssistanceEnabled: value
               })
             }
-            placeholder="What needs doing?"
-            value={props.draft.title}
           />
-        </label>
+        ) : null}
 
-        <label className="stack-field wide">
-          <span>Description</span>
-          <textarea
+        <FormField className="wide" label="Description">
+          <FormTextarea
             disabled={!props.canEdit}
             onChange={(event) =>
               props.onChange({
@@ -1545,251 +3160,235 @@ function TaskForm(props: {
             rows={4}
             value={props.draft.description}
           />
-        </label>
+        </FormField>
 
-        <label className="stack-field">
-          <span>Assignee</span>
-          <select
+        {props.variant === "create" ? (
+          <FormSelect
+            allowEmptyOption
+            className=""
             disabled={!props.canEdit}
-            onChange={(event) =>
+            label="Assignee"
+            onValueChange={(value) =>
               props.onChange({
                 ...props.draft,
-                assigneeUserId: event.target.value
+                assigneeUserId: value
               })
             }
-            value={props.draft.assigneeUserId}
-          >
-            <option value="">Unassigned</option>
-            {props.users
+            options={props.users
               .filter((user) => !user.deactivatedAt)
-              .map((user) => (
-              <option key={user.id} value={user.id}>
-                {user.displayName}
-              </option>
-              ))}
-          </select>
-        </label>
-
-        <label className="stack-field">
-          <span>Due date</span>
-          <input
-            disabled={!props.canEdit}
-            onChange={(event) =>
-              props.onChange({
-                ...props.draft,
-                dueOn: event.target.value
-              })
-            }
-            type="date"
-            value={props.draft.dueOn}
+              .map((user) => ({
+                label: user.displayName,
+                value: user.id
+              }))}
+            placeholder="Unassigned"
+            value={props.draft.assigneeUserId}
           />
-        </label>
-
-        <label className="stack-field">
-          <span>Due time</span>
-          <input
-            disabled={!props.canEdit}
-            onChange={(event) =>
-              props.onChange({
-                ...props.draft,
-                dueTime: event.target.value
-              })
-            }
-            type="time"
-            value={props.draft.dueTime}
-          />
-        </label>
-
-        <label className="toggle-field">
-          <input
-            checked={props.draft.aiAssistanceEnabled}
-            disabled={!props.canEdit}
-            onChange={(event) =>
-              props.onChange({
-                ...props.draft,
-                aiAssistanceEnabled: event.target.checked
-              })
-            }
-            type="checkbox"
-          />
-          <span>{props.aiAssistanceToggleLabel}</span>
-        </label>
+        ) : null}
       </div>
 
-      <div className="sheet-section">
-        <div className="section-header compact">
-          <div>
-            <p className="eyebrow">Checklist</p>
-            <h3>Subtasks</h3>
+      {props.variant === "detail" ? (
+        <>
+          <div className="checklist-stack wide">
+            <div className="checklist-stack-header">
+              <span className="checklist-stack-label">Checklist</span>
+              <Button
+                className="checklist-add-button"
+                disabled={!props.canEdit}
+                onClick={() => {
+                  const clientId = crypto.randomUUID();
+                  pendingChecklistFocusIdRef.current = clientId;
+
+                  props.onChange({
+                    ...props.draft,
+                    checklistItems: [
+                      ...props.draft.checklistItems,
+                      {
+                        body: "",
+                        clientId,
+                        isCompleted: false
+                      }
+                    ]
+                  });
+                }}
+                size="icon"
+                type="button"
+                variant="outline"
+              >
+                <Plus className="size-4" />
+                <span className="sr-only">Add checklist item</span>
+              </Button>
+            </div>
+            <div className="checklist-editor">
+              {props.draft.checklistItems.map((item, index) => (
+                <div className="checklist-row" key={item.clientId}>
+                  <Checkbox
+                    checked={item.isCompleted}
+                    disabled={!props.canEdit}
+                    onCheckedChange={(checked) =>
+                      props.onChange({
+                        ...props.draft,
+                        checklistItems: props.draft.checklistItems.map((entry, entryIndex) =>
+                          entryIndex === index
+                            ? { ...entry, isCompleted: checked === true }
+                            : entry
+                        )
+                      })
+                    }
+                  />
+                  <FormInput
+                    disabled={!props.canEdit}
+                    onChange={(event) =>
+                      props.onChange({
+                        ...props.draft,
+                        checklistItems: props.draft.checklistItems.map((entry, entryIndex) =>
+                          entryIndex === index
+                            ? { ...entry, body: event.target.value }
+                            : entry
+                        )
+                      })
+                    }
+                    placeholder="Subtask description"
+                    ref={(node) => {
+                      if (node) {
+                        checklistInputMapRef.current.set(item.clientId, node);
+                      } else {
+                        checklistInputMapRef.current.delete(item.clientId);
+                      }
+                    }}
+                    value={item.body}
+                  />
+                  <Button
+                    className="checklist-remove-button"
+                    disabled={!props.canEdit}
+                    onClick={() =>
+                      props.onChange({
+                        ...props.draft,
+                        checklistItems: props.draft.checklistItems.filter(
+                          (_, entryIndex) => entryIndex !== index
+                        )
+                      })
+                    }
+                    size="icon"
+                    type="button"
+                    variant="ghost"
+                  >
+                    <Trash2 className="size-4" />
+                    <span className="sr-only">Remove checklist item</span>
+                  </Button>
+                </div>
+              ))}
+            </div>
           </div>
-          <button
-            className="secondary-button"
-            disabled={!props.canEdit}
-            onClick={() =>
-              props.onChange({
-                ...props.draft,
-                checklistItems: [
-                  ...props.draft.checklistItems,
-                  {
-                    body: "",
-                    clientId: crypto.randomUUID(),
-                    isCompleted: false
-                  }
-                ]
-              })
-            }
+
+        </>
+      ) : null}
+
+      {props.showSubmitButton ? (
+        <div className="sheet-actions">
+          <Button
+            disabled={!props.canEdit || !props.draft.title.trim()}
+            onClick={props.onSubmit}
             type="button"
           >
-            Add Item
-          </button>
+            {props.submitLabel}
+          </Button>
         </div>
-        <div className="checklist-editor">
-          {props.draft.checklistItems.map((item, index) => (
-            <div className="checklist-row" key={item.clientId}>
-              <input
-                checked={item.isCompleted}
-                disabled={!props.canEdit}
-                onChange={(event) =>
-                  props.onChange({
-                    ...props.draft,
-                    checklistItems: props.draft.checklistItems.map((entry, entryIndex) =>
-                      entryIndex === index
-                        ? { ...entry, isCompleted: event.target.checked }
-                        : entry
-                    )
-                  })
-                }
-                type="checkbox"
-              />
-              <input
-                disabled={!props.canEdit}
-                onChange={(event) =>
-                  props.onChange({
-                    ...props.draft,
-                    checklistItems: props.draft.checklistItems.map((entry, entryIndex) =>
-                      entryIndex === index
-                        ? { ...entry, body: event.target.value }
-                        : entry
-                    )
-                  })
-                }
-                placeholder="Subtask description"
-                value={item.body}
-              />
-              <button
-                className="ghost-button"
-                disabled={!props.canEdit}
-                onClick={() =>
-                  props.onChange({
-                    ...props.draft,
-                    checklistItems: props.draft.checklistItems.filter(
-                      (_, entryIndex) => entryIndex !== index
-                    )
-                  })
-                }
-                type="button"
-              >
-                Remove
-              </button>
-            </div>
-          ))}
-          {props.draft.checklistItems.length === 0 ? (
-            <div className="empty-card">No checklist items yet.</div>
-          ) : null}
-        </div>
-      </div>
-
-      <div className="sheet-section">
-        <div className="section-header compact">
-          <div>
-            <p className="eyebrow">Labels</p>
-            <h3>Categories</h3>
-          </div>
-        </div>
-        <div className="checkbox-grid">
-          {props.labels.map((label) => (
-            <label className="choice-pill" key={label.id}>
-              <input
-                checked={props.draft.labelIds.includes(label.id)}
-                disabled={!props.canEdit}
-                onChange={(event) =>
-                  props.onChange({
-                    ...props.draft,
-                    labelIds: event.target.checked
-                      ? [...props.draft.labelIds, label.id]
-                      : props.draft.labelIds.filter((entry) => entry !== label.id)
-                  })
-                }
-                type="checkbox"
-              />
-              <span>{label.name}</span>
-            </label>
-          ))}
-          {props.labels.length === 0 ? (
-            <div className="empty-card">Create labels in Settings to use them here.</div>
-          ) : null}
-        </div>
-      </div>
-
-      <div className="sheet-actions">
-        <button
-          className="primary-button"
-          disabled={!props.canEdit || !props.draft.title.trim()}
-          onClick={props.onSubmit}
-          type="button"
-        >
-          {props.submitLabel}
-        </button>
-      </div>
+      ) : null}
     </section>
   );
 }
 
 function SettingsView(props: {
+  activePage: SettingsPage;
   canAdmin: boolean;
+  isLabelEditorOpen: boolean;
+  isUserEditorOpen: boolean;
   labels: Label[];
-  onCreateLabel: (input: { color: string; name: string }) => Promise<void>;
+  onDeleteLabel: (labelId: string) => Promise<boolean>;
   onIssueServiceToken: (
     userId: string,
     name: string
   ) => Promise<{ item: ServiceToken; plainTextToken: string } | null>;
   onRemoveUser: (userId: string) => Promise<boolean>;
   onRevokeServiceToken: (tokenId: string) => Promise<void>;
-  onSaveSettings: (settings: Settings) => Promise<void>;
-  onSaveTemplate: (draft: TemplateDraft) => Promise<void>;
+  onSaveLabel: (labelId: string | null, draft: LabelDraft) => Promise<Label | null>;
+  onSaveSettings: (settings: Settings) => Promise<boolean>;
   onSaveUser: (userId: string | null, draft: HouseholdUserDraft) => Promise<boolean>;
-  onSelectTemplate: (templateId: string | null) => void;
+  onSelectLabel: (labelId: string | "new" | null) => void;
+  onSelectPage: (page: SettingsPage) => void;
   onSelectUser: (userKey: string | "new-admin" | "new-service" | null) => void;
-  recurringTemplates: RecurringTemplate[];
-  selectedTemplate: RecurringTemplate | null;
+  selectedLabel: Label | null;
+  selectedLabelKey: string | "new" | null;
   selectedUser: UserRef | null;
   serviceTokensByUserId: Record<string, ServiceToken[]>;
   settings: Settings | null;
   userEditorMode: "admin" | "service";
   users: UserRef[];
 }) {
-  const [labelName, setLabelName] = useState("");
-  const [labelColor, setLabelColor] = useState("");
+  const [labelDraft, setLabelDraft] = useState<LabelDraft>(createLabelDraft(props.selectedLabel));
   const [settingsDraft, setSettingsDraft] = useState<Settings | null>(props.settings);
-  const [templateDraft, setTemplateDraft] = useState<TemplateDraft>(
-    createTemplateDraft(props.selectedTemplate)
-  );
   const [userDraft, setUserDraft] = useState<HouseholdUserDraft>(
     createHouseholdUserDraft(props.selectedUser, props.userEditorMode)
   );
   const [serviceTokenName, setServiceTokenName] = useState("");
   const [issuedServiceToken, setIssuedServiceToken] = useState<string | null>(null);
+  const [isLabelDeletePending, setIsLabelDeletePending] = useState(false);
+  const [isLabelSavePending, setIsLabelSavePending] = useState(false);
+  const [pendingLabelDelete, setPendingLabelDelete] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
   const [userActionMessage, setUserActionMessage] = useState<string | null>(null);
   const [isUserRemovePending, setIsUserRemovePending] = useState(false);
   const [isUserSavePending, setIsUserSavePending] = useState(false);
+  const [isSettingsSavePending, setIsSettingsSavePending] = useState(false);
+  const lastSavedLabelDraftRef = useRef(serializeLabelDraft(createLabelDraft(props.selectedLabel)));
+  const lastSavedSettingsDraftRef = useRef(
+    props.settings ? serializeSettingsDraft(props.settings) : null
+  );
+  const inlineLabelInputRef = useRef<HTMLInputElement | null>(null);
+  const normalizedLabelDraft = useMemo(() => serializeLabelDraft(labelDraft), [labelDraft]);
+  const normalizedSettingsDraft = useMemo(
+    () => (settingsDraft ? serializeSettingsDraft(settingsDraft) : null),
+    [settingsDraft]
+  );
 
   useEffect(() => {
     setSettingsDraft(props.settings);
+    lastSavedSettingsDraftRef.current = props.settings
+      ? serializeSettingsDraft(props.settings)
+      : null;
+    setIsSettingsSavePending(false);
   }, [props.settings]);
 
   useEffect(() => {
-    setTemplateDraft(createTemplateDraft(props.selectedTemplate));
-  }, [props.selectedTemplate]);
+    if (props.selectedLabelKey && props.selectedLabelKey !== "new" && !props.selectedLabel) {
+      return;
+    }
+
+    if (props.selectedLabelKey === "new") {
+      setLabelDraft(createLabelDraft(null));
+      lastSavedLabelDraftRef.current = serializeLabelDraft(createLabelDraft(null));
+    } else {
+      setLabelDraft(createLabelDraft(props.selectedLabel));
+      lastSavedLabelDraftRef.current = serializeLabelDraft(createLabelDraft(props.selectedLabel));
+    }
+
+    setIsLabelDeletePending(false);
+    setIsLabelSavePending(false);
+    setPendingLabelDelete((current) =>
+      current && current.id !== props.selectedLabel?.id ? null : current
+    );
+  }, [props.isLabelEditorOpen, props.selectedLabel, props.selectedLabelKey]);
+
+  useEffect(() => {
+    if (!props.isLabelEditorOpen) {
+      return;
+    }
+
+    inlineLabelInputRef.current?.focus();
+    inlineLabelInputRef.current?.select();
+  }, [props.isLabelEditorOpen, props.selectedLabelKey]);
 
   useEffect(() => {
     setUserDraft(createHouseholdUserDraft(props.selectedUser, props.userEditorMode));
@@ -1800,12 +3399,126 @@ function SettingsView(props: {
     setIsUserSavePending(false);
   }, [props.selectedUser, props.userEditorMode]);
 
+  const submitSettingsAutosave = useEffectEvent(async (nextSettings: Settings) => {
+    const normalized = normalizeSettingsDraft(nextSettings);
+
+    if (!normalized.defaultTimezone || !Number.isFinite(normalized.doneArchiveAfterDays)) {
+      return;
+    }
+
+    if (normalized.doneArchiveAfterDays < 1) {
+      return;
+    }
+
+    setIsSettingsSavePending(true);
+    const saved = await props.onSaveSettings({
+      ...nextSettings,
+      defaultTimezone: normalized.defaultTimezone
+    });
+    setIsSettingsSavePending(false);
+
+    if (saved) {
+      lastSavedSettingsDraftRef.current = JSON.stringify(normalized);
+    }
+  });
+
+  const submitLabelAutosave = useEffectEvent(async (nextDraft: LabelDraft) => {
+    const normalized = normalizeLabelDraft(nextDraft);
+    const labelId =
+      props.selectedLabelKey && props.selectedLabelKey !== "new" ? props.selectedLabelKey : null;
+
+    if (!normalized.name) {
+      return;
+    }
+
+    setIsLabelSavePending(true);
+    const saved = await props.onSaveLabel(labelId, nextDraft);
+    setIsLabelSavePending(false);
+
+    if (saved) {
+      lastSavedLabelDraftRef.current = JSON.stringify({
+        color: saved.color ?? "",
+        name: saved.name
+      });
+    }
+  });
+
+  useEffect(() => {
+    if (!settingsDraft || isSettingsSavePending) {
+      return;
+    }
+
+    if (normalizedSettingsDraft === lastSavedSettingsDraftRef.current) {
+      return;
+    }
+
+    const normalized = normalizeSettingsDraft(settingsDraft);
+
+    if (!normalized.defaultTimezone || !Number.isFinite(normalized.doneArchiveAfterDays)) {
+      return;
+    }
+
+    if (normalized.doneArchiveAfterDays < 1) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      void submitSettingsAutosave(settingsDraft);
+    }, 500);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [isSettingsSavePending, normalizedSettingsDraft, settingsDraft, submitSettingsAutosave]);
+
+  useEffect(() => {
+    if (!props.isLabelEditorOpen || isLabelDeletePending || isLabelSavePending) {
+      return;
+    }
+
+    if (normalizedLabelDraft === lastSavedLabelDraftRef.current) {
+      return;
+    }
+
+    const normalized = normalizeLabelDraft(labelDraft);
+
+    if (!normalized.name) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      void submitLabelAutosave(labelDraft);
+    }, 450);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [
+    isLabelDeletePending,
+    isLabelSavePending,
+    labelDraft,
+    normalizedLabelDraft,
+    props.isLabelEditorOpen,
+    submitLabelAutosave
+  ]);
+
+  const handleLabelDeleteConfirm = useEffectEvent(async (labelId: string) => {
+    setIsLabelDeletePending(true);
+    const deleted = await props.onDeleteLabel(labelId);
+    setIsLabelDeletePending(false);
+    setPendingLabelDelete(null);
+
+    if (deleted && props.selectedLabel?.id === labelId) {
+      props.onSelectLabel(null);
+    }
+  });
+
   if (!props.canAdmin || !settingsDraft) {
     return (
-      <section className="status-panel">
-        <h2>Settings are reserved for household admins.</h2>
-        <p>The current browser session does not have admin access.</p>
-      </section>
+      <StatusMessageCard
+        description="The current browser session does not have admin access."
+        title="Settings are reserved for household admins."
+      />
     );
   }
 
@@ -1815,424 +3528,690 @@ function SettingsView(props: {
       : [];
 
   return (
-    <section className="settings-grid">
-      <article className="settings-card">
-        <div className="section-header">
-          <div>
-            <p className="eyebrow">House Rules</p>
-            <h2>Settings</h2>
-          </div>
-          <p className="section-copy">
-            Tune the default timezone, archive cadence, and calendar preference.
-          </p>
-        </div>
-        <div className="form-grid">
-          <label className="stack-field">
-            <span>Timezone</span>
-            <input
-              onChange={(event) =>
-                setSettingsDraft({
-                  ...settingsDraft,
-                  defaultTimezone: event.target.value
-                })
-              }
-              value={settingsDraft.defaultTimezone}
-            />
-          </label>
-          <label className="stack-field">
-            <span>Done retention (days)</span>
-            <input
-              min={1}
-              onChange={(event) =>
-                setSettingsDraft({
-                  ...settingsDraft,
-                  doneArchiveAfterDays: Number(event.target.value)
-                })
-              }
-              type="number"
-              value={settingsDraft.doneArchiveAfterDays}
-            />
-          </label>
-          <label className="stack-field">
-            <span>Default calendar export</span>
-            <select
-              onChange={(event) =>
-                setSettingsDraft({
-                  ...settingsDraft,
-                  defaultCalendarExportKind: event.target.value as "google" | "ics"
-                })
-              }
-              value={settingsDraft.defaultCalendarExportKind}
-            >
-              <option value="google">Google Calendar</option>
-              <option value="ics">ICS download</option>
-            </select>
-          </label>
-        </div>
-        <div className="sheet-actions">
-          <button
-            className="primary-button"
-            onClick={() => {
-              void props.onSaveSettings(settingsDraft);
-            }}
+    <section className="settings-shell">
+      <div className="settings-page-nav">
+        {settingsNavItems.map((item) => (
+          <Button
+            className={cn(
+              "settings-page-button rounded-full border border-border/50 bg-white/62 text-foreground shadow-sm backdrop-blur-sm",
+              props.activePage === item.id && "bg-primary text-primary-foreground"
+            )}
+            key={item.id}
+            onClick={() => props.onSelectPage(item.id)}
+            size="sm"
             type="button"
+            variant={props.activePage === item.id ? "default" : "ghost"}
           >
-            Save Settings
-          </button>
-        </div>
-      </article>
+            {item.label}
+          </Button>
+        ))}
+      </div>
 
-      <article className="settings-card">
-        <div className="section-header">
-          <div>
-            <p className="eyebrow">Household Cast</p>
-            <h2>People and Assistants</h2>
-          </div>
-          <div className="sheet-actions">
-            <button
-              className="secondary-button"
-              onClick={() => props.onSelectUser("new-admin")}
-              type="button"
-            >
-              New Person
-            </button>
-            <button
-              className="secondary-button"
-              onClick={() => props.onSelectUser("new-service")}
-              type="button"
-            >
-              New Assistant
-            </button>
-          </div>
-        </div>
-        <div className="template-grid">
-          <div className="template-list">
-            {props.users.length === 0 ? (
-              <div className="empty-card">No household actors yet.</div>
-            ) : null}
-            {props.users.map((user) => (
-              <button
-                className={
-                  props.selectedUser?.id === user.id
-                    ? "template-row template-row-active"
-                    : "template-row"
-                }
-                key={user.id}
-                onClick={() => props.onSelectUser(user.id)}
-                type="button"
-              >
-                <strong>{user.displayName}</strong>
-                <span>{formatRoleLabel(user)}</span>
-              </button>
-            ))}
-          </div>
-          <div className="template-editor">
+      <div className="settings-page-stack">
+        {props.activePage === "general" ? (
+          <SurfaceCard className="settings-card gap-0 py-0">
+            <SectionHeading
+              description="Tune the default timezone, archive cadence, and calendar preference."
+              eyebrow="House Rules"
+              title="General Settings"
+            />
             <div className="form-grid">
-              <label className="stack-field">
-                <span>Type</span>
-                <input
-                  disabled
-                  value={userDraft.mode === "admin" ? "Person" : "Assistant"}
-                />
-              </label>
-              <label className="stack-field">
-                <span>Display name</span>
-                <input
+              <FormField label="Timezone">
+                <FormInput
                   onChange={(event) =>
-                    setUserDraft({
-                      ...userDraft,
-                      displayName: event.target.value
+                    setSettingsDraft({
+                      ...settingsDraft,
+                      defaultTimezone: event.target.value
                     })
                   }
-                  value={userDraft.displayName}
+                  value={settingsDraft.defaultTimezone}
                 />
-              </label>
-              {userDraft.mode === "admin" ? (
-                <label className="stack-field wide">
-                  <span>Email</span>
-                  <input
-                    onChange={(event) =>
-                      setUserDraft({
-                        ...userDraft,
-                        email: event.target.value
-                      })
-                    }
-                    placeholder="person@example.com"
-                    type="email"
-                    value={userDraft.email}
-                  />
-                </label>
-              ) : (
-                <label className="stack-field wide">
-                  <span>Service kind</span>
-                  <input
-                    onChange={(event) =>
-                      setUserDraft({
-                        ...userDraft,
-                        serviceKind: event.target.value
-                      })
-                    }
-                    placeholder="assistant"
-                    value={userDraft.serviceKind}
-                  />
-                </label>
-              )}
-            </div>
-            <div className="sheet-actions">
-              <button
-                className="primary-button"
-                disabled={
-                  isUserRemovePending ||
-                  isUserSavePending ||
-                  !userDraft.displayName.trim() ||
-                  (userDraft.mode === "admin"
-                    ? !userDraft.email.trim()
-                    : !userDraft.serviceKind.trim())
-                }
-                onClick={async () => {
-                  setIsUserSavePending(true);
-                  setUserActionMessage(null);
-                  const saved = await props.onSaveUser(props.selectedUser?.id ?? null, userDraft);
-
-                  setIsUserSavePending(false);
-
-                  if (saved) {
-                    setUserActionMessage(
-                      props.selectedUser ? "Actor saved." : "Actor created."
-                    );
+              </FormField>
+              <FormField label="Done retention (days)">
+                <FormInput
+                  min={1}
+                  onChange={(event) =>
+                    setSettingsDraft({
+                      ...settingsDraft,
+                      doneArchiveAfterDays: Number(event.target.value)
+                    })
                   }
-                }}
-                type="button"
-              >
-                {isUserSavePending
-                  ? props.selectedUser
-                    ? "Saving..."
-                    : "Creating..."
-                  : props.selectedUser
-                    ? "Save Actor"
-                    : "Create Actor"}
-              </button>
-              {props.selectedUser ? (
-                <button
-                  className="ghost-button"
-                  disabled={isUserRemovePending || isUserSavePending}
-                  onClick={async () => {
-                    const selectedUserId = props.selectedUser?.id;
-
-                    if (!selectedUserId) {
-                      return;
-                    }
-
-                    if (
-                      !window.confirm(
-                        "Remove this household actor permanently from the active cast? They will stay in task history, lose open assignments, and any assistant tokens will be revoked."
-                      )
-                    ) {
-                      return;
-                    }
-
-                    setIsUserRemovePending(true);
-                    setUserActionMessage(null);
-                    await props.onRemoveUser(selectedUserId);
-                    setIsUserRemovePending(false);
-                  }}
-                  type="button"
-                >
-                  {isUserRemovePending ? "Removing..." : "Remove Actor"}
-                </button>
-              ) : null}
+                  type="number"
+                  value={settingsDraft.doneArchiveAfterDays}
+                />
+              </FormField>
+              <FormSelect
+                label="Default calendar export"
+                onValueChange={(value) =>
+                  setSettingsDraft({
+                    ...settingsDraft,
+                    defaultCalendarExportKind: value as "google" | "ics"
+                  })
+                }
+                options={[
+                  { label: "Google Calendar", value: "google" },
+                  { label: "ICS download", value: "ics" }
+                ]}
+                value={settingsDraft.defaultCalendarExportKind}
+              />
             </div>
-            {userActionMessage ? <div className="empty-card">{userActionMessage}</div> : null}
-            {props.selectedUser ? (
-              <div className="empty-card">
-                Removing an actor is permanent. They stay attached to past comments and
-                history, but disappear from the household cast, cannot be assigned to
-                anything new, and assistants lose any active tokens.
-              </div>
-            ) : null}
+          </SurfaceCard>
+        ) : null}
 
-            {props.selectedUser?.role === "service" ? (
-              <section className="sheet-section">
-                <div className="section-header compact">
-                  <div>
-                    <p className="eyebrow">Assistant Access</p>
-                    <h3>Service Tokens</h3>
-                  </div>
-                </div>
-                <div className="sheet-actions">
-                  <label className="stack-field compact-field">
-                    <span>Token name</span>
-                    <input
-                      onChange={(event) => setServiceTokenName(event.target.value)}
-                      placeholder="Primary assistant"
-                      value={serviceTokenName}
-                    />
-                  </label>
-                  <button
-                    className="secondary-button"
-                    disabled={
-                      !serviceTokenName.trim() || isUserRemovePending || isUserSavePending
-                    }
-                    onClick={async () => {
-                      const issued = await props.onIssueServiceToken(
-                        props.selectedUser!.id,
-                        serviceTokenName
-                      );
-
-                      if (issued) {
-                        setIssuedServiceToken(issued.plainTextToken);
-                        setServiceTokenName("");
-                      }
-                    }}
+        {props.activePage === "household" ? (
+          <SurfaceCard className="settings-card gap-0 py-0">
+            <SectionHeading
+              actions={
+                <div className="header-action-row">
+                  <Button
+                    onClick={() => props.onSelectUser("new-admin")}
+                    size="sm"
                     type="button"
+                    variant="outline"
                   >
-                    Issue Token
-                  </button>
+                    New Person
+                  </Button>
+                  <Button
+                    onClick={() => props.onSelectUser("new-service")}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    New Assistant
+                  </Button>
                 </div>
-                {issuedServiceToken ? (
-                  <div className="empty-card">
-                    <strong>Copy this token now:</strong>
-                    <p>{issuedServiceToken}</p>
-                  </div>
+              }
+              eyebrow="Household Cast"
+              title="People and Assistants"
+            />
+            <div className="template-grid">
+              <div className="template-list">
+                {props.users.length === 0 ? (
+                  <EmptyStateCard message="No household actors yet." />
                 ) : null}
-                <div className="cast-list">
-                  {selectedServiceTokens.length === 0 ? (
-                    <div className="empty-card">No service tokens issued yet.</div>
-                  ) : null}
-                  {selectedServiceTokens.map((token) => (
-                    <div className="cast-row" key={token.id}>
-                      <div>
-                        <strong>{token.name}</strong>
-                        <span>
-                          Created {formatTimestamp(token.createdAt)}
-                          {token.lastUsedAt
-                            ? ` · Last used ${formatTimestamp(token.lastUsedAt)}`
-                            : " · Never used"}
-                          {token.revokedAt
-                            ? ` · Revoked ${formatTimestamp(token.revokedAt)}`
-                            : ""}
-                        </span>
-                      </div>
-                      <button
-                        className="ghost-button"
-                        disabled={Boolean(token.revokedAt)}
-                        onClick={() => {
-                          void props.onRevokeServiceToken(token.id);
+                {props.users.map((user) => (
+                  <SelectionListButton
+                    active={props.selectedUser?.id === user.id}
+                    key={user.id}
+                    label={user.displayName}
+                    meta={formatRoleLabel(user)}
+                    onClick={() => props.onSelectUser(user.id)}
+                  />
+                ))}
+              </div>
+              <div className="template-editor">
+                {props.isUserEditorOpen ? (
+                  <>
+                    <div className="form-grid">
+                      <FormField label="Type">
+                        <FormInput
+                          disabled
+                          value={userDraft.mode === "admin" ? "Person" : "Assistant"}
+                        />
+                      </FormField>
+                      <FormField label="Display name">
+                        <FormInput
+                          onChange={(event) =>
+                            setUserDraft({
+                              ...userDraft,
+                              displayName: event.target.value
+                            })
+                          }
+                          value={userDraft.displayName}
+                        />
+                      </FormField>
+                      {userDraft.mode === "admin" ? (
+                        <FormField className="wide" label="Email">
+                          <FormInput
+                            onChange={(event) =>
+                              setUserDraft({
+                                ...userDraft,
+                                email: event.target.value
+                              })
+                            }
+                            placeholder="person@example.com"
+                            type="email"
+                            value={userDraft.email}
+                          />
+                        </FormField>
+                      ) : (
+                        <FormField className="wide" label="Service kind">
+                          <FormInput
+                            onChange={(event) =>
+                              setUserDraft({
+                                ...userDraft,
+                                serviceKind: event.target.value
+                              })
+                            }
+                            placeholder="assistant"
+                            value={userDraft.serviceKind}
+                          />
+                        </FormField>
+                      )}
+                    </div>
+                    <div className="sheet-actions">
+                      <Button
+                        disabled={
+                          isUserRemovePending ||
+                          isUserSavePending ||
+                          !userDraft.displayName.trim() ||
+                          (userDraft.mode === "admin"
+                            ? !userDraft.email.trim()
+                            : !userDraft.serviceKind.trim())
+                        }
+                        onClick={async () => {
+                          setIsUserSavePending(true);
+                          setUserActionMessage(null);
+                          const saved = await props.onSaveUser(
+                            props.selectedUser?.id ?? null,
+                            userDraft
+                          );
+
+                          setIsUserSavePending(false);
+
+                          if (saved) {
+                            setUserActionMessage(
+                              props.selectedUser ? "Actor saved." : "Actor created."
+                            );
+                          }
                         }}
                         type="button"
                       >
-                        {token.revokedAt ? "Revoked" : "Revoke"}
-                      </button>
+                        {isUserSavePending
+                          ? props.selectedUser
+                            ? "Saving..."
+                            : "Creating..."
+                          : props.selectedUser
+                            ? "Save Actor"
+                            : "Create Actor"}
+                      </Button>
+                      {props.selectedUser ? (
+                        <Button
+                          disabled={isUserRemovePending || isUserSavePending}
+                          onClick={async () => {
+                            const selectedUserId = props.selectedUser?.id;
+
+                            if (!selectedUserId) {
+                              return;
+                            }
+
+                            if (
+                              !window.confirm(
+                                "Remove this household actor permanently from the active cast? They will stay in task history, lose open assignments, and any assistant tokens will be revoked."
+                              )
+                            ) {
+                              return;
+                            }
+
+                            setIsUserRemovePending(true);
+                            setUserActionMessage(null);
+                            await props.onRemoveUser(selectedUserId);
+                            setIsUserRemovePending(false);
+                          }}
+                          size="sm"
+                          type="button"
+                          variant="ghost"
+                        >
+                          {isUserRemovePending ? "Removing..." : "Remove Actor"}
+                        </Button>
+                      ) : null}
                     </div>
-                  ))}
+                    {userActionMessage ? <EmptyStateCard message={userActionMessage} /> : null}
+                    {props.selectedUser ? (
+                      <EmptyStateCard
+                        message="Removing an actor is permanent. They stay attached to past comments and history, but disappear from the household cast, cannot be assigned to anything new, and assistants lose any active tokens."
+                      />
+                    ) : null}
+
+                    {props.selectedUser?.role === "service" ? (
+                      <section className="sheet-section">
+                        <SectionHeading
+                          compact
+                          eyebrow="Assistant Access"
+                          title="Service Tokens"
+                          titleAs="h3"
+                        />
+                        <div className="sheet-actions">
+                          <FormField className="compact-field" label="Token name">
+                            <FormInput
+                              onChange={(event) => setServiceTokenName(event.target.value)}
+                              placeholder="Primary assistant"
+                              value={serviceTokenName}
+                            />
+                          </FormField>
+                          <Button
+                            disabled={
+                              !serviceTokenName.trim() || isUserRemovePending || isUserSavePending
+                            }
+                            onClick={async () => {
+                              const issued = await props.onIssueServiceToken(
+                                props.selectedUser!.id,
+                                serviceTokenName
+                              );
+
+                              if (issued) {
+                                setIssuedServiceToken(issued.plainTextToken);
+                                setServiceTokenName("");
+                              }
+                            }}
+                            size="sm"
+                            type="button"
+                            variant="outline"
+                          >
+                            Issue Token
+                          </Button>
+                        </div>
+                        {issuedServiceToken ? (
+                          <EmptyStateCard
+                            message={issuedServiceToken}
+                            title="Copy this token now:"
+                          />
+                        ) : null}
+                        <div className="cast-list">
+                          {selectedServiceTokens.length === 0 ? (
+                            <EmptyStateCard message="No service tokens issued yet." />
+                          ) : null}
+                          {selectedServiceTokens.map((token) => (
+                            <InfoRow
+                              action={
+                                <Button
+                                  disabled={Boolean(token.revokedAt)}
+                                  onClick={() => {
+                                    void props.onRevokeServiceToken(token.id);
+                                  }}
+                                  size="sm"
+                                  type="button"
+                                  variant="ghost"
+                                >
+                                  {token.revokedAt ? "Revoked" : "Revoke"}
+                                </Button>
+                              }
+                              key={token.id}
+                            >
+                              <div>
+                                <strong>{token.name}</strong>
+                                <span>
+                                  Created {formatTimestamp(token.createdAt)}
+                                  {token.lastUsedAt
+                                    ? ` · Last used ${formatTimestamp(token.lastUsedAt)}`
+                                    : " · Never used"}
+                                  {token.revokedAt
+                                    ? ` · Revoked ${formatTimestamp(token.revokedAt)}`
+                                    : ""}
+                                </span>
+                              </div>
+                            </InfoRow>
+                          ))}
+                        </div>
+                      </section>
+                    ) : null}
+                  </>
+                ) : (
+                  <EmptyStateCard message="Choose someone or create a new person or assistant." />
+                )}
+              </div>
+            </div>
+          </SurfaceCard>
+        ) : null}
+
+        {props.activePage === "labels" ? (
+          <>
+            <SurfaceCard className="settings-card gap-0 py-0">
+              <SectionHeading
+                actions={
+                  <div className="section-icon-actions">
+                    <Button
+                      className="rounded-full"
+                      onClick={() => props.onSelectLabel("new")}
+                      size="icon"
+                      type="button"
+                      variant="outline"
+                    >
+                      <Plus className="size-4" />
+                      <span className="sr-only">New label</span>
+                    </Button>
+                  </div>
+                }
+                description="Create short labels for things like errands, bills, cleaning, shopping, or anything else you want to scan quickly on the board."
+                eyebrow="Labels"
+                title="Tag Library"
+              />
+              <div className="template-grid">
+                <div className="template-list">
+                  {props.labels.length === 0 ? (
+                    <EmptyStateCard message="No labels yet. Add a few tags to make the board easier to scan." />
+                  ) : null}
+                  <div className="label-library-list">
+                    {props.selectedLabelKey === "new" ? (
+                      <div className="label-library-item label-library-item-active">
+                        <div className="label-library-item-input-wrap">
+                          <input
+                            aria-label="New label name"
+                            className={cn(
+                              "label-library-inline-input",
+                              !labelDraft.color &&
+                                !labelDraft.name.trim() &&
+                                "label-library-inline-input-neutral"
+                            )}
+                            maxLength={maxLabelNameLength}
+                            onChange={(event) =>
+                              setLabelDraft((current) => ({
+                                ...current,
+                                name: event.target.value.slice(0, maxLabelNameLength)
+                              }))
+                            }
+                            placeholder="New label"
+                            ref={inlineLabelInputRef}
+                            style={getLabelBadgeStyle(labelDraft.color || null)}
+                            value={labelDraft.name}
+                          />
+                        </div>
+                      </div>
+                    ) : null}
+                    {props.labels.map((label) => {
+                      const isSelected = props.selectedLabelKey === label.id;
+
+                      return (
+                        <div
+                          className={cn(
+                            "label-library-item",
+                            isSelected && "label-library-item-active"
+                          )}
+                          key={label.id}
+                        >
+                          {isSelected ? (
+                            <div className="label-library-item-input-wrap">
+                              <input
+                                aria-label={`Edit label ${label.name}`}
+                                className="label-library-inline-input"
+                                maxLength={maxLabelNameLength}
+                                onChange={(event) =>
+                                  setLabelDraft((current) => ({
+                                    ...current,
+                                    name: event.target.value.slice(0, maxLabelNameLength)
+                                  }))
+                                }
+                                ref={inlineLabelInputRef}
+                                style={getLabelBadgeStyle(labelDraft.color || null)}
+                                value={labelDraft.name}
+                              />
+                            </div>
+                          ) : (
+                            <button
+                              aria-pressed={isSelected}
+                              className="label-library-item-button"
+                              onClick={() => props.onSelectLabel(label.id)}
+                              type="button"
+                            >
+                              <Badge
+                                className="label-pill label-library-item-pill"
+                                style={getLabelBadgeStyle(label.color ?? null)}
+                                variant="outline"
+                              >
+                                {label.name}
+                              </Badge>
+                            </button>
+                          )}
+                          <Button
+                            className="label-library-delete-button rounded-full"
+                            disabled={isLabelDeletePending || isLabelSavePending}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              props.onSelectLabel(label.id);
+                              setPendingLabelDelete({
+                                id: label.id,
+                                name: label.name
+                              });
+                            }}
+                            size="icon"
+                            type="button"
+                            variant="ghost"
+                          >
+                            <Trash2 className="size-4" />
+                            <span className="sr-only">Delete {label.name}</span>
+                          </Button>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
-              </section>
+                <div className="template-editor">
+                  {props.isLabelEditorOpen ? (
+                    <>
+                      <div className="wide">
+                        <div className="label-color-field">
+                          <div className="label-color-grid">
+                            <button
+                              aria-label="Clear label color"
+                              aria-pressed={!labelDraft.color}
+                              className={cn(
+                                "label-color-swatch label-color-swatch-clear",
+                                !labelDraft.color && "label-color-swatch-active"
+                              )}
+                              onClick={() =>
+                                setLabelDraft((current) => ({
+                                  ...current,
+                                  color: ""
+                                }))
+                              }
+                              type="button"
+                            >
+                              <X className="size-4" />
+                            </button>
+                            {labelPalette.map((color) => (
+                              <button
+                                aria-label={`Select label color ${color}`}
+                                aria-pressed={labelDraft.color === color}
+                                className={cn(
+                                  "label-color-swatch",
+                                  labelDraft.color === color && "label-color-swatch-active"
+                                )}
+                                key={color}
+                                onClick={() =>
+                                  setLabelDraft((current) => ({
+                                    ...current,
+                                    color
+                                  }))
+                                }
+                                style={{ backgroundColor: color }}
+                                type="button"
+                              >
+                                {labelDraft.color === color ? <Check className="size-4" /> : null}
+                              </button>
+                              ))}
+                            </div>
+                          </div>
+                      </div>
+                    </>
+                  ) : (
+                    <EmptyStateCard message="Choose a label or create a new one." />
+                  )}
+                </div>
+              </div>
+            </SurfaceCard>
+            {pendingLabelDelete ? (
+              <div
+                aria-hidden={false}
+                className="confirm-backdrop"
+                onClick={() => setPendingLabelDelete(null)}
+                role="presentation"
+              >
+                <SurfaceCard
+                  aria-labelledby="label-delete-title"
+                  aria-modal="true"
+                  className="confirm-dialog"
+                  onClick={(event) => event.stopPropagation()}
+                  role="dialog"
+                >
+                  <div className="label-delete-confirmation-copy">
+                    <strong id="label-delete-title">Delete {pendingLabelDelete.name}?</strong>
+                    <p>
+                      It will be removed from every task and recurring template that currently
+                      uses it.
+                    </p>
+                  </div>
+                  <div className="label-delete-confirmation-actions">
+                    <Button
+                      disabled={isLabelDeletePending}
+                      onClick={() => setPendingLabelDelete(null)}
+                      size="sm"
+                      type="button"
+                      variant="ghost"
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      disabled={isLabelDeletePending}
+                      onClick={() => {
+                        void handleLabelDeleteConfirm(pendingLabelDelete.id);
+                      }}
+                      size="sm"
+                      type="button"
+                      variant="destructive"
+                    >
+                      {isLabelDeletePending ? "Deleting..." : "Delete Label"}
+                    </Button>
+                  </div>
+                </SurfaceCard>
+              </div>
             ) : null}
-          </div>
-        </div>
+          </>
+        ) : null}
 
-        <div className="section-header compact">
-          <div>
-            <p className="eyebrow">Labels</p>
-            <h3>Quick Add</h3>
-          </div>
-        </div>
-        <div className="sheet-actions">
-          <label className="stack-field compact-field">
-            <span>Name</span>
-            <input
-              onChange={(event) => setLabelName(event.target.value)}
-              placeholder="Errand"
-              value={labelName}
-            />
-          </label>
-          <label className="stack-field compact-field">
-            <span>Color note</span>
-            <input
-              onChange={(event) => setLabelColor(event.target.value)}
-              placeholder="#c96 or brass"
-              value={labelColor}
-            />
-          </label>
-          <button
-            className="secondary-button"
-            onClick={() => {
-              if (!labelName.trim()) {
-                return;
-              }
+      </div>
+    </section>
+  );
+}
 
-              void props.onCreateLabel({
-                color: labelColor,
-                name: labelName
-              });
-              setLabelName("");
-              setLabelColor("");
-            }}
-            type="button"
-          >
-            Add Label
-          </button>
-        </div>
-        <div className="label-row roomy">
-          {props.labels.map((label) => (
-            <span className="label-pill" key={label.id}>
-              {label.name}
-            </span>
-          ))}
-        </div>
-      </article>
+function RecurringView(props: {
+  canAdmin: boolean;
+  isTemplateEditorOpen: boolean;
+  labels: Label[];
+  onSaveTemplate: (draft: TemplateDraft) => Promise<void>;
+  onSelectTemplate: (templateId: string | "new" | null) => void;
+  recurringTemplates: RecurringTemplate[];
+  selectedTemplate: RecurringTemplate | null;
+  users: UserRef[];
+}) {
+  const [templateDraft, setTemplateDraft] = useState<TemplateDraft>(
+    createTemplateDraft(props.selectedTemplate)
+  );
 
-      <article className="settings-card settings-card-wide">
-        <div className="section-header">
-          <div>
-            <p className="eyebrow">Recurring Work</p>
-            <h2>Templates</h2>
-          </div>
-          <button
-            className="secondary-button"
-            onClick={() => props.onSelectTemplate(null)}
-            type="button"
-          >
-            New Template
-          </button>
-        </div>
-        <div className="template-grid">
+  useEffect(() => {
+    setTemplateDraft(createTemplateDraft(props.selectedTemplate));
+  }, [props.selectedTemplate]);
+
+  if (!props.canAdmin) {
+    return (
+      <StatusMessageCard
+        description="The current browser session does not have admin access."
+        title="Recurring templates are reserved for household admins."
+      />
+    );
+  }
+
+  return (
+    <section className="settings-shell">
+      <div className="settings-page-stack">
+        <SurfaceCard className="settings-card gap-0 py-0">
+          <SectionHeading
+            actions={
+              <Button
+                onClick={() => props.onSelectTemplate("new")}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                New Template
+              </Button>
+            }
+            eyebrow="Recurring Work"
+            title="Templates"
+          />
           <div className="template-list">
             {props.recurringTemplates.length === 0 ? (
-              <div className="empty-card">No recurring templates yet.</div>
+              <EmptyStateCard message="No recurring templates yet." />
             ) : null}
             {props.recurringTemplates.map((template) => (
-              <button
-                className={
-                  props.selectedTemplate?.id === template.id
-                    ? "template-row template-row-active"
-                    : "template-row"
-                }
+              <SelectionListButton
+                active={props.selectedTemplate?.id === template.id}
                 key={template.id}
+                label={template.title}
+                meta={formatRecurringScheduleMeta(template)}
                 onClick={() => props.onSelectTemplate(template.id)}
-                type="button"
-              >
-                <strong>{template.title}</strong>
-                <span>
-                  {template.recurrenceCadence} every {template.recurrenceInterval}
-                </span>
-              </button>
+              />
             ))}
           </div>
-          <div className="template-editor">
-            <RecurringTemplateForm
-              draft={templateDraft}
-              labels={props.labels}
-              onChange={setTemplateDraft}
-              onSubmit={() => {
-                void props.onSaveTemplate(templateDraft);
-              }}
-              users={props.users}
-            />
-          </div>
-        </div>
-      </article>
+        </SurfaceCard>
+      </div>
+
+      {props.isTemplateEditorOpen ? (
+        <RecurringTemplateDrawer
+          draft={templateDraft}
+          labels={props.labels}
+          onChange={setTemplateDraft}
+          onClose={() => props.onSelectTemplate(null)}
+          onSubmit={() => {
+            void props.onSaveTemplate(templateDraft);
+          }}
+          selectedTemplate={props.selectedTemplate}
+          users={props.users}
+        />
+      ) : null}
     </section>
+  );
+}
+
+function RecurringTemplateDrawer(props: {
+  draft: TemplateDraft;
+  labels: Label[];
+  onChange: (draft: TemplateDraft) => void;
+  onClose: () => void;
+  onSubmit: () => void;
+  selectedTemplate: RecurringTemplate | null;
+  users: UserRef[];
+}) {
+  return (
+    <div
+      className="sheet-backdrop recurring-drawer-backdrop"
+      onClick={props.onClose}
+      role="presentation"
+    >
+      <aside
+        aria-label="Recurring template editor"
+        className="sheet-panel recurring-drawer-panel"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <header className="sheet-header">
+          <div className="sheet-header-copy">
+            <p className="eyebrow">Recurring Work</p>
+            <h2>{props.selectedTemplate ? props.selectedTemplate.title : "New Template"}</h2>
+            <p className="section-copy">
+              Set the cadence, defaults, and checklist once, then let the board keep the rhythm.
+            </p>
+          </div>
+          <Button
+            className="rounded-full"
+            onClick={props.onClose}
+            size="icon"
+            type="button"
+            variant="outline"
+          >
+            <X className="size-4" />
+            <span className="sr-only">Close recurring template editor</span>
+          </Button>
+        </header>
+        <div className="sheet-body">
+          <RecurringTemplateForm
+            draft={props.draft}
+            labels={props.labels}
+            onChange={props.onChange}
+            onSubmit={props.onSubmit}
+            users={props.users}
+          />
+        </div>
+      </aside>
+    </div>
   );
 }
 
@@ -2245,9 +4224,8 @@ function RecurringTemplateForm(props: {
 }) {
   return (
     <div className="form-grid">
-      <label className="stack-field wide">
-        <span>Title</span>
-        <input
+      <FormField className="wide" label="Title">
+        <FormInput
           onChange={(event) =>
             props.onChange({
               ...props.draft,
@@ -2256,10 +4234,9 @@ function RecurringTemplateForm(props: {
           }
           value={props.draft.title}
         />
-      </label>
-      <label className="stack-field wide">
-        <span>Description</span>
-        <textarea
+      </FormField>
+      <FormField className="wide" label="Description">
+        <FormTextarea
           onChange={(event) =>
             props.onChange({
               ...props.draft,
@@ -2269,31 +4246,27 @@ function RecurringTemplateForm(props: {
           rows={4}
           value={props.draft.description}
         />
-      </label>
-      <label className="stack-field">
-        <span>Default assignee</span>
-        <select
-          onChange={(event) =>
-            props.onChange({
-              ...props.draft,
-              defaultAssigneeUserId: event.target.value
-            })
-          }
-          value={props.draft.defaultAssigneeUserId}
-        >
-          <option value="">Unassigned</option>
-          {props.users
-            .filter((user) => !user.deactivatedAt)
-            .map((user) => (
-            <option key={user.id} value={user.id}>
-              {user.displayName}
-            </option>
-            ))}
-        </select>
-      </label>
-      <label className="stack-field">
-        <span>Next occurrence</span>
-        <input
+      </FormField>
+      <FormSelect
+        allowEmptyOption
+        label="Default assignee"
+        onValueChange={(value) =>
+          props.onChange({
+            ...props.draft,
+            defaultAssigneeUserId: value
+          })
+        }
+        options={props.users
+          .filter((user) => !user.deactivatedAt)
+          .map((user) => ({
+            label: user.displayName,
+            value: user.id
+          }))}
+        placeholder="Unassigned"
+        value={props.draft.defaultAssigneeUserId}
+      />
+      <FormField label="Next occurrence">
+        <FormInput
           onChange={(event) =>
             props.onChange({
               ...props.draft,
@@ -2303,10 +4276,9 @@ function RecurringTemplateForm(props: {
           type="date"
           value={props.draft.nextOccurrenceOn}
         />
-      </label>
-      <label className="stack-field">
-        <span>Due time</span>
-        <input
+      </FormField>
+      <FormField label="Due time">
+        <FormInput
           onChange={(event) =>
             props.onChange({
               ...props.draft,
@@ -2316,26 +4288,24 @@ function RecurringTemplateForm(props: {
           type="time"
           value={props.draft.defaultDueTime}
         />
-      </label>
-      <label className="stack-field">
-        <span>Cadence</span>
-        <select
-          onChange={(event) =>
-            props.onChange({
-              ...props.draft,
-              recurrenceCadence: event.target.value as "daily" | "weekly" | "monthly"
-            })
-          }
-          value={props.draft.recurrenceCadence}
-        >
-          <option value="daily">Daily</option>
-          <option value="weekly">Weekly</option>
-          <option value="monthly">Monthly</option>
-        </select>
-      </label>
-      <label className="stack-field">
-        <span>Interval</span>
-        <input
+      </FormField>
+      <FormSelect
+        label="Cadence"
+        onValueChange={(value) =>
+          props.onChange({
+            ...props.draft,
+            recurrenceCadence: value as "daily" | "weekly" | "monthly"
+          })
+        }
+        options={[
+          { label: "Daily", value: "daily" },
+          { label: "Weekly", value: "weekly" },
+          { label: "Monthly", value: "monthly" }
+        ]}
+        value={props.draft.recurrenceCadence}
+      />
+      <FormField label="Interval">
+        <FormInput
           min={1}
           onChange={(event) =>
             props.onChange({
@@ -2346,63 +4316,60 @@ function RecurringTemplateForm(props: {
           type="number"
           value={props.draft.recurrenceInterval}
         />
-      </label>
-      <label className="toggle-field">
-        <input
-          checked={props.draft.isActive}
-          onChange={(event) =>
-            props.onChange({
-              ...props.draft,
-              isActive: event.target.checked
-            })
-          }
-          type="checkbox"
-        />
-        <span>Template is active</span>
-      </label>
-      <label className="toggle-field">
-        <input
-          checked={props.draft.aiAssistanceEnabledDefault}
-          onChange={(event) =>
-            props.onChange({
-              ...props.draft,
-              aiAssistanceEnabledDefault: event.target.checked
-            })
-          }
-          type="checkbox"
-        />
-        <span>Occurrences are AI-eligible by default</span>
-      </label>
+      </FormField>
+      <ToggleField
+        checked={props.draft.isActive}
+        label="Template is active"
+        onCheckedChange={(value) =>
+          props.onChange({
+            ...props.draft,
+            isActive: value
+          })
+        }
+      />
+      <ToggleField
+        checked={props.draft.aiAssistanceEnabledDefault}
+        label="Occurrences are AI-eligible by default"
+        onCheckedChange={(value) =>
+          props.onChange({
+            ...props.draft,
+            aiAssistanceEnabledDefault: value
+          })
+        }
+      />
 
       <div className="sheet-section wide">
-        <div className="section-header compact">
-          <div>
-            <p className="eyebrow">Template Checklist</p>
-            <h3>Recurring subtasks</h3>
-          </div>
-          <button
-            className="secondary-button"
-            onClick={() =>
-              props.onChange({
-                ...props.draft,
-                checklistItems: [
-                  ...props.draft.checklistItems,
-                  {
-                    body: "",
-                    clientId: crypto.randomUUID()
-                  }
-                ]
-              })
-            }
-            type="button"
-          >
-            Add Item
-          </button>
-        </div>
+        <SectionHeading
+          actions={
+            <Button
+              onClick={() =>
+                props.onChange({
+                  ...props.draft,
+                  checklistItems: [
+                    ...props.draft.checklistItems,
+                    {
+                      body: "",
+                      clientId: crypto.randomUUID()
+                    }
+                  ]
+                })
+              }
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              Add Item
+            </Button>
+          }
+          compact
+          eyebrow="Template Checklist"
+          title="Recurring subtasks"
+          titleAs="h3"
+        />
         <div className="checklist-editor">
           {props.draft.checklistItems.map((item, index) => (
             <div className="checklist-row" key={item.clientId}>
-              <input
+              <FormInput
                 onChange={(event) =>
                   props.onChange({
                     ...props.draft,
@@ -2416,8 +4383,7 @@ function RecurringTemplateForm(props: {
                 placeholder="Template checklist item"
                 value={item.body}
               />
-              <button
-                className="ghost-button"
+              <Button
                 onClick={() =>
                   props.onChange({
                     ...props.draft,
@@ -2426,52 +4392,49 @@ function RecurringTemplateForm(props: {
                     )
                   })
                 }
+                size="sm"
                 type="button"
+                variant="ghost"
               >
                 Remove
-              </button>
+              </Button>
             </div>
           ))}
+          {props.draft.checklistItems.length === 0 ? (
+            <EmptyStateCard message="No recurring checklist items yet." />
+          ) : null}
         </div>
       </div>
 
       <div className="sheet-section wide">
-        <div className="section-header compact">
-          <div>
-            <p className="eyebrow">Labels</p>
-            <h3>Template tags</h3>
-          </div>
-        </div>
+        <SectionHeading compact eyebrow="Labels" title="Template tags" titleAs="h3" />
         <div className="checkbox-grid">
           {props.labels.map((label) => (
-            <label className="choice-pill" key={label.id}>
-              <input
-                checked={props.draft.labelIds.includes(label.id)}
-                onChange={(event) =>
-                  props.onChange({
-                    ...props.draft,
-                    labelIds: event.target.checked
-                      ? [...props.draft.labelIds, label.id]
-                      : props.draft.labelIds.filter((entry) => entry !== label.id)
-                  })
-                }
-                type="checkbox"
-              />
-              <span>{label.name}</span>
-            </label>
+            <ChoiceChip
+              checked={props.draft.labelIds.includes(label.id)}
+              key={label.id}
+              label={label.name}
+              onCheckedChange={(checked) =>
+                props.onChange({
+                  ...props.draft,
+                  labelIds: checked === true
+                    ? [...props.draft.labelIds, label.id]
+                    : props.draft.labelIds.filter((entry) => entry !== label.id)
+                })
+              }
+            />
           ))}
         </div>
       </div>
 
       <div className="sheet-actions wide">
-        <button
-          className="primary-button"
+        <Button
           disabled={!props.draft.title.trim() || !props.draft.nextOccurrenceOn}
           onClick={props.onSubmit}
           type="button"
         >
           Save Template
-        </button>
+        </Button>
       </div>
     </div>
   );

@@ -24,6 +24,8 @@ import {
   createLabel,
   createRecurringTemplate,
   createTask,
+  deleteArchivedTask,
+  deleteLabel,
   getCurrentActor,
   getRecurringTemplate,
   getSettings,
@@ -40,6 +42,7 @@ import {
   revokeServiceToken,
   transitionTask,
   unarchiveTask,
+  updateLabel,
   updateHouseholdUser,
   updateRecurringTemplate,
   updateSettings,
@@ -101,8 +104,16 @@ const attachmentLinkSchema = z.object({
 
 const labelSchema = z.object({
   color: z.string().trim().min(1).nullable().optional(),
-  name: z.string().trim().min(1)
+  name: z.string().trim().min(1).max(16)
 });
+const updateLabelSchema = z
+  .object({
+    color: z.string().trim().min(1).nullable().optional(),
+    name: z.string().trim().min(1).max(16).optional()
+  })
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "At least one label field must be updated."
+  });
 
 const createHouseholdUserSchema = z.discriminatedUnion("role", [
   z.object({
@@ -361,6 +372,19 @@ export function createApp() {
     return jsonOk(c, await createLabel(c.var.db, c.var.actor, input), 201);
   });
 
+  app.patch("/api/v1/labels/:labelId", async (c) => {
+    const input = await parseJsonBody(c, updateLabelSchema);
+
+    return jsonOk(
+      c,
+      await updateLabel(c.var.db, c.var.actor, c.req.param("labelId"), input)
+    );
+  });
+
+  app.delete("/api/v1/labels/:labelId", async (c) =>
+    jsonOk(c, await deleteLabel(c.var.db, c.var.actor, c.req.param("labelId")))
+  );
+
   app.get("/api/v1/recurring-templates", async (c) =>
     jsonOk(c, await listRecurringTemplates(c.var.db, c.var.actor))
   );
@@ -538,17 +562,40 @@ export function createApp() {
     );
   });
 
+  app.delete("/api/v1/tasks/:taskId", async (c) => {
+    const input = await parseJsonBody(c, archiveSchema);
+    const result = await deleteArchivedTask(
+      c.var.db,
+      c.var.actor,
+      c.req.param("taskId"),
+      input.expectedRevision
+    );
+
+    await Promise.allSettled(
+      result.uploadStoragePaths.map((storagePath) =>
+        deleteStoredUpload(storagePath, c.var.config)
+      )
+    );
+
+    return jsonOk(c, {
+      item: {
+        id: result.deletedTaskId
+      }
+    });
+  });
+
   app.get("/api/v1/openapi.json", (c) =>
     jsonOk(c, {
       openapi: "3.1.0",
       paths: {
         "/api/v1/labels": ["get", "post"],
+        "/api/v1/labels/:labelId": ["patch", "delete"],
         "/api/v1/me": ["get"],
         "/api/v1/recurring-templates": ["get", "post"],
         "/api/v1/recurring-templates/{templateId}": ["get", "patch"],
         "/api/v1/settings": ["get", "patch"],
         "/api/v1/tasks": ["get", "post"],
-        "/api/v1/tasks/{taskId}": ["get", "patch"],
+        "/api/v1/tasks/{taskId}": ["get", "patch", "delete"],
         "/api/v1/tasks/{taskId}/archive": ["post"],
         "/api/v1/tasks/{taskId}/attachment-links": ["post"],
         "/api/v1/tasks/{taskId}/attachments/{attachmentId}/download": ["get"],

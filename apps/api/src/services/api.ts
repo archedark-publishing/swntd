@@ -189,6 +189,11 @@ export type CreateLabelInput = {
   name: string;
 };
 
+export type UpdateLabelInput = {
+  color?: string | null | undefined;
+  name?: string | undefined;
+};
+
 export type UpdateSettingsInput = {
   defaultCalendarExportKind?: "google" | "ics" | undefined;
   defaultTimezone?: string | undefined;
@@ -1137,6 +1142,88 @@ export async function createLabel(
   };
 }
 
+export async function updateLabel(
+  db: DatabaseClient,
+  actor: AuthenticatedActor,
+  labelId: string,
+  input: UpdateLabelInput
+) {
+  assertAdmin(actor);
+
+  const [current] = await db
+    .select()
+    .from(labels)
+    .where(and(eq(labels.householdId, actor.householdId), eq(labels.id, labelId)));
+
+  if (!current) {
+    throw new ApiError(404, "label_not_found", "Label not found.");
+  }
+
+  const nextName = input.name?.trim() ?? current.name;
+
+  if (nextName !== current.name) {
+    const [existing] = await db
+      .select({
+        id: labels.id
+      })
+      .from(labels)
+      .where(and(eq(labels.householdId, actor.householdId), eq(labels.name, nextName)));
+
+    if (existing) {
+      throw new ApiError(409, "label_exists", "A label with that name already exists.");
+    }
+  }
+
+  const [updated] = await db
+    .update(labels)
+    .set({
+      color: input.color === undefined ? current.color : input.color,
+      name: nextName,
+      updatedAt: new Date()
+    })
+    .where(eq(labels.id, current.id))
+    .returning();
+
+  const label = getRequiredRow(updated, "label_update_failed", "Label update failed.");
+
+  return {
+    item: {
+      color: label.color,
+      createdAt: label.createdAt,
+      id: label.id,
+      name: label.name,
+      updatedAt: label.updatedAt
+    }
+  };
+}
+
+export async function deleteLabel(
+  db: DatabaseClient,
+  actor: AuthenticatedActor,
+  labelId: string
+) {
+  assertAdmin(actor);
+
+  const [deleted] = await db
+    .delete(labels)
+    .where(and(eq(labels.householdId, actor.householdId), eq(labels.id, labelId)))
+    .returning();
+
+  if (!deleted) {
+    throw new ApiError(404, "label_not_found", "Label not found.");
+  }
+
+  return {
+    item: {
+      color: deleted.color,
+      createdAt: deleted.createdAt,
+      id: deleted.id,
+      name: deleted.name,
+      updatedAt: deleted.updatedAt
+    }
+  };
+}
+
 export async function getSettings(db: DatabaseClient, actor: AuthenticatedActor) {
   assertAdmin(actor);
 
@@ -1917,6 +2004,46 @@ export async function unarchiveTask(
   });
 
   return getTaskDetail(db, actor, taskId);
+}
+
+export async function deleteArchivedTask(
+  db: DatabaseClient,
+  actor: AuthenticatedActor,
+  taskId: string,
+  expectedRevision: number
+) {
+  const current = await getTaskOrThrowForAdmin(db, actor, taskId);
+  assertExpectedRevision(current.revision, expectedRevision);
+
+  if (!current.archivedAt) {
+    throw new ApiError(
+      409,
+      "task_not_archived",
+      "Only archived tasks can be deleted permanently."
+    );
+  }
+
+  const uploadRows = await db
+    .select({
+      storagePath: attachments.storagePath
+    })
+    .from(attachments)
+    .where(
+      and(
+        eq(attachments.taskId, taskId),
+        eq(attachments.storageKind, "upload"),
+        isNotNull(attachments.storagePath)
+      )
+    );
+
+  await db.delete(tasks).where(eq(tasks.id, taskId));
+
+  return {
+    deletedTaskId: taskId,
+    uploadStoragePaths: uploadRows.flatMap((row) =>
+      row.storagePath ? [row.storagePath] : []
+    )
+  };
 }
 
 export async function getTaskAttachmentDownload(
