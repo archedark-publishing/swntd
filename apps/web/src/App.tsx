@@ -409,6 +409,18 @@ function serializeLabelDraft(draft: LabelDraft) {
   return JSON.stringify(normalizeLabelDraft(draft));
 }
 
+function normalizeSettingsDraft(settings: Settings) {
+  return {
+    defaultCalendarExportKind: settings.defaultCalendarExportKind,
+    defaultTimezone: settings.defaultTimezone.trim(),
+    doneArchiveAfterDays: settings.doneArchiveAfterDays
+  };
+}
+
+function serializeSettingsDraft(settings: Settings) {
+  return JSON.stringify(normalizeSettingsDraft(settings));
+}
+
 function getTaskColumnOrder(tasks: TaskListItem[], status: TaskStatus) {
   return tasks
     .filter((task) => task.status === status)
@@ -1120,15 +1132,18 @@ export function App() {
   }
 
   async function handleSettingsSave(nextSettings: Settings) {
-    await runMutation(
+    const saved = await runMutation(
       () =>
         api.updateSettings({
           defaultCalendarExportKind: nextSettings.defaultCalendarExportKind,
           defaultTimezone: nextSettings.defaultTimezone,
           doneArchiveAfterDays: nextSettings.doneArchiveAfterDays
         }),
-      "Household settings saved."
+      "Household settings saved.",
+      { silentSuccess: true }
     );
+
+    return saved !== null;
   }
 
   async function handleLabelSave(labelId: string | null, draft: LabelDraft) {
@@ -3225,7 +3240,7 @@ function SettingsView(props: {
   onRemoveUser: (userId: string) => Promise<boolean>;
   onRevokeServiceToken: (tokenId: string) => Promise<void>;
   onSaveLabel: (labelId: string | null, draft: LabelDraft) => Promise<Label | null>;
-  onSaveSettings: (settings: Settings) => Promise<void>;
+  onSaveSettings: (settings: Settings) => Promise<boolean>;
   onSaveUser: (userId: string | null, draft: HouseholdUserDraft) => Promise<boolean>;
   onSelectLabel: (labelId: string | "new" | null) => void;
   onSelectPage: (page: SettingsPage) => void;
@@ -3254,12 +3269,24 @@ function SettingsView(props: {
   const [userActionMessage, setUserActionMessage] = useState<string | null>(null);
   const [isUserRemovePending, setIsUserRemovePending] = useState(false);
   const [isUserSavePending, setIsUserSavePending] = useState(false);
+  const [isSettingsSavePending, setIsSettingsSavePending] = useState(false);
   const lastSavedLabelDraftRef = useRef(serializeLabelDraft(createLabelDraft(props.selectedLabel)));
+  const lastSavedSettingsDraftRef = useRef(
+    props.settings ? serializeSettingsDraft(props.settings) : null
+  );
   const inlineLabelInputRef = useRef<HTMLInputElement | null>(null);
   const normalizedLabelDraft = useMemo(() => serializeLabelDraft(labelDraft), [labelDraft]);
+  const normalizedSettingsDraft = useMemo(
+    () => (settingsDraft ? serializeSettingsDraft(settingsDraft) : null),
+    [settingsDraft]
+  );
 
   useEffect(() => {
     setSettingsDraft(props.settings);
+    lastSavedSettingsDraftRef.current = props.settings
+      ? serializeSettingsDraft(props.settings)
+      : null;
+    setIsSettingsSavePending(false);
   }, [props.settings]);
 
   useEffect(() => {
@@ -3300,6 +3327,29 @@ function SettingsView(props: {
     setIsUserSavePending(false);
   }, [props.selectedUser, props.userEditorMode]);
 
+  const submitSettingsAutosave = useEffectEvent(async (nextSettings: Settings) => {
+    const normalized = normalizeSettingsDraft(nextSettings);
+
+    if (!normalized.defaultTimezone || !Number.isFinite(normalized.doneArchiveAfterDays)) {
+      return;
+    }
+
+    if (normalized.doneArchiveAfterDays < 1) {
+      return;
+    }
+
+    setIsSettingsSavePending(true);
+    const saved = await props.onSaveSettings({
+      ...nextSettings,
+      defaultTimezone: normalized.defaultTimezone
+    });
+    setIsSettingsSavePending(false);
+
+    if (saved) {
+      lastSavedSettingsDraftRef.current = JSON.stringify(normalized);
+    }
+  });
+
   const submitLabelAutosave = useEffectEvent(async (nextDraft: LabelDraft) => {
     const normalized = normalizeLabelDraft(nextDraft);
     const labelId =
@@ -3320,6 +3370,34 @@ function SettingsView(props: {
       });
     }
   });
+
+  useEffect(() => {
+    if (!settingsDraft || isSettingsSavePending) {
+      return;
+    }
+
+    if (normalizedSettingsDraft === lastSavedSettingsDraftRef.current) {
+      return;
+    }
+
+    const normalized = normalizeSettingsDraft(settingsDraft);
+
+    if (!normalized.defaultTimezone || !Number.isFinite(normalized.doneArchiveAfterDays)) {
+      return;
+    }
+
+    if (normalized.doneArchiveAfterDays < 1) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      void submitSettingsAutosave(settingsDraft);
+    }, 500);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [isSettingsSavePending, normalizedSettingsDraft, settingsDraft, submitSettingsAutosave]);
 
   useEffect(() => {
     if (!props.isLabelEditorOpen || isLabelDeletePending || isLabelSavePending) {
@@ -3444,16 +3522,6 @@ function SettingsView(props: {
                 ]}
                 value={settingsDraft.defaultCalendarExportKind}
               />
-            </div>
-            <div className="sheet-actions">
-              <Button
-                onClick={() => {
-                  void props.onSaveSettings(settingsDraft);
-                }}
-                type="button"
-              >
-                Save Settings
-              </Button>
             </div>
           </SurfaceCard>
         ) : null}
