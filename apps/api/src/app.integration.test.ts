@@ -1,3 +1,4 @@
+import { readdir } from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   getAssistantActorId,
@@ -522,6 +523,90 @@ describe("Phase 3 API", () => {
     expect(openApi.paths["/api/v1/tasks/{taskId}/status"]).toContain("post");
     expect(openApi.paths["/api/v1/users/{userId}/service-tokens"]).toContain("post");
     expect(openApi.paths["/api/v1/users/{userId}/remove"]).toContain("post");
+  });
+
+  it("permanently deletes archived tasks and cleans up uploaded files", async () => {
+    const adminHeaders = trustedHeader("admin1@example.com");
+
+    const createTaskResponse = await app.request(
+      "/api/v1/tasks",
+      jsonRequest({
+        body: {
+          aiAssistanceEnabled: false,
+          assigneeUserId: null,
+          checklistItems: [],
+          description: "Disposable archived task",
+          dueOn: null,
+          dueTime: null,
+          labelIds: [],
+          title: "Delete me later"
+        },
+        headers: adminHeaders,
+        method: "POST"
+      })
+    );
+    expect(createTaskResponse.status).toBe(201);
+    const createdTask = await parseJson<TaskItemResponse>(createTaskResponse);
+
+    const uploadForm = new FormData();
+    uploadForm.set(
+      "file",
+      new File(["temporary archive payload"], "temporary.txt", { type: "text/plain" })
+    );
+
+    const uploadResponse = await app.request(
+      `/api/v1/tasks/${createdTask.item.id}/uploads`,
+      {
+        body: uploadForm,
+        headers: adminHeaders,
+        method: "POST"
+      }
+    );
+    expect(uploadResponse.status).toBe(201);
+    const uploadedTask = await parseJson<TaskItemResponse>(uploadResponse);
+
+    expect((await readdir(uploadsDir)).length).toBe(1);
+
+    const archiveResponse = await app.request(
+      `/api/v1/tasks/${createdTask.item.id}/archive`,
+      jsonRequest({
+        body: {
+          expectedRevision: uploadedTask.item.revision
+        },
+        headers: adminHeaders,
+        method: "POST"
+      })
+    );
+    expect(archiveResponse.status).toBe(200);
+    const archivedTask = await parseJson<TaskItemResponse>(archiveResponse);
+
+    const deleteResponse = await app.request(
+      `/api/v1/tasks/${createdTask.item.id}`,
+      jsonRequest({
+        body: {
+          expectedRevision: archivedTask.item.revision
+        },
+        headers: adminHeaders,
+        method: "DELETE"
+      })
+    );
+    expect(deleteResponse.status).toBe(200);
+
+    const detailResponse = await app.request(`/api/v1/tasks/${createdTask.item.id}`, {
+      headers: adminHeaders
+    });
+    expect(detailResponse.status).toBe(404);
+
+    const archiveListResponse = await app.request("/api/v1/tasks?archived=only", {
+      headers: adminHeaders
+    });
+    expect(archiveListResponse.status).toBe(200);
+    const archiveList = await parseJson<TaskListResponse>(archiveListResponse);
+    expect(archiveList.items.some((task: { id: string }) => task.id === createdTask.item.id)).toBe(
+      false
+    );
+
+    expect(await readdir(uploadsDir)).toHaveLength(0);
   });
 
   it("supports managing household actors and assistant tokens", async () => {

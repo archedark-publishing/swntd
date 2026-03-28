@@ -1097,6 +1097,14 @@ export function App() {
     );
   }
 
+  async function handleDeleteArchivedTask(task: TaskDetail) {
+    await runMutation(
+      () => api.deleteTask(task.id, task.revision),
+      "Task deleted permanently.",
+      { closeTaskSheet: true }
+    );
+  }
+
   async function handleActivitySubmit(
     task: TaskDetail,
     input: { body: string; files: File[]; links: string[] }
@@ -1481,6 +1489,7 @@ export function App() {
           setIsTaskSheetOpen(false);
           setIsCreatingTask(false);
         }}
+        onDeleteArchivedTask={handleDeleteArchivedTask}
         onDownloadAttachment={async (attachment) => {
           if (!attachment.downloadUrl) {
             return;
@@ -2216,6 +2225,7 @@ function TaskSheet(props: {
   onArchive: (task: TaskDetail) => Promise<void>;
   onCalendarAction: (task: TaskDetail, kind: "google" | "ics") => void;
   onClose: () => void;
+  onDeleteArchivedTask: (task: TaskDetail) => Promise<void>;
   onDownloadAttachment: (attachment: Attachment) => Promise<void>;
   onSave: (
     draft: TaskDraft,
@@ -2235,6 +2245,7 @@ function TaskSheet(props: {
   const [draft, setDraft] = useState<TaskDraft>(() => createTaskDraft(null));
   const [activeControl, setActiveControl] = useState<TaskDetailControlId | null>(null);
   const [commentBody, setCommentBody] = useState("");
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
   const [pendingActivityFiles, setPendingActivityFiles] = useState<File[]>([]);
   const [ignoredParsedLinks, setIgnoredParsedLinks] = useState<string[]>([]);
   const lastServerDraftKeyRef = useRef(serializeTaskDraft(createTaskDraft(null)));
@@ -2283,6 +2294,7 @@ function TaskSheet(props: {
       if (isNewTask) {
         setActiveControl(null);
         setCommentBody("");
+        setIsDeleteConfirmOpen(false);
         setPendingActivityFiles([]);
         setIgnoredParsedLinks([]);
       }
@@ -2292,6 +2304,7 @@ function TaskSheet(props: {
       setDraft(nextDraft);
       setActiveControl(null);
       setCommentBody("");
+      setIsDeleteConfirmOpen(false);
       setPendingActivityFiles([]);
       setIgnoredParsedLinks([]);
     }
@@ -2361,6 +2374,7 @@ function TaskSheet(props: {
       void props.onSave(draft, { silentSuccess: true });
     }
 
+    setIsDeleteConfirmOpen(false);
     props.onClose();
   }
 
@@ -2647,16 +2661,28 @@ function TaskSheet(props: {
             <section className="sheet-section">
               <div className="sheet-actions detail-actions">
                 {currentTask.archivedAt ? (
-                  <Button
-                    onClick={() => {
-                      void props.onUnarchive(currentTask);
-                    }}
-                    size="sm"
-                    type="button"
-                    variant="outline"
-                  >
-                    Restore from Archive
-                  </Button>
+                  <>
+                    <Button
+                      onClick={() => {
+                        void props.onUnarchive(currentTask);
+                      }}
+                      size="sm"
+                      type="button"
+                      variant="outline"
+                    >
+                      Restore from Archive
+                    </Button>
+                    <Button
+                      onClick={() => {
+                        setIsDeleteConfirmOpen(true);
+                      }}
+                      size="sm"
+                      type="button"
+                      variant="destructive"
+                    >
+                      Delete Task
+                    </Button>
+                  </>
                 ) : (
                   <Button
                     onClick={() => {
@@ -2673,6 +2699,51 @@ function TaskSheet(props: {
             </section>
           ) : null}
         </div>
+        {currentTask && isDeleteConfirmOpen ? (
+          <div
+            aria-hidden={false}
+            className="confirm-backdrop"
+            onClick={() => setIsDeleteConfirmOpen(false)}
+            role="presentation"
+          >
+            <SurfaceCard
+              aria-labelledby="task-delete-title"
+              aria-modal="true"
+              className="confirm-dialog"
+              onClick={(event) => event.stopPropagation()}
+              role="dialog"
+            >
+              <div className="label-delete-confirmation-copy">
+                <strong id="task-delete-title">Delete {currentTask.title}?</strong>
+                <p>
+                  This archived task will be removed permanently, including its notes,
+                  attachments, and checklist history.
+                </p>
+              </div>
+              <div className="label-delete-confirmation-actions">
+                <Button
+                  onClick={() => setIsDeleteConfirmOpen(false)}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={() => {
+                    setIsDeleteConfirmOpen(false);
+                    void props.onDeleteArchivedTask(currentTask);
+                  }}
+                  size="sm"
+                  type="button"
+                  variant="destructive"
+                >
+                  Delete Task
+                </Button>
+              </div>
+            </SurfaceCard>
+          </div>
+        ) : null}
       </aside>
     </div>
   );

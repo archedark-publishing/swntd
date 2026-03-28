@@ -293,6 +293,15 @@ export const api = {
       method: "DELETE"
     });
   },
+  deleteTask(taskId: string, expectedRevision: number) {
+    return request<{ item: { id: string } }>(`/api/v1/tasks/${taskId}`, {
+      body: JSON.stringify({ expectedRevision }),
+      headers: {
+        "content-type": "application/json"
+      },
+      method: "DELETE"
+    });
+  },
   createRecurringTemplate(input: {
     aiAssistanceEnabledDefault: boolean;
     checklistItems: Array<{ body: string }>;

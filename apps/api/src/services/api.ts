@@ -2006,6 +2006,46 @@ export async function unarchiveTask(
   return getTaskDetail(db, actor, taskId);
 }
 
+export async function deleteArchivedTask(
+  db: DatabaseClient,
+  actor: AuthenticatedActor,
+  taskId: string,
+  expectedRevision: number
+) {
+  const current = await getTaskOrThrowForAdmin(db, actor, taskId);
+  assertExpectedRevision(current.revision, expectedRevision);
+
+  if (!current.archivedAt) {
+    throw new ApiError(
+      409,
+      "task_not_archived",
+      "Only archived tasks can be deleted permanently."
+    );
+  }
+
+  const uploadRows = await db
+    .select({
+      storagePath: attachments.storagePath
+    })
+    .from(attachments)
+    .where(
+      and(
+        eq(attachments.taskId, taskId),
+        eq(attachments.storageKind, "upload"),
+        isNotNull(attachments.storagePath)
+      )
+    );
+
+  await db.delete(tasks).where(eq(tasks.id, taskId));
+
+  return {
+    deletedTaskId: taskId,
+    uploadStoragePaths: uploadRows.flatMap((row) =>
+      row.storagePath ? [row.storagePath] : []
+    )
+  };
+}
+
 export async function getTaskAttachmentDownload(
   db: DatabaseClient,
   actor: AuthenticatedActor,

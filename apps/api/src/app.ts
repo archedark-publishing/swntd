@@ -24,6 +24,7 @@ import {
   createLabel,
   createRecurringTemplate,
   createTask,
+  deleteArchivedTask,
   deleteLabel,
   getCurrentActor,
   getRecurringTemplate,
@@ -561,6 +562,28 @@ export function createApp() {
     );
   });
 
+  app.delete("/api/v1/tasks/:taskId", async (c) => {
+    const input = await parseJsonBody(c, archiveSchema);
+    const result = await deleteArchivedTask(
+      c.var.db,
+      c.var.actor,
+      c.req.param("taskId"),
+      input.expectedRevision
+    );
+
+    await Promise.allSettled(
+      result.uploadStoragePaths.map((storagePath) =>
+        deleteStoredUpload(storagePath, c.var.config)
+      )
+    );
+
+    return jsonOk(c, {
+      item: {
+        id: result.deletedTaskId
+      }
+    });
+  });
+
   app.get("/api/v1/openapi.json", (c) =>
     jsonOk(c, {
       openapi: "3.1.0",
@@ -572,7 +595,7 @@ export function createApp() {
         "/api/v1/recurring-templates/{templateId}": ["get", "patch"],
         "/api/v1/settings": ["get", "patch"],
         "/api/v1/tasks": ["get", "post"],
-        "/api/v1/tasks/{taskId}": ["get", "patch"],
+        "/api/v1/tasks/{taskId}": ["get", "patch", "delete"],
         "/api/v1/tasks/{taskId}/archive": ["post"],
         "/api/v1/tasks/{taskId}/attachment-links": ["post"],
         "/api/v1/tasks/{taskId}/attachments/{attachmentId}/download": ["get"],
