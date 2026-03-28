@@ -21,6 +21,7 @@ const rawConfigSchema = z.object({
     .trim()
     .min(1)
     .default("admin@example.com"),
+  SWNTD_BOOTSTRAP_OWNER_EMAILS: z.string().trim().optional(),
   SWNTD_SERVICE_ACTOR_NAME: z
     .string()
     .trim()
@@ -57,6 +58,14 @@ function parseAdminEmails(value: string) {
   return emailSchema.parse(emails);
 }
 
+function parseOptionalAdminEmails(value: string | undefined) {
+  if (!value?.trim()) {
+    return [];
+  }
+
+  return parseAdminEmails(value);
+}
+
 export function parseSwntdConfig(env: NodeJS.ProcessEnv = process.env) {
   const raw = rawConfigSchema.parse(env);
 
@@ -65,6 +74,7 @@ export function parseSwntdConfig(env: NodeJS.ProcessEnv = process.env) {
     trustedEmailHeader: raw.SWNTD_TRUSTED_EMAIL_HEADER,
     householdName: raw.SWNTD_HOUSEHOLD_NAME,
     bootstrapAdminEmails: parseAdminEmails(raw.SWNTD_BOOTSTRAP_ADMIN_EMAILS),
+    bootstrapOwnerEmails: parseOptionalAdminEmails(raw.SWNTD_BOOTSTRAP_OWNER_EMAILS),
     serviceActorName: raw.SWNTD_SERVICE_ACTOR_NAME,
     serviceActorKind: raw.SWNTD_SERVICE_ACTOR_KIND,
     defaultTimezone: raw.SWNTD_DEFAULT_TIMEZONE,

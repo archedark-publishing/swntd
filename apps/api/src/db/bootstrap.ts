@@ -6,9 +6,9 @@ import {
 } from "@swntd/shared/server/db/schema";
 import { createDatabase } from "./client";
 
-const DEFAULT_HOUSEHOLD_ID = "default-household";
+export const DEFAULT_HOUSEHOLD_ID = "default-household";
 
-function toDisplayName(email: string) {
+export function toDisplayName(email: string) {
   const localPart = email.split("@")[0] ?? "admin";
 
   return localPart

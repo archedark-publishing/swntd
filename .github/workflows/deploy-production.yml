@@ -1,0 +1,90 @@
+name: Deploy SWNTD Production
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-swntd-production
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment: production
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Verify required production secrets
+        env:
+          EXE_SSH_DEST: ${{ secrets.EXE_SSH_DEST }}
+          EXE_DEPLOY_PRIVATE_KEY: ${{ secrets.EXE_DEPLOY_PRIVATE_KEY }}
+          EXE_KNOWN_HOSTS: ${{ secrets.EXE_KNOWN_HOSTS }}
+          EXE_DEPLOY_PATH: ${{ secrets.EXE_DEPLOY_PATH }}
+        run: |
+          set -euo pipefail
+          test -n "$EXE_SSH_DEST"
+          test -n "$EXE_DEPLOY_PRIVATE_KEY"
+          test -n "$EXE_KNOWN_HOSTS"
+          test -n "$EXE_DEPLOY_PATH"
+
+      - name: Configure SSH
+        env:
+          EXE_DEPLOY_PRIVATE_KEY: ${{ secrets.EXE_DEPLOY_PRIVATE_KEY }}
+          EXE_KNOWN_HOSTS: ${{ secrets.EXE_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$EXE_DEPLOY_PRIVATE_KEY" > "$HOME/.ssh/exe_deploy_key"
+          chmod 600 "$HOME/.ssh/exe_deploy_key"
+          printf '%s\n' "$EXE_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Package release
+        run: |
+          set -euo pipefail
+          git archive --format=tar.gz --output "$RUNNER_TEMP/swntd-release.tgz" HEAD
+
+      - name: Upload and deploy production release
+        env:
+          EXE_SSH_DEST: ${{ secrets.EXE_SSH_DEST }}
+          EXE_DEPLOY_PATH: ${{ secrets.EXE_DEPLOY_PATH }}
+        run: |
+          set -euo pipefail
+
+          release_id="production-${GITHUB_SHA::12}"
+
+          scp -o BatchMode=yes -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes \
+            -i "$HOME/.ssh/exe_deploy_key" \
+            "$RUNNER_TEMP/swntd-release.tgz" \
+            "$EXE_SSH_DEST:/tmp/$release_id.tgz"
+
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes \
+            -i "$HOME/.ssh/exe_deploy_key" "$EXE_SSH_DEST" \
+            "DEPLOY_PATH='$EXE_DEPLOY_PATH' RELEASE_ID='$release_id' bash -se" <<'EOF'
+          set -euo pipefail
+          temp_dir="$(mktemp -d)"
+          tar -xzf "/tmp/$RELEASE_ID.tgz" -C "$temp_dir"
+          DEPLOY_PATH="$DEPLOY_PATH" RELEASE_ID="$RELEASE_ID" \
+            bash "$temp_dir/scripts/deploy/deploy-release.sh" "/tmp/$RELEASE_ID.tgz"
+          rm -rf "$temp_dir"
+          rm -f "/tmp/$RELEASE_ID.tgz"
+          EOF
+
+          echo "Deployed commit ${GITHUB_SHA::12}"
+
+      - name: Smoke check production deployment
+        env:
+          PRODUCTION_BASE_URL: https://swntd.exe.xyz
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --retry 12 --retry-delay 5 --retry-connrefused \
+            "$PRODUCTION_BASE_URL/healthz" \
+            | python3 -c 'import json, sys; payload = json.load(sys.stdin); assert payload["status"] == "ok", payload'

@@ -22,6 +22,7 @@ import { CSS } from "@dnd-kit/utilities";
 import {
   type CSSProperties,
   type ComponentType,
+  type FormEvent,
   startTransition,
   useDeferredValue,
   useEffect,
@@ -72,6 +73,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { cn } from "@/lib/utils";
 import {
   api,
+  type BootstrapContext,
   downloadAttachment,
   isConflictError,
   loadAttachmentObjectUrl,
@@ -180,6 +182,11 @@ type AppSnapshot = {
   users: UserRef[];
 };
 
+type AccessState = {
+  context: BootstrapContext | null;
+  kind: "claim" | "forbidden" | "unauthenticated";
+};
+
 const emptySnapshot: AppSnapshot = {
   activeTasks: [],
   actor: null,
@@ -201,6 +208,8 @@ const settingsNavItems: Array<{ id: SettingsPage; label: string }> = [
   { id: "household", label: "Household" },
   { id: "labels", label: "Labels" }
 ];
+
+const intendedEmailStorageKey = "swntd:intended-email";
 
 function isSettingsPage(value: string | undefined): value is SettingsPage {
   return value === "general" || value === "household" || value === "labels";
@@ -634,13 +643,70 @@ function showErrorToast(message: string, toastId?: string) {
   toast.error(message, { id: toastId ?? `error:${message}` });
 }
 
+function getStoredIntendedEmail() {
+  if (typeof window === "undefined") {
+    return "";
+  }
+
+  return window.sessionStorage.getItem(intendedEmailStorageKey) ?? "";
+}
+
+function setStoredIntendedEmail(email: string) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const normalizedEmail = email.trim().toLowerCase();
+
+  if (normalizedEmail) {
+    window.sessionStorage.setItem(intendedEmailStorageKey, normalizedEmail);
+    return;
+  }
+
+  window.sessionStorage.removeItem(intendedEmailStorageKey);
+}
+
+function buildExeDevLoginUrl() {
+  const redirect = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  const url = new URL("/__exe.dev/login", window.location.origin);
+
+  url.searchParams.set("redirect", redirect || "/");
+
+  return `${url.pathname}${url.search}`;
+}
+
+function createAccessState(
+  error: SwntdApiError,
+  context: BootstrapContext | null
+): AccessState | null {
+  if (error.status === 401) {
+    return {
+      context,
+      kind: "unauthenticated"
+    };
+  }
+
+  if (error.status !== 403) {
+    return null;
+  }
+
+  return {
+    context,
+    kind: context?.canClaimOwnership ? "claim" : "forbidden"
+  };
+}
+
 export function App() {
   const initialRoute = readRouteFromHash();
   const [view, setView] = useState<ViewName>(initialRoute.view);
   const [onlyMyTasks, setOnlyMyTasks] = useState(initialRoute.onlyMyTasks);
   const [settingsPage, setSettingsPage] = useState<SettingsPage>(initialRoute.settingsPage);
+  const [accessState, setAccessState] = useState<AccessState | null>(null);
+  const [authEmail, setAuthEmail] = useState(() => getStoredIntendedEmail());
   const [snapshot, setSnapshot] = useState<AppSnapshot>(emptySnapshot);
   const [isBooting, setIsBooting] = useState(true);
+  const [isClaimingOwnership, setIsClaimingOwnership] = useState(false);
+  const [isSwitchingAccount, setIsSwitchingAccount] = useState(false);
   const [isNavOpen, setIsNavOpen] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [selectedTask, setSelectedTask] = useState<TaskDetail | null>(null);
@@ -722,6 +788,8 @@ export function App() {
             api.listTasks({ archived: "only" })
           ]);
 
+          setAccessState(null);
+
           if (me.actor.role === "admin") {
             const [users, labels, settings, recurringTemplates] = await Promise.all([
               api.listUsers(),
@@ -767,11 +835,17 @@ export function App() {
 
           hasLoadedRef.current = true;
         } catch (error) {
-          if (!options?.background) {
-            showErrorToast(
-              buildFlashMessage(error),
-              "refresh-error"
-            );
+          const apiError = normalizeApiError(error);
+
+          if (apiError?.status === 401 || apiError?.status === 403) {
+            const context = await api.getBootstrapContext().catch(() => null);
+
+            setAccessState(createAccessState(apiError, context));
+            setSnapshot(emptySnapshot);
+            setSelectedTask(null);
+            setSelectedTaskId(null);
+          } else if (!options?.background) {
+            showErrorToast(buildFlashMessage(error), "refresh-error");
           }
         } finally {
           setIsBooting(false);
@@ -1311,6 +1385,58 @@ export function App() {
     );
   }
 
+  function handleSignIn(event?: FormEvent<HTMLFormElement>) {
+    event?.preventDefault();
+
+    const normalizedEmail = authEmail.trim().toLowerCase();
+
+    if (!normalizedEmail) {
+      showErrorToast("Enter the email you want to sign in with.", "auth-email-required");
+      return;
+    }
+
+    setStoredIntendedEmail(normalizedEmail);
+    window.location.assign(buildExeDevLoginUrl());
+  }
+
+  async function handleSwitchAccount() {
+    setIsSwitchingAccount(true);
+
+    try {
+      await fetch("/__exe.dev/logout", {
+        credentials: "same-origin",
+        method: "POST"
+      });
+      setStoredIntendedEmail(authEmail);
+      window.location.assign(buildExeDevLoginUrl());
+    } catch (error) {
+      showErrorToast(buildFlashMessage(error), "switch-account-error");
+      setIsSwitchingAccount(false);
+    }
+  }
+
+  async function handleClaimOwnership() {
+    setIsClaimingOwnership(true);
+
+    try {
+      await api.claimBootstrapOwnership();
+      toast.success("Ownership claimed. Opening your household.");
+      await refreshApp();
+    } catch (error) {
+      const apiError = normalizeApiError(error);
+
+      if (apiError?.status === 401 || apiError?.status === 403 || apiError?.status === 409) {
+        const context = await api.getBootstrapContext().catch(() => null);
+
+        setAccessState(createAccessState(apiError, context));
+      }
+
+      showErrorToast(buildFlashMessage(error), "claim-ownership-error");
+    } finally {
+      setIsClaimingOwnership(false);
+    }
+  }
+
   const canAdmin = snapshot.actor?.role === "admin";
   const selectedHouseholdUser =
     editingUserKey && editingUserKey !== "new-admin" && editingUserKey !== "new-service"
@@ -1330,187 +1456,341 @@ export function App() {
   return (
     <main className="app-shell">
       <div className="grain" />
-      <div className="app-frame">
-        <AppNavigation
-          actorDisplayName={snapshot.actor?.displayName ?? "Loading..."}
-          actorRoleLabel={snapshot.actor ? formatRoleLabel(snapshot.actor) : "guest"}
-          isOpen={isNavOpen}
-          mainItems={navItems.map((item) => ({ id: item.id, label: item.label }))}
-          onClose={() => setIsNavOpen(false)}
-          onSelectMain={(itemId) => handleViewChange(itemId as ViewName)}
-          selectedMain={view}
+      {accessState ? (
+        <AuthGate
+          accessState={accessState}
+          authEmail={authEmail}
+          intendedEmail={getStoredIntendedEmail()}
+          isClaimingOwnership={isClaimingOwnership}
+          isSwitchingAccount={isSwitchingAccount}
+          onAuthEmailChange={(value) => {
+            setAuthEmail(value);
+            setStoredIntendedEmail(value);
+          }}
+          onClaimOwnership={handleClaimOwnership}
+          onSignIn={handleSignIn}
+          onSwitchAccount={handleSwitchAccount}
         />
+      ) : (
+        <>
+          <div className="app-frame">
+            <AppNavigation
+              actorDisplayName={snapshot.actor?.displayName ?? "Loading..."}
+              actorRoleLabel={snapshot.actor ? formatRoleLabel(snapshot.actor) : "guest"}
+              isOpen={isNavOpen}
+              mainItems={navItems.map((item) => ({ id: item.id, label: item.label }))}
+              onClose={() => setIsNavOpen(false)}
+              onSelectMain={(itemId) => handleViewChange(itemId as ViewName)}
+              selectedMain={view}
+            />
 
-        <div className="app-content">
-          <div className="mobile-nav-row">
-            <Button
-              className="nav-drawer-trigger rounded-full bg-white/70 shadow-sm hover:bg-white"
-              onClick={() => setIsNavOpen(true)}
-              size="icon"
-              type="button"
-              variant="outline"
-            >
-              <Menu className="size-4" />
-              <span className="sr-only">Open navigation</span>
-            </Button>
+            <div className="app-content">
+              <div className="mobile-nav-row">
+                <Button
+                  className="nav-drawer-trigger rounded-full bg-white/70 shadow-sm hover:bg-white"
+                  onClick={() => setIsNavOpen(true)}
+                  size="icon"
+                  type="button"
+                  variant="outline"
+                >
+                  <Menu className="size-4" />
+                  <span className="sr-only">Open navigation</span>
+                </Button>
+              </div>
+
+              {isBooting ? (
+                <StatusMessageCard
+                  description="Fetching the latest board state, settings, and household cast."
+                  title="Opening the ledger..."
+                />
+              ) : null}
+
+              {!isBooting && view === "board" ? (
+                <BoardView
+                  aiAssistanceLabel={getAiAssistanceLabel(snapshot.users)}
+                  allTasks={activeTasks}
+                  canAdmin={canAdmin}
+                  isFilteredToActor={onlyMyTasks}
+                  onCreateTask={createTaskFromBoardTitle}
+                  onDropTask={handleTaskDrop}
+                  onOpenTask={openTask}
+                  onQuickMove={handleQuickMove}
+                  onReorder={handleReorder}
+                  onToggleActorFilter={() => setOnlyMyTasks((current) => !current)}
+                  visibleTasks={onlyMyTasks ? myTasks : activeTasks}
+                />
+              ) : null}
+
+              {!isBooting && view === "archive" ? (
+                <section className="panel-stack">
+                  <SectionHeading
+                    actions={
+                      <SearchField
+                        label="Search archive"
+                        onChange={setArchiveSearch}
+                        placeholder="Search titles or notes"
+                        value={archiveSearch}
+                      />
+                    }
+                    eyebrow="History"
+                    title="Archive"
+                  />
+                  <TaskListView
+                    aiAssistanceLabel={getAiAssistanceLabel(snapshot.users)}
+                    description="A place for finished errands, closed loops, and things you only need to remember once in a while."
+                    emptyMessage="Nothing has been archived yet."
+                    onOpenTask={openTask}
+                    onQuickMove={() => Promise.resolve()}
+                    onReorder={() => Promise.resolve()}
+                    showHeader={false}
+                    tasks={archivedTasks}
+                    title="Archive"
+                  />
+                </section>
+              ) : null}
+
+              {!isBooting && view === "recurring" ? (
+                <RecurringView
+                  canAdmin={canAdmin}
+                  isTemplateEditorOpen={editingTemplateKey !== null}
+                  labels={snapshot.labels}
+                  onSaveTemplate={handleTemplateSave}
+                  onSelectTemplate={(templateKey) => {
+                    setEditingTemplateKey(templateKey);
+                    setIsNavOpen(false);
+                  }}
+                  recurringTemplates={snapshot.recurringTemplates}
+                  selectedTemplate={
+                    editingTemplateKey && editingTemplateKey !== "new"
+                      ? snapshot.recurringTemplates.find(
+                          (template) => template.id === editingTemplateKey
+                        ) ?? null
+                      : null
+                  }
+                  users={snapshot.users}
+                />
+              ) : null}
+
+              {!isBooting && view === "settings" ? (
+                <SettingsView
+                  activePage={settingsPage}
+                  canAdmin={canAdmin}
+                  isLabelEditorOpen={editingLabelKey !== null}
+                  labels={snapshot.labels}
+                  onDeleteLabel={handleLabelDelete}
+                  onIssueServiceToken={handleServiceTokenIssue}
+                  onRemoveUser={handleHouseholdUserRemove}
+                  onRevokeServiceToken={handleServiceTokenRevoke}
+                  onSaveLabel={handleLabelSave}
+                  onSaveSettings={handleSettingsSave}
+                  onSaveUser={handleHouseholdUserSave}
+                  onSelectLabel={setEditingLabelKey}
+                  onSelectPage={handleSettingsPageChange}
+                  onSelectUser={(userKey) => {
+                    setEditingUserKey(userKey);
+                    setSettingsPage("household");
+                  }}
+                  selectedLabel={selectedLabel}
+                  selectedLabelKey={editingLabelKey}
+                  isUserEditorOpen={editingUserKey !== null}
+                  selectedUser={selectedHouseholdUser}
+                  serviceTokensByUserId={snapshot.serviceTokensByUserId}
+                  settings={snapshot.settings}
+                  userEditorMode={householdUserEditorMode}
+                  users={snapshot.users}
+                />
+              ) : null}
+            </div>
           </div>
 
-          {isBooting ? (
-            <StatusMessageCard
-              description="Fetching the latest board state, settings, and household cast."
-              title="Opening the ledger..."
-            />
-          ) : null}
-
-          {!isBooting && view === "board" ? (
-            <BoardView
-              aiAssistanceLabel={getAiAssistanceLabel(snapshot.users)}
-              allTasks={activeTasks}
-              canAdmin={canAdmin}
-              isFilteredToActor={onlyMyTasks}
-              onCreateTask={createTaskFromBoardTitle}
-              onDropTask={handleTaskDrop}
-              onOpenTask={openTask}
-              onQuickMove={handleQuickMove}
-              onReorder={handleReorder}
-              onToggleActorFilter={() => setOnlyMyTasks((current) => !current)}
-              visibleTasks={onlyMyTasks ? myTasks : activeTasks}
-            />
-          ) : null}
-
-          {!isBooting && view === "archive" ? (
-            <section className="panel-stack">
-              <SectionHeading
-                actions={
-                  <SearchField
-                    label="Search archive"
-                    onChange={setArchiveSearch}
-                    placeholder="Search titles or notes"
-                    value={archiveSearch}
-                  />
-                }
-                eyebrow="History"
-                title="Archive"
-              />
-              <TaskListView
-                aiAssistanceLabel={getAiAssistanceLabel(snapshot.users)}
-                description="A place for finished errands, closed loops, and things you only need to remember once in a while."
-                emptyMessage="Nothing has been archived yet."
-                onOpenTask={openTask}
-                onQuickMove={() => Promise.resolve()}
-                onReorder={() => Promise.resolve()}
-                showHeader={false}
-                tasks={archivedTasks}
-                title="Archive"
-              />
-            </section>
-          ) : null}
-
-          {!isBooting && view === "recurring" ? (
-            <RecurringView
-              canAdmin={canAdmin}
-              isTemplateEditorOpen={editingTemplateKey !== null}
-              labels={snapshot.labels}
-              onSaveTemplate={handleTemplateSave}
-              onSelectTemplate={(templateKey) => {
-                setEditingTemplateKey(templateKey);
-                setIsNavOpen(false);
-              }}
-              recurringTemplates={snapshot.recurringTemplates}
-              selectedTemplate={
-                editingTemplateKey && editingTemplateKey !== "new"
-                  ? snapshot.recurringTemplates.find(
-                      (template) => template.id === editingTemplateKey
-                    ) ?? null
-                  : null
+          <TaskSheet
+            aiAssistanceToggleLabel={getAiAssistanceToggleLabel(snapshot.users)}
+            actor={snapshot.actor}
+            isOpen={isTaskSheetOpen}
+            isSavingDisabled={!canAdmin}
+            labels={snapshot.labels}
+            onSubmitActivity={handleActivitySubmit}
+            onArchive={handleArchive}
+            onCalendarAction={(task, calendarKind) => {
+              if (!snapshot.settings) {
+                return;
               }
-              users={snapshot.users}
-            />
-          ) : null}
 
-          {!isBooting && view === "settings" ? (
-            <SettingsView
-              activePage={settingsPage}
-              canAdmin={canAdmin}
-              isLabelEditorOpen={editingLabelKey !== null}
-              labels={snapshot.labels}
-              onDeleteLabel={handleLabelDelete}
-              onIssueServiceToken={handleServiceTokenIssue}
-              onRemoveUser={handleHouseholdUserRemove}
-              onRevokeServiceToken={handleServiceTokenRevoke}
-              onSaveLabel={handleLabelSave}
-              onSaveSettings={handleSettingsSave}
-              onSaveUser={handleHouseholdUserSave}
-              onSelectLabel={setEditingLabelKey}
-              onSelectPage={handleSettingsPageChange}
-              onSelectUser={(userKey) => {
-                setEditingUserKey(userKey);
-                setSettingsPage("household");
-              }}
-              selectedLabel={selectedLabel}
-              selectedLabelKey={editingLabelKey}
-              isUserEditorOpen={editingUserKey !== null}
-              selectedUser={selectedHouseholdUser}
-              serviceTokensByUserId={snapshot.serviceTokensByUserId}
-              settings={snapshot.settings}
-              userEditorMode={householdUserEditorMode}
-              users={snapshot.users}
-            />
-          ) : null}
-        </div>
-      </div>
+              if (calendarKind === "google") {
+                const googleUrl = buildGoogleCalendarUrl(task, snapshot.settings.defaultTimezone);
 
-      <TaskSheet
-        aiAssistanceToggleLabel={getAiAssistanceToggleLabel(snapshot.users)}
-        actor={snapshot.actor}
-        isOpen={isTaskSheetOpen}
-        isSavingDisabled={!canAdmin}
-        labels={snapshot.labels}
-        onSubmitActivity={handleActivitySubmit}
-        onArchive={handleArchive}
-        onCalendarAction={(task, calendarKind) => {
-          if (!snapshot.settings) {
-            return;
-          }
+                if (googleUrl) {
+                  window.open(googleUrl, "_blank", "noopener,noreferrer");
+                }
 
-          if (calendarKind === "google") {
-            const googleUrl = buildGoogleCalendarUrl(task, snapshot.settings.defaultTimezone);
+                return;
+              }
 
-            if (googleUrl) {
-              window.open(googleUrl, "_blank", "noopener,noreferrer");
-            }
+              downloadIcsFile(task, snapshot.settings.defaultTimezone);
+            }}
+            onClose={() => {
+              setIsTaskSheetOpen(false);
+              setIsCreatingTask(false);
+            }}
+            onDeleteArchivedTask={handleDeleteArchivedTask}
+            onDownloadAttachment={async (attachment) => {
+              if (!attachment.downloadUrl) {
+                return;
+              }
 
-            return;
-          }
-
-          downloadIcsFile(task, snapshot.settings.defaultTimezone);
-        }}
-        onClose={() => {
-          setIsTaskSheetOpen(false);
-          setIsCreatingTask(false);
-        }}
-        onDeleteArchivedTask={handleDeleteArchivedTask}
-        onDownloadAttachment={async (attachment) => {
-          if (!attachment.downloadUrl) {
-            return;
-          }
-
-          try {
-            await downloadAttachment(attachment.downloadUrl, attachment.originalName);
-          } catch (error) {
-            showErrorToast(buildFlashMessage(error), "attachment-download-error");
-          }
-        }}
-        onSave={handleTaskSubmit}
-        onStatusChange={handleStatusChange}
-        onUnarchive={handleUnarchive}
-        settings={snapshot.settings}
-        task={selectedTask}
-        users={snapshot.users}
-        variant={isCreatingTask ? "create" : "detail"}
-      />
+              try {
+                await downloadAttachment(attachment.downloadUrl, attachment.originalName);
+              } catch (error) {
+                showErrorToast(buildFlashMessage(error), "attachment-download-error");
+              }
+            }}
+            onSave={handleTaskSubmit}
+            onStatusChange={handleStatusChange}
+            onUnarchive={handleUnarchive}
+            settings={snapshot.settings}
+            task={selectedTask}
+            users={snapshot.users}
+            variant={isCreatingTask ? "create" : "detail"}
+          />
+        </>
+      )}
       <Toaster />
     </main>
+  );
+}
+
+function AuthGate(props: {
+  accessState: AccessState;
+  authEmail: string;
+  intendedEmail: string;
+  isClaimingOwnership: boolean;
+  isSwitchingAccount: boolean;
+  onAuthEmailChange: (value: string) => void;
+  onClaimOwnership: () => Promise<void>;
+  onSignIn: (event: FormEvent<HTMLFormElement>) => void;
+  onSwitchAccount: () => Promise<void>;
+}) {
+  const authenticatedEmail = props.accessState.context?.authenticatedEmail;
+  const householdName = props.accessState.context?.householdName ?? "your household";
+  const isEmailMismatch =
+    Boolean(authenticatedEmail) &&
+    Boolean(props.intendedEmail) &&
+    authenticatedEmail !== props.intendedEmail.trim().toLowerCase();
+
+  return (
+    <div className="auth-shell">
+      <SurfaceCard className="auth-card">
+        <div className="auth-card-copy">
+          <p className="eyebrow">SWNTD Access</p>
+          <h1>Sign in to open the household ledger.</h1>
+          <p className="section-copy">
+            exe.dev handles the email login, and SWNTD decides whether that account belongs to
+            the household.
+          </p>
+        </div>
+
+        <Separator className="auth-separator" />
+
+        {props.accessState.kind === "unauthenticated" ? (
+          <form className="auth-form" onSubmit={props.onSignIn}>
+            <FormField label="Email">
+              <FormInput
+                autoComplete="email"
+                onChange={(event) => props.onAuthEmailChange(event.target.value)}
+                placeholder="you@example.com"
+                type="email"
+                value={props.authEmail}
+              />
+            </FormField>
+            <p className="auth-note">
+              We’ll send you to exe.dev’s login screen next so you can verify this email.
+            </p>
+            <Button className="w-full sm:w-auto" type="submit">
+              Continue to Login
+            </Button>
+          </form>
+        ) : null}
+
+        {props.accessState.kind !== "unauthenticated" ? (
+          <div className="auth-status-block">
+            <div className="auth-email-pill">
+              <UserRound className="size-4" />
+              <span>{authenticatedEmail ?? "No authenticated email"}</span>
+            </div>
+            {isEmailMismatch ? (
+              <p className="auth-note">
+                You started sign-in for <strong>{props.intendedEmail}</strong>, but exe.dev
+                returned <strong>{authenticatedEmail}</strong>.
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+
+        {props.accessState.kind === "claim" ? (
+          <div className="auth-action-stack">
+            <div className="auth-highlight">
+              <Check className="size-4" />
+              <p>
+                <strong>{authenticatedEmail}</strong> is approved to claim <strong>{householdName}</strong>.
+                This creates your first real admin account and leaves the placeholder bootstrap
+                admin in place until you remove it from Settings.
+              </p>
+            </div>
+            <div className="auth-actions">
+              <Button
+                disabled={props.isClaimingOwnership}
+                onClick={() => {
+                  void props.onClaimOwnership();
+                }}
+                type="button"
+              >
+                {props.isClaimingOwnership ? "Claiming..." : "Claim Household"}
+              </Button>
+              <Button
+                disabled={props.isSwitchingAccount}
+                onClick={() => {
+                  void props.onSwitchAccount();
+                }}
+                type="button"
+                variant="outline"
+              >
+                Switch Account
+              </Button>
+            </div>
+          </div>
+        ) : null}
+
+        {props.accessState.kind === "forbidden" ? (
+          <div className="auth-action-stack">
+            <p className="auth-note">
+              <strong>{authenticatedEmail}</strong> is not currently a member of this household.
+              Sign in with an approved bootstrap owner email, or ask an existing admin to add this
+              address in Settings.
+            </p>
+            <div className="auth-actions">
+              <Button
+                disabled={props.isSwitchingAccount}
+                onClick={() => {
+                  void props.onSwitchAccount();
+                }}
+                type="button"
+              >
+                {props.isSwitchingAccount ? "Switching..." : "Switch Account"}
+              </Button>
+              <Button
+                asChild
+                variant="outline"
+              >
+                <a href={buildExeDevLoginUrl()}>
+                  Open exe.dev Login
+                  <ExternalLink className="size-4" />
+                </a>
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </SurfaceCard>
+    </div>
   );
 }
 

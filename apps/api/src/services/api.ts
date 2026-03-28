@@ -47,6 +47,7 @@ import {
 } from "@swntd/shared/server/domain/tasks";
 import { issueServiceToken } from "../auth/service-tokens";
 import type { DatabaseClient } from "../db/client";
+import { DEFAULT_HOUSEHOLD_ID, toDisplayName } from "../db/bootstrap";
 import { ApiError } from "../http/errors";
 
 export type UserRef = {
@@ -262,6 +263,28 @@ type MutationAuditOptions = {
   eventSource?: TaskEventSource;
 };
 
+export type BootstrapClaimStatus =
+  | "already_member"
+  | "email_not_allowed"
+  | "not_authenticated"
+  | "ready"
+  | "setup_locked";
+
+export type BootstrapContextDto = {
+  authenticatedEmail: string | null;
+  canClaimOwnership: boolean;
+  claimStatus: BootstrapClaimStatus;
+  householdName: string;
+};
+
+type BootstrapConfig = {
+  bootstrapAdminEmails: string[];
+  bootstrapOwnerEmails: string[];
+  householdName: string;
+};
+
+const BOOTSTRAP_PLACEHOLDER_EMAIL_DOMAIN = ".invalid";
+
 function getRequiredRow<T>(row: T | undefined, code: string, message: string) {
   if (!row) {
     throw new ApiError(500, code, message);
@@ -298,6 +321,35 @@ function mapUserRef(row: {
   };
 
   return userRef;
+}
+
+function normalizeEmail(email: string) {
+  return email.trim().toLowerCase();
+}
+
+function isBootstrapPlaceholderEmail(email: string, config: BootstrapConfig) {
+  const normalizedEmail = normalizeEmail(email);
+
+  return (
+    normalizedEmail.endsWith(BOOTSTRAP_PLACEHOLDER_EMAIL_DOMAIN) &&
+    config.bootstrapAdminEmails.includes(normalizedEmail)
+  );
+}
+
+async function listActiveAdminUsers(db: DatabaseClient) {
+  return db
+    .select({
+      email: users.email,
+      id: users.id
+    })
+    .from(users)
+    .where(
+      and(
+        eq(users.householdId, DEFAULT_HOUSEHOLD_ID),
+        eq(users.role, "admin"),
+        isNull(users.deactivatedAt)
+      )
+    );
 }
 
 async function getUserRefsById(db: DatabaseClient, userIds: string[]) {
@@ -696,6 +748,123 @@ export async function listHouseholdUsers(
 
   return {
     items: rows.map((row) => mapUserRef(row))
+  };
+}
+
+export async function getBootstrapContext(
+  db: DatabaseClient,
+  config: BootstrapConfig,
+  authenticatedEmail: string | null
+) {
+  const normalizedEmail = authenticatedEmail ? normalizeEmail(authenticatedEmail) : null;
+  const activeAdmins = await listActiveAdminUsers(db);
+  const hasOnlyBootstrapAdmins =
+    activeAdmins.length > 0 &&
+    activeAdmins.every(
+      (admin) => admin.email && isBootstrapPlaceholderEmail(admin.email, config)
+    );
+  const isCurrentMember =
+    normalizedEmail !== null &&
+    activeAdmins.some((admin) => admin.email === normalizedEmail);
+  const isAllowedOwner =
+    normalizedEmail !== null &&
+    config.bootstrapOwnerEmails.includes(normalizedEmail);
+
+  let claimStatus: BootstrapClaimStatus;
+
+  if (!normalizedEmail) {
+    claimStatus = "not_authenticated";
+  } else if (isCurrentMember) {
+    claimStatus = "already_member";
+  } else if (!hasOnlyBootstrapAdmins) {
+    claimStatus = "setup_locked";
+  } else if (!isAllowedOwner) {
+    claimStatus = "email_not_allowed";
+  } else {
+    claimStatus = "ready";
+  }
+
+  const context: BootstrapContextDto = {
+    authenticatedEmail: normalizedEmail,
+    canClaimOwnership: claimStatus === "ready",
+    claimStatus,
+    householdName: config.householdName
+  };
+
+  return context;
+}
+
+export async function claimBootstrapOwnership(
+  db: DatabaseClient,
+  config: BootstrapConfig,
+  authenticatedEmail: string | null
+) {
+  const context = await getBootstrapContext(db, config, authenticatedEmail);
+
+  switch (context.claimStatus) {
+    case "not_authenticated":
+      throw new ApiError(401, "unauthorized", "Authentication required.");
+    case "already_member":
+      throw new ApiError(409, "user_exists", "Authenticated user is already a household member.");
+    case "email_not_allowed":
+      throw new ApiError(
+        403,
+        "bootstrap_claim_not_allowed",
+        "Authenticated email is not allowed to claim household ownership."
+      );
+    case "setup_locked":
+      throw new ApiError(
+        403,
+        "bootstrap_claim_locked",
+        "Bootstrap ownership claim is no longer available for this household."
+      );
+    case "ready":
+      break;
+  }
+
+  const normalizedEmail = normalizeEmail(authenticatedEmail!);
+  const [existingUser] = await db
+    .select({
+      id: users.id
+    })
+    .from(users)
+    .where(eq(users.email, normalizedEmail));
+
+  if (existingUser) {
+    throw new ApiError(409, "user_exists", "A household user with that email already exists.");
+  }
+
+  const [createdAdmin] = await db
+    .insert(users)
+    .values({
+      deactivatedAt: null,
+      displayName: toDisplayName(normalizedEmail),
+      email: normalizedEmail,
+      externalAuthId: null,
+      householdId: DEFAULT_HOUSEHOLD_ID,
+      role: "admin",
+      serviceKind: null
+    })
+    .returning({
+      displayName: users.displayName,
+      email: users.email,
+      householdId: users.householdId,
+      id: users.id,
+      role: users.role,
+      serviceKind: users.serviceKind
+    });
+
+  const actor = getRequiredRow(
+    createdAdmin,
+    "bootstrap_claim_failed",
+    "Bootstrap household owner claim failed."
+  );
+
+  return {
+    actor: {
+      ...actor,
+      authStrategy: "trusted_header" as const
+    }
   };
 }
 

@@ -12,6 +12,7 @@ The current implementation baseline includes the `/api/v1` HTTP surface, upload/
 
 Key architectural choices and their rationale are tracked in [ARCHITECTURE_DECISIONS.md](ARCHITECTURE_DECISIONS.md).
 The API also exposes a lightweight machine-readable contract at `/api/v1/openapi.json`.
+Deployment details for exe.dev staging and production live in [DEPLOY.md](DEPLOY.md).
 
 ## Local Development
 
@@ -53,7 +54,7 @@ For browser development, `apps/web` proxies `/api` requests to `SWNTD_API_PROXY_
 
 The MCP server reads `SWNTD_MCP_SERVICE_TOKEN` from the environment and authenticates as a service actor on each tool call. In local development, point that env var at an issued SWNTD service token before running `pnpm --filter @swntd/mcp dev`.
 
-The bootstrap configuration is intentionally generic. Household-specific admin emails, service actor names, and deployment secrets should live in local `.env` files or GitHub Actions secrets, not in committed repository data. Bootstrap now seeds missing initial users, but in-app household actor management becomes the source of truth for display names, assistant tokens, and whether an actor still belongs in the active household cast after setup.
+The bootstrap configuration is intentionally generic. Household-specific admin emails, bootstrap owner emails, service actor names, and deployment secrets should live in local `.env` files or GitHub Actions secrets, not in committed repository data. Bootstrap now seeds missing initial users, but in-app household actor management becomes the source of truth for display names, assistant tokens, and whether an actor still belongs in the active household cast after setup.
 
 ## Product Goals
 

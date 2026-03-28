@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsup src/index.ts src/jobs/run.ts --format esm --dts --clean",
+    "start": "node dist/index.js",
     "db:generate": "drizzle-kit generate --config drizzle.config.ts",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:bootstrap": "tsx src/db/bootstrap.ts",

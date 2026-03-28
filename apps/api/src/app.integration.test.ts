@@ -158,6 +158,15 @@ describe("Phase 3 API", () => {
     await teardownApiTestEnvironment(uploadsDir);
   });
 
+  it("exposes an unauthenticated health check", async () => {
+    const response = await app.request("/healthz");
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      status: "ok"
+    });
+  });
+
   it("supports the primary admin task workflow end to end", async () => {
     const adminHeaders = trustedHeader("admin1@example.com");
 

@@ -24,8 +24,10 @@ import {
   createLabel,
   createRecurringTemplate,
   createTask,
+  claimBootstrapOwnership,
   deleteArchivedTask,
   deleteLabel,
+  getBootstrapContext,
   getCurrentActor,
   getRecurringTemplate,
   getSettings,
@@ -227,6 +229,32 @@ function headersToObject(c: Context) {
   return Object.fromEntries(c.req.raw.headers.entries());
 }
 
+function getHeaderValue(
+  headers: Record<string, string | undefined>,
+  name: string
+) {
+  const entry = Object.entries(headers).find(
+    ([headerName]) => headerName.toLowerCase() === name.toLowerCase()
+  );
+
+  return entry?.[1];
+}
+
+function getBootstrapAuthenticatedEmail(
+  c: Context<{ Variables: AppVariables }>,
+  headers: Record<string, string | undefined>
+) {
+  if (c.var.config.authMode === "trusted_header") {
+    return getHeaderValue(headers, c.var.config.trustedEmailHeader)?.trim().toLowerCase() ?? null;
+  }
+
+  if (c.var.config.authMode === "local_dev") {
+    return headers["x-swntd-dev-email"]?.trim().toLowerCase() ?? null;
+  }
+
+  return null;
+}
+
 function jsonOk<T>(c: Context, payload: T, status: 200 | 201 = 200) {
   return c.json(payload, status);
 }
@@ -262,6 +290,12 @@ export function createApp() {
     )
   );
 
+  app.get("/healthz", (c) =>
+    c.json({
+      status: "ok"
+    })
+  );
+
   app.use("/api/*", async (c, next) => {
     const database = await createDatabase();
 
@@ -273,6 +307,33 @@ export function createApp() {
     } finally {
       database.client.close();
     }
+  });
+
+  app.get("/api/v1/bootstrap/context", async (c) => {
+    const headers = headersToObject(c);
+
+    return jsonOk(
+      c,
+      await getBootstrapContext(
+        c.var.db,
+        c.var.config,
+        getBootstrapAuthenticatedEmail(c, headers)
+      )
+    );
+  });
+
+  app.post("/api/v1/bootstrap/claim", async (c) => {
+    const headers = headersToObject(c);
+
+    return jsonOk(
+      c,
+      await claimBootstrapOwnership(
+        c.var.db,
+        c.var.config,
+        getBootstrapAuthenticatedEmail(c, headers)
+      ),
+      201
+    );
   });
 
   app.use("/api/*", async (c, next) => {
@@ -588,6 +649,8 @@ export function createApp() {
     jsonOk(c, {
       openapi: "3.1.0",
       paths: {
+        "/api/v1/bootstrap/claim": ["post"],
+        "/api/v1/bootstrap/context": ["get"],
         "/api/v1/labels": ["get", "post"],
         "/api/v1/labels/:labelId": ["patch", "delete"],
         "/api/v1/me": ["get"],

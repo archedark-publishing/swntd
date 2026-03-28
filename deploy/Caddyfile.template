@@ -1,0 +1,22 @@
+{
+  admin off
+  auto_https off
+}
+
+:8000 {
+  encode gzip zstd
+
+  route {
+    handle /healthz {
+      reverse_proxy 127.0.0.1:3001
+    }
+
+    handle /api/* {
+      reverse_proxy 127.0.0.1:3001
+    }
+
+    root * __DEPLOY_PATH__/current/apps/web/dist
+    try_files {path} /index.html
+    file_server
+  }
+}

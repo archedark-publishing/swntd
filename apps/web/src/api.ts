@@ -139,6 +139,18 @@ export type RecurringTemplate = {
   updatedAt: string;
 };
 
+export type BootstrapContext = {
+  authenticatedEmail: string | null;
+  canClaimOwnership: boolean;
+  claimStatus:
+    | "already_member"
+    | "email_not_allowed"
+    | "not_authenticated"
+    | "ready"
+    | "setup_locked";
+  householdName: string;
+};
+
 export type ApiErrorShape = {
   code: string;
   details: unknown;
@@ -302,6 +314,11 @@ export const api = {
       method: "DELETE"
     });
   },
+  claimBootstrapOwnership() {
+    return request<{ actor: Actor }>("/api/v1/bootstrap/claim", {
+      method: "POST"
+    });
+  },
   createRecurringTemplate(input: {
     aiAssistanceEnabledDefault: boolean;
     checklistItems: Array<{ body: string }>;
@@ -361,6 +378,9 @@ export const api = {
       },
       method: "POST"
     });
+  },
+  getBootstrapContext() {
+    return request<BootstrapContext>("/api/v1/bootstrap/context");
   },
   getMe() {
     return request<{ actor: Actor }>("/api/v1/me");
