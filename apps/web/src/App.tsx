@@ -413,6 +413,31 @@ function formatDueControlValue(dateValue: string | null, timeValue?: string | nu
   }).format(date);
 }
 
+function formatRecurringScheduleMeta(template: Pick<
+  RecurringTemplate,
+  "nextOccurrenceOn" | "recurrenceCadence" | "recurrenceInterval"
+>) {
+  const unit =
+    template.recurrenceCadence === "daily"
+      ? template.recurrenceInterval === 1
+        ? "day"
+        : "days"
+      : template.recurrenceCadence === "weekly"
+        ? template.recurrenceInterval === 1
+          ? "week"
+          : "weeks"
+        : template.recurrenceInterval === 1
+          ? "month"
+          : "months";
+
+  const cadenceLabel =
+    template.recurrenceInterval === 1
+      ? `Every ${unit}`
+      : `Every ${template.recurrenceInterval} ${unit}`;
+
+  return `${cadenceLabel} · Next ${formatDueControlValue(template.nextOccurrenceOn)}`;
+}
+
 function formatTimestamp(value: string) {
   return new Intl.DateTimeFormat(undefined, {
     dateStyle: "medium",
@@ -3573,7 +3598,7 @@ function RecurringView(props: {
                 active={props.selectedTemplate?.id === template.id}
                 key={template.id}
                 label={template.title}
-                meta={`${template.recurrenceCadence} every ${template.recurrenceInterval}`}
+                meta={formatRecurringScheduleMeta(template)}
                 onClick={() => props.onSelectTemplate(template.id)}
               />
             ))}
