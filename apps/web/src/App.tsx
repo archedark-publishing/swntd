@@ -3776,7 +3776,7 @@ function SettingsView(props: {
                     ) : null}
                   </>
                 ) : (
-                  <EmptyStateCard message="Choose someone from the cast or start a new person or assistant." />
+                  <EmptyStateCard message="Choose someone or create a new person or assistant." />
                 )}
               </div>
             </div>
