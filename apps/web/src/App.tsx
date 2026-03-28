@@ -1632,27 +1632,18 @@ function AuthGate(props: {
         <div className="auth-card-copy">
           <p className="eyebrow">SWNTD Access</p>
           <h1>Sign in to open the household ledger.</h1>
-          <p className="section-copy">
-            exe.dev handles the email login, and SWNTD decides whether that account belongs to
-            the household.
-          </p>
         </div>
 
         <Separator className="auth-separator" />
 
         {props.accessState.kind === "unauthenticated" ? (
           <div className="auth-form">
-            <p className="auth-note">
-              Continue to exe.dev to sign in with your email. Once you come back, SWNTD will
-              either open your household, let you claim it, or tell you that this account needs
-              access.
-            </p>
             <Button
               className="w-full sm:w-auto"
               onClick={props.onSignIn}
               type="button"
             >
-              Continue with exe.dev
+              Continue to exe.dev
             </Button>
           </div>
         ) : null}
