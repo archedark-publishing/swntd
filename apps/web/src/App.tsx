@@ -3093,6 +3093,7 @@ function TaskForm(props: {
 
         {props.variant === "create" ? (
           <FormSelect
+            allowEmptyOption
             className=""
             disabled={!props.canEdit}
             label="Assignee"
@@ -4176,6 +4177,7 @@ function RecurringTemplateForm(props: {
         />
       </FormField>
       <FormSelect
+        allowEmptyOption
         label="Default assignee"
         onValueChange={(value) =>
           props.onChange({

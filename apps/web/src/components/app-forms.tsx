@@ -47,6 +47,7 @@ export function FormTextarea(props: React.ComponentProps<typeof Textarea>) {
 }
 
 export function FormSelect(props: {
+  allowEmptyOption?: boolean;
   className?: string;
   disabled?: boolean;
   label: string;
@@ -57,6 +58,11 @@ export function FormSelect(props: {
 }) {
   const fieldProps = props.className ? { className: props.className } : {};
   const selectProps = props.disabled ? { disabled: props.disabled } : {};
+  const valueProps = props.value
+    ? { value: props.value }
+    : props.allowEmptyOption
+      ? { value: EMPTY_SELECT_VALUE }
+      : {};
 
   return (
     <FormField label={props.label} {...fieldProps}>
@@ -64,16 +70,18 @@ export function FormSelect(props: {
         onValueChange={(value) =>
           props.onValueChange(value === EMPTY_SELECT_VALUE ? "" : value)
         }
-        value={props.value || EMPTY_SELECT_VALUE}
         {...selectProps}
+        {...valueProps}
       >
         <SelectTrigger className="w-full rounded-2xl border-border/50 bg-white/80">
           <SelectValue placeholder={props.placeholder ?? "Select an option"} />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value={EMPTY_SELECT_VALUE}>
-            {props.placeholder ?? "Select an option"}
-          </SelectItem>
+          {props.allowEmptyOption ? (
+            <SelectItem value={EMPTY_SELECT_VALUE}>
+              {props.placeholder ?? "Select an option"}
+            </SelectItem>
+          ) : null}
           {props.options.map((option) => (
             <SelectItem key={option.value} value={option.value}>
               {option.label}
