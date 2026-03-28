@@ -22,7 +22,6 @@ import { CSS } from "@dnd-kit/utilities";
 import {
   type CSSProperties,
   type ComponentType,
-  type FormEvent,
   startTransition,
   useDeferredValue,
   useEffect,
@@ -208,8 +207,6 @@ const settingsNavItems: Array<{ id: SettingsPage; label: string }> = [
   { id: "household", label: "Household" },
   { id: "labels", label: "Labels" }
 ];
-
-const intendedEmailStorageKey = "swntd:intended-email";
 
 function isSettingsPage(value: string | undefined): value is SettingsPage {
   return value === "general" || value === "household" || value === "labels";
@@ -643,29 +640,6 @@ function showErrorToast(message: string, toastId?: string) {
   toast.error(message, { id: toastId ?? `error:${message}` });
 }
 
-function getStoredIntendedEmail() {
-  if (typeof window === "undefined") {
-    return "";
-  }
-
-  return window.sessionStorage.getItem(intendedEmailStorageKey) ?? "";
-}
-
-function setStoredIntendedEmail(email: string) {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  const normalizedEmail = email.trim().toLowerCase();
-
-  if (normalizedEmail) {
-    window.sessionStorage.setItem(intendedEmailStorageKey, normalizedEmail);
-    return;
-  }
-
-  window.sessionStorage.removeItem(intendedEmailStorageKey);
-}
-
 function buildExeDevLoginUrl() {
   const redirect = `${window.location.pathname}${window.location.search}${window.location.hash}`;
   const url = new URL("/__exe.dev/login", window.location.origin);
@@ -702,7 +676,6 @@ export function App() {
   const [onlyMyTasks, setOnlyMyTasks] = useState(initialRoute.onlyMyTasks);
   const [settingsPage, setSettingsPage] = useState<SettingsPage>(initialRoute.settingsPage);
   const [accessState, setAccessState] = useState<AccessState | null>(null);
-  const [authEmail, setAuthEmail] = useState(() => getStoredIntendedEmail());
   const [snapshot, setSnapshot] = useState<AppSnapshot>(emptySnapshot);
   const [isBooting, setIsBooting] = useState(true);
   const [isClaimingOwnership, setIsClaimingOwnership] = useState(false);
@@ -1385,17 +1358,7 @@ export function App() {
     );
   }
 
-  function handleSignIn(event?: FormEvent<HTMLFormElement>) {
-    event?.preventDefault();
-
-    const normalizedEmail = authEmail.trim().toLowerCase();
-
-    if (!normalizedEmail) {
-      showErrorToast("Enter the email you want to sign in with.", "auth-email-required");
-      return;
-    }
-
-    setStoredIntendedEmail(normalizedEmail);
+  function handleSignIn() {
     window.location.assign(buildExeDevLoginUrl());
   }
 
@@ -1407,7 +1370,6 @@ export function App() {
         credentials: "same-origin",
         method: "POST"
       });
-      setStoredIntendedEmail(authEmail);
       window.location.assign(buildExeDevLoginUrl());
     } catch (error) {
       showErrorToast(buildFlashMessage(error), "switch-account-error");
@@ -1459,14 +1421,8 @@ export function App() {
       {accessState ? (
         <AuthGate
           accessState={accessState}
-          authEmail={authEmail}
-          intendedEmail={getStoredIntendedEmail()}
           isClaimingOwnership={isClaimingOwnership}
           isSwitchingAccount={isSwitchingAccount}
-          onAuthEmailChange={(value) => {
-            setAuthEmail(value);
-            setStoredIntendedEmail(value);
-          }}
           onClaimOwnership={handleClaimOwnership}
           onSignIn={handleSignIn}
           onSwitchAccount={handleSwitchAccount}
@@ -1661,21 +1617,14 @@ export function App() {
 
 function AuthGate(props: {
   accessState: AccessState;
-  authEmail: string;
-  intendedEmail: string;
   isClaimingOwnership: boolean;
   isSwitchingAccount: boolean;
-  onAuthEmailChange: (value: string) => void;
   onClaimOwnership: () => Promise<void>;
-  onSignIn: (event: FormEvent<HTMLFormElement>) => void;
+  onSignIn: () => void;
   onSwitchAccount: () => Promise<void>;
 }) {
   const authenticatedEmail = props.accessState.context?.authenticatedEmail;
   const householdName = props.accessState.context?.householdName ?? "your household";
-  const isEmailMismatch =
-    Boolean(authenticatedEmail) &&
-    Boolean(props.intendedEmail) &&
-    authenticatedEmail !== props.intendedEmail.trim().toLowerCase();
 
   return (
     <div className="auth-shell">
@@ -1692,23 +1641,20 @@ function AuthGate(props: {
         <Separator className="auth-separator" />
 
         {props.accessState.kind === "unauthenticated" ? (
-          <form className="auth-form" onSubmit={props.onSignIn}>
-            <FormField label="Email">
-              <FormInput
-                autoComplete="email"
-                onChange={(event) => props.onAuthEmailChange(event.target.value)}
-                placeholder="you@example.com"
-                type="email"
-                value={props.authEmail}
-              />
-            </FormField>
+          <div className="auth-form">
             <p className="auth-note">
-              We’ll send you to exe.dev’s login screen next so you can verify this email.
+              Continue to exe.dev to sign in with your email. Once you come back, SWNTD will
+              either open your household, let you claim it, or tell you that this account needs
+              access.
             </p>
-            <Button className="w-full sm:w-auto" type="submit">
-              Continue to Login
+            <Button
+              className="w-full sm:w-auto"
+              onClick={props.onSignIn}
+              type="button"
+            >
+              Continue with exe.dev
             </Button>
-          </form>
+          </div>
         ) : null}
 
         {props.accessState.kind !== "unauthenticated" ? (
@@ -1717,12 +1663,6 @@ function AuthGate(props: {
               <UserRound className="size-4" />
               <span>{authenticatedEmail ?? "No authenticated email"}</span>
             </div>
-            {isEmailMismatch ? (
-              <p className="auth-note">
-                You started sign-in for <strong>{props.intendedEmail}</strong>, but exe.dev
-                returned <strong>{authenticatedEmail}</strong>.
-              </p>
-            ) : null}
           </div>
         ) : null}
 
