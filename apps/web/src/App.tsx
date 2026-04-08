@@ -2,7 +2,8 @@ import {
   DndContext,
   DragOverlay,
   KeyboardSensor,
-  PointerSensor,
+  MouseSensor,
+  TouchSensor,
   closestCorners,
   useDroppable,
   useSensor,
@@ -100,6 +101,9 @@ type ViewName = "archive" | "board" | "recurring" | "settings";
 type SettingsPage = "general" | "household" | "labels";
 type TaskDetailControlId = "assignee" | "due" | "labels" | "status";
 const maxLabelNameLength = 16;
+const boardMouseDragDistancePx = 8;
+const boardTouchHoldDelayMs = 220;
+const boardTouchHoldTolerancePx = 10;
 
 const urlPattern = /https?:\/\/[^\s]+/gi;
 const labelPalette = [
@@ -1754,9 +1758,15 @@ function BoardView(props: {
   const edgeScrollLockRef = useRef<"left" | "right" | null>(null);
   const taskNodeMapRef = useRef(new Map<string, HTMLDivElement>());
   const sensors = useSensors(
-    useSensor(PointerSensor, {
+    useSensor(MouseSensor, {
       activationConstraint: {
-        distance: 8
+        distance: boardMouseDragDistancePx
+      }
+    }),
+    useSensor(TouchSensor, {
+      activationConstraint: {
+        delay: boardTouchHoldDelayMs,
+        tolerance: boardTouchHoldTolerancePx
       }
     }),
     useSensor(KeyboardSensor, {

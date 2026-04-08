@@ -710,7 +710,7 @@ a {
 }
 
 .task-sortable-shell {
-  touch-action: none;
+  touch-action: manipulation;
 }
 
 .task-drag-overlay {
