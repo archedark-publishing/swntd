@@ -3341,6 +3341,7 @@ function TaskForm(props: {
 }) {
   const checklistComposerInputRef = useRef<HTMLInputElement | null>(null);
   const checklistEditInputRef = useRef<HTMLInputElement | null>(null);
+  const isChecklistComposerSubmittingRef = useRef(false);
   const [isChecklistComposerOpen, setIsChecklistComposerOpen] = useState(false);
   const [checklistComposerValue, setChecklistComposerValue] = useState("");
   const [editingChecklistItemId, setEditingChecklistItemId] = useState<string | null>(null);
@@ -3375,10 +3376,29 @@ function TaskForm(props: {
       return;
     }
 
-    window.requestAnimationFrame(() => {
-      checklistComposerInputRef.current?.focus();
-    });
+    focusChecklistComposer();
   }, [isChecklistComposerOpen]);
+
+  function focusChecklistComposer() {
+    window.requestAnimationFrame(() => {
+      const input = checklistComposerInputRef.current;
+
+      if (!input) {
+        isChecklistComposerSubmittingRef.current = false;
+        return;
+      }
+
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+      isChecklistComposerSubmittingRef.current = false;
+    });
+  }
+
+  function dismissChecklistComposer() {
+    setChecklistComposerValue("");
+    setIsChecklistComposerOpen(false);
+    isChecklistComposerSubmittingRef.current = false;
+  }
 
   async function commitChecklistChange(update: (current: TaskDraft) => TaskDraft) {
     if (props.onCommitChecklistChange) {
@@ -3396,8 +3416,8 @@ function TaskForm(props: {
       return;
     }
 
+    isChecklistComposerSubmittingRef.current = true;
     setChecklistComposerValue("");
-    setIsChecklistComposerOpen(false);
     await commitChecklistChange((current) => ({
       ...current,
       checklistItems: [
@@ -3409,6 +3429,8 @@ function TaskForm(props: {
         }
       ]
     }));
+    setIsChecklistComposerOpen(true);
+    focusChecklistComposer();
   }
 
   function startChecklistEdit(item: ChecklistDraftItem) {
@@ -3526,6 +3548,7 @@ function TaskForm(props: {
                 onClick={() => {
                   cancelChecklistEdit();
                   setIsChecklistComposerOpen(true);
+                  focusChecklistComposer();
                 }}
                 size="icon"
                 type="button"
@@ -3611,22 +3634,29 @@ function TaskForm(props: {
                 </div>
               ))}
               {isChecklistComposerOpen ? (
-                <div className="checklist-row checklist-row-composer">
+                <form
+                  className="checklist-row checklist-row-composer"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void submitChecklistComposer();
+                  }}
+                >
                   <span aria-hidden="true" className="checklist-row-spacer" />
                   <FormInput
                     disabled={!props.canEdit}
-                    onChange={(event) => setChecklistComposerValue(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        void submitChecklistComposer();
+                    enterKeyHint="done"
+                    onBlur={() => {
+                      if (isChecklistComposerSubmittingRef.current) {
                         return;
                       }
 
+                      dismissChecklistComposer();
+                    }}
+                    onChange={(event) => setChecklistComposerValue(event.target.value)}
+                    onKeyDown={(event) => {
                       if (event.key === "Escape") {
                         event.preventDefault();
-                        setChecklistComposerValue("");
-                        setIsChecklistComposerOpen(false);
+                        dismissChecklistComposer();
                       }
                     }}
                     placeholder="What needs doing?"
@@ -3634,7 +3664,7 @@ function TaskForm(props: {
                     value={checklistComposerValue}
                   />
                   <span aria-hidden="true" className="checklist-row-spacer" />
-                </div>
+                </form>
               ) : null}
             </div>
           </div>
