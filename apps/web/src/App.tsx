@@ -2,7 +2,8 @@ import {
   DndContext,
   DragOverlay,
   KeyboardSensor,
-  PointerSensor,
+  MouseSensor,
+  TouchSensor,
   closestCorners,
   useDroppable,
   useSensor,
@@ -14,6 +15,7 @@ import {
 } from "@dnd-kit/core";
 import {
   SortableContext,
+  arrayMove,
   sortableKeyboardCoordinates,
   useSortable,
   verticalListSortingStrategy,
@@ -22,6 +24,7 @@ import { CSS } from "@dnd-kit/utilities";
 import {
   type CSSProperties,
   type ComponentType,
+  type ReactNode,
   startTransition,
   useDeferredValue,
   useEffect,
@@ -100,6 +103,9 @@ type ViewName = "archive" | "board" | "recurring" | "settings";
 type SettingsPage = "general" | "household" | "labels";
 type TaskDetailControlId = "assignee" | "due" | "labels" | "status";
 const maxLabelNameLength = 16;
+const dragMouseDistancePx = 8;
+const dragTouchHoldDelayMs = 220;
+const dragTouchHoldTolerancePx = 10;
 
 const urlPattern = /https?:\/\/[^\s]+/gi;
 const labelPalette = [
@@ -332,6 +338,13 @@ function buildTaskSavePayload(draft: TaskDraft) {
 
 function serializeTaskDraft(draft: TaskDraft) {
   return JSON.stringify(buildTaskSavePayload(draft));
+}
+
+function serializeTaskDraftForAutosave(draft: TaskDraft) {
+  return JSON.stringify({
+    ...buildTaskSavePayload(draft),
+    checklistItems: []
+  });
 }
 
 function createTemplateDraft(template?: RecurringTemplate | null): TemplateDraft {
@@ -1754,9 +1767,15 @@ function BoardView(props: {
   const edgeScrollLockRef = useRef<"left" | "right" | null>(null);
   const taskNodeMapRef = useRef(new Map<string, HTMLDivElement>());
   const sensors = useSensors(
-    useSensor(PointerSensor, {
+    useSensor(MouseSensor, {
       activationConstraint: {
-        distance: 8
+        distance: dragMouseDistancePx
+      }
+    }),
+    useSensor(TouchSensor, {
+      activationConstraint: {
+        delay: dragTouchHoldDelayMs,
+        tolerance: dragTouchHoldTolerancePx
       }
     }),
     useSensor(KeyboardSensor, {
@@ -2461,6 +2480,7 @@ function TaskSheet(props: {
   const [ignoredParsedLinks, setIgnoredParsedLinks] = useState<string[]>([]);
   const lastServerDraftKeyRef = useRef(serializeTaskDraft(createTaskDraft(null)));
   const currentTaskIdRef = useRef<string | null>(null);
+  const draftRef = useRef(draft);
   const activityFileInputRef = useRef<HTMLInputElement | null>(null);
   const titleInputRef = useRef<HTMLTextAreaElement | null>(null);
   const resizeTitleInput = useEffectEvent(() => {
@@ -2482,6 +2502,16 @@ function TaskSheet(props: {
 
     lastServerDraftKeyRef.current = serializeTaskDraft(createTaskDraft(savedTask));
   });
+
+  const commitChecklistChange = useEffectEvent(async (update: (current: TaskDraft) => TaskDraft) => {
+    const nextDraft = update(draftRef.current);
+    setDraft(nextDraft);
+    await submitAutosave(nextDraft);
+  });
+
+  useEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
 
   useEffect(() => {
     const nextDraft = createTaskDraft(props.variant === "detail" ? props.task : null);
@@ -2552,8 +2582,8 @@ function TaskSheet(props: {
       return;
     }
 
-    const serverDraftKey = serializeTaskDraft(createTaskDraft(props.task));
-    const currentDraftKey = serializeTaskDraft(draft);
+    const serverDraftKey = serializeTaskDraftForAutosave(createTaskDraft(props.task));
+    const currentDraftKey = serializeTaskDraftForAutosave(draft);
 
     if (currentDraftKey === serverDraftKey || !draft.title.trim()) {
       return;
@@ -2677,6 +2707,9 @@ function TaskSheet(props: {
             canEdit={!props.isSavingDisabled}
             draft={draft}
             onChange={setDraft}
+            {...(props.variant === "detail"
+              ? { onCommitChecklistChange: commitChecklistChange }
+              : {})}
             onSubmit={() => {
               void props.onSave(draft);
             }}
@@ -3297,7 +3330,10 @@ function TaskForm(props: {
   aiAssistanceToggleLabel: string;
   canEdit: boolean;
   draft: TaskDraft;
-  onChange: (draft: TaskDraft) => void;
+  onChange: (draft: TaskDraft | ((current: TaskDraft) => TaskDraft)) => void;
+  onCommitChecklistChange?: (
+    update: (current: TaskDraft) => TaskDraft
+  ) => Promise<void>;
   onSubmit: () => void;
   showSubmitButton: boolean;
   showTitleField: boolean;
@@ -3305,25 +3341,165 @@ function TaskForm(props: {
   users: UserRef[];
   variant: "create" | "detail";
 }) {
-  const checklistInputMapRef = useRef(new Map<string, HTMLInputElement>());
-  const pendingChecklistFocusIdRef = useRef<string | null>(null);
+  const checklistComposerInputRef = useRef<HTMLInputElement | null>(null);
+  const checklistEditInputRef = useRef<HTMLInputElement | null>(null);
+  const isChecklistComposerSubmittingRef = useRef(false);
+  const suppressChecklistItemClickUntilRef = useRef(0);
+  const [isChecklistComposerOpen, setIsChecklistComposerOpen] = useState(false);
+  const [activeChecklistItemId, setActiveChecklistItemId] = useState<string | null>(null);
+  const [checklistComposerValue, setChecklistComposerValue] = useState("");
+  const [editingChecklistItemId, setEditingChecklistItemId] = useState<string | null>(null);
+  const [editingChecklistValue, setEditingChecklistValue] = useState("");
+  const checklistSensors = useSensors(
+    useSensor(MouseSensor, {
+      activationConstraint: {
+        distance: dragMouseDistancePx
+      }
+    }),
+    useSensor(TouchSensor, {
+      activationConstraint: {
+        delay: dragTouchHoldDelayMs,
+        tolerance: dragTouchHoldTolerancePx
+      }
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates
+    })
+  );
 
   useEffect(() => {
-    const pendingId = pendingChecklistFocusIdRef.current;
-
-    if (!pendingId) {
+    if (!editingChecklistItemId) {
       return;
     }
 
-    const input = checklistInputMapRef.current.get(pendingId);
+    const activeItem = props.draft.checklistItems.find(
+      (item) => item.clientId === editingChecklistItemId
+    );
 
-    if (!input) {
+    if (!activeItem) {
+      setEditingChecklistItemId(null);
+      setEditingChecklistValue("");
+    }
+  }, [editingChecklistItemId, props.draft.checklistItems]);
+
+  useEffect(() => {
+    if (!editingChecklistItemId || !checklistEditInputRef.current) {
       return;
     }
 
-    input.focus();
-    pendingChecklistFocusIdRef.current = null;
-  }, [props.draft.checklistItems]);
+    checklistEditInputRef.current.focus();
+    checklistEditInputRef.current.select();
+  }, [editingChecklistItemId]);
+
+  useEffect(() => {
+    if (!isChecklistComposerOpen) {
+      return;
+    }
+
+    focusChecklistComposer();
+  }, [isChecklistComposerOpen]);
+
+  function focusChecklistComposer() {
+    window.requestAnimationFrame(() => {
+      const input = checklistComposerInputRef.current;
+
+      if (!input) {
+        isChecklistComposerSubmittingRef.current = false;
+        return;
+      }
+
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+      isChecklistComposerSubmittingRef.current = false;
+    });
+  }
+
+  function dismissChecklistComposer() {
+    setChecklistComposerValue("");
+    setIsChecklistComposerOpen(false);
+    isChecklistComposerSubmittingRef.current = false;
+  }
+
+  async function reorderChecklistItems(activeId: string, overId: string) {
+    await commitChecklistChange((current) => {
+      const activeIndex = current.checklistItems.findIndex((item) => item.clientId === activeId);
+      const overIndex = current.checklistItems.findIndex((item) => item.clientId === overId);
+
+      if (activeIndex < 0 || overIndex < 0 || activeIndex === overIndex) {
+        return current;
+      }
+
+      return {
+        ...current,
+        checklistItems: arrayMove(current.checklistItems, activeIndex, overIndex)
+      };
+    });
+  }
+
+  async function commitChecklistChange(update: (current: TaskDraft) => TaskDraft) {
+    if (props.onCommitChecklistChange) {
+      await props.onCommitChecklistChange(update);
+      return;
+    }
+
+    props.onChange(update);
+  }
+
+  async function submitChecklistComposer() {
+    const body = checklistComposerValue.trim();
+
+    if (!body || !props.canEdit) {
+      return;
+    }
+
+    isChecklistComposerSubmittingRef.current = true;
+    setChecklistComposerValue("");
+    await commitChecklistChange((current) => ({
+      ...current,
+      checklistItems: [
+        ...current.checklistItems,
+        {
+          body,
+          clientId: crypto.randomUUID(),
+          isCompleted: false
+        }
+      ]
+    }));
+    setIsChecklistComposerOpen(true);
+    focusChecklistComposer();
+  }
+
+  function startChecklistEdit(item: ChecklistDraftItem) {
+    if (!props.canEdit) {
+      return;
+    }
+
+    setEditingChecklistItemId(item.clientId);
+    setEditingChecklistValue(item.body);
+  }
+
+  function cancelChecklistEdit() {
+    setEditingChecklistItemId(null);
+    setEditingChecklistValue("");
+  }
+
+  async function submitChecklistEdit(item: ChecklistDraftItem) {
+    const body = editingChecklistValue.trim();
+
+    if (!body || !props.canEdit) {
+      return;
+    }
+
+    await commitChecklistChange((current) => ({
+      ...current,
+      checklistItems: current.checklistItems.map((entry) =>
+        entry.clientId === item.clientId
+          ? { ...entry, body }
+          : entry
+      )
+    }));
+    cancelChecklistEdit();
+  }
 
   return (
     <section className="sheet-section">
@@ -3406,20 +3582,9 @@ function TaskForm(props: {
                 className="checklist-add-button"
                 disabled={!props.canEdit}
                 onClick={() => {
-                  const clientId = crypto.randomUUID();
-                  pendingChecklistFocusIdRef.current = clientId;
-
-                  props.onChange({
-                    ...props.draft,
-                    checklistItems: [
-                      ...props.draft.checklistItems,
-                      {
-                        body: "",
-                        clientId,
-                        isCompleted: false
-                      }
-                    ]
-                  });
+                  cancelChecklistEdit();
+                  setIsChecklistComposerOpen(true);
+                  focusChecklistComposer();
                 }}
                 size="icon"
                 type="button"
@@ -3430,64 +3595,158 @@ function TaskForm(props: {
               </Button>
             </div>
             <div className="checklist-editor">
-              {props.draft.checklistItems.map((item, index) => (
-                <div className="checklist-row" key={item.clientId}>
-                  <Checkbox
-                    checked={item.isCompleted}
-                    disabled={!props.canEdit}
-                    onCheckedChange={(checked) =>
-                      props.onChange({
-                        ...props.draft,
-                        checklistItems: props.draft.checklistItems.map((entry, entryIndex) =>
-                          entryIndex === index
-                            ? { ...entry, isCompleted: checked === true }
-                            : entry
-                        )
-                      })
-                    }
-                  />
+              <DndContext
+                collisionDetection={closestCorners}
+                onDragCancel={() => {
+                  setActiveChecklistItemId(null);
+                  suppressChecklistItemClickUntilRef.current = Date.now() + 250;
+                }}
+                onDragEnd={(event) => {
+                  const activeId = String(event.active.id);
+                  const overId = event.over ? String(event.over.id) : null;
+
+                  setActiveChecklistItemId(null);
+                  suppressChecklistItemClickUntilRef.current = Date.now() + 250;
+
+                  if (!overId || activeId === overId) {
+                    return;
+                  }
+
+                  void reorderChecklistItems(activeId, overId);
+                }}
+                onDragStart={(event) => {
+                  setActiveChecklistItemId(String(event.active.id));
+                  cancelChecklistEdit();
+                  dismissChecklistComposer();
+                }}
+                sensors={checklistSensors}
+              >
+                <SortableContext
+                  items={props.draft.checklistItems.map((item) => item.clientId)}
+                  strategy={verticalListSortingStrategy}
+                >
+                  {props.draft.checklistItems.map((item) => (
+                    <SortableChecklistRow
+                      disabled={!props.canEdit || editingChecklistItemId === item.clientId}
+                      isDragging={activeChecklistItemId === item.clientId}
+                      itemId={item.clientId}
+                      key={item.clientId}
+                    >
+                      <div className="checklist-row">
+                        <Checkbox
+                          checked={item.isCompleted}
+                          disabled={!props.canEdit}
+                          onCheckedChange={(checked) => {
+                            void commitChecklistChange((current) => ({
+                              ...current,
+                              checklistItems: current.checklistItems.map((entry) =>
+                                entry.clientId === item.clientId
+                                  ? { ...entry, isCompleted: checked === true }
+                                  : entry
+                              )
+                            }));
+                          }}
+                        />
+                        {editingChecklistItemId === item.clientId ? (
+                          <FormInput
+                            disabled={!props.canEdit}
+                            onBlur={cancelChecklistEdit}
+                            onChange={(event) => setEditingChecklistValue(event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.preventDefault();
+                                void submitChecklistEdit(item);
+                                return;
+                              }
+
+                              if (event.key === "Escape") {
+                                event.preventDefault();
+                                cancelChecklistEdit();
+                              }
+                            }}
+                            placeholder="Subtask description"
+                            ref={checklistEditInputRef}
+                            value={editingChecklistValue}
+                          />
+                        ) : (
+                          <button
+                            className={cn(
+                              "checklist-item-button",
+                              item.isCompleted && "checklist-item-button-complete"
+                            )}
+                            disabled={!props.canEdit}
+                            onClick={() => {
+                              if (Date.now() < suppressChecklistItemClickUntilRef.current) {
+                                return;
+                              }
+
+                              startChecklistEdit(item);
+                            }}
+                            type="button"
+                          >
+                            <span className="checklist-item-body">{item.body}</span>
+                          </button>
+                        )}
+                        <Button
+                          className="checklist-remove-button"
+                          disabled={!props.canEdit}
+                          onClick={() => {
+                            if (editingChecklistItemId === item.clientId) {
+                              cancelChecklistEdit();
+                            }
+
+                            void commitChecklistChange((current) => ({
+                              ...current,
+                              checklistItems: current.checklistItems.filter(
+                                (entry) => entry.clientId !== item.clientId
+                              )
+                            }));
+                          }}
+                          size="icon"
+                          type="button"
+                          variant="ghost"
+                        >
+                          <Trash2 className="size-4" />
+                          <span className="sr-only">Remove checklist item</span>
+                        </Button>
+                      </div>
+                    </SortableChecklistRow>
+                  ))}
+                </SortableContext>
+              </DndContext>
+              {isChecklistComposerOpen ? (
+                <form
+                  className="checklist-row checklist-row-composer"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void submitChecklistComposer();
+                  }}
+                >
+                  <span aria-hidden="true" className="checklist-row-spacer" />
                   <FormInput
                     disabled={!props.canEdit}
-                    onChange={(event) =>
-                      props.onChange({
-                        ...props.draft,
-                        checklistItems: props.draft.checklistItems.map((entry, entryIndex) =>
-                          entryIndex === index
-                            ? { ...entry, body: event.target.value }
-                            : entry
-                        )
-                      })
-                    }
-                    placeholder="Subtask description"
-                    ref={(node) => {
-                      if (node) {
-                        checklistInputMapRef.current.set(item.clientId, node);
-                      } else {
-                        checklistInputMapRef.current.delete(item.clientId);
+                    enterKeyHint="done"
+                    onBlur={() => {
+                      if (isChecklistComposerSubmittingRef.current) {
+                        return;
+                      }
+
+                      dismissChecklistComposer();
+                    }}
+                    onChange={(event) => setChecklistComposerValue(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") {
+                        event.preventDefault();
+                        dismissChecklistComposer();
                       }
                     }}
-                    value={item.body}
+                    placeholder="What needs doing?"
+                    ref={checklistComposerInputRef}
+                    value={checklistComposerValue}
                   />
-                  <Button
-                    className="checklist-remove-button"
-                    disabled={!props.canEdit}
-                    onClick={() =>
-                      props.onChange({
-                        ...props.draft,
-                        checklistItems: props.draft.checklistItems.filter(
-                          (_, entryIndex) => entryIndex !== index
-                        )
-                      })
-                    }
-                    size="icon"
-                    type="button"
-                    variant="ghost"
-                  >
-                    <Trash2 className="size-4" />
-                    <span className="sr-only">Remove checklist item</span>
-                  </Button>
-                </div>
-              ))}
+                  <span aria-hidden="true" className="checklist-row-spacer" />
+                </form>
+              ) : null}
             </div>
           </div>
 
@@ -3506,6 +3765,37 @@ function TaskForm(props: {
         </div>
       ) : null}
     </section>
+  );
+}
+
+function SortableChecklistRow(props: {
+  children: ReactNode;
+  disabled: boolean;
+  isDragging: boolean;
+  itemId: string;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({
+    disabled: props.disabled,
+    id: props.itemId
+  });
+
+  return (
+    <div
+      className={cn(
+        "checklist-sortable-shell",
+        !props.disabled && "checklist-sortable-shell-enabled",
+        props.isDragging && "checklist-sortable-shell-dragging"
+      )}
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition
+      }}
+      {...attributes}
+      {...listeners}
+    >
+      {props.children}
+    </div>
   );
 }
 
