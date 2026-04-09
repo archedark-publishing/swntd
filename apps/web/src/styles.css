@@ -1496,6 +1496,19 @@ a {
   min-height: 2.9rem;
 }
 
+.checklist-sortable-shell {
+  touch-action: manipulation;
+}
+
+.checklist-sortable-shell-enabled {
+  cursor: grab;
+}
+
+.checklist-sortable-shell-dragging {
+  cursor: grabbing;
+  opacity: 0.92;
+}
+
 .checklist-row + .checklist-row {
   margin-top: 0.05rem;
 }
@@ -1520,6 +1533,7 @@ a {
   border-radius: 0.9rem;
   border: 1px solid rgb(86 58 30 / 0.12);
   background: rgb(255 255 255 / 0.5);
+  cursor: inherit;
   text-align: left;
   transition:
     border-color 180ms ease,
