@@ -268,7 +268,7 @@ describe("Phase 6 MCP server", () => {
     15_000
   );
 
-  it("fails cleanly when assignment or AI assistance eligibility changes", async () => {
+  it("fails cleanly when a task is no longer assigned and not open to AI assistance", async () => {
     const { client: databaseClient, db } = await createDatabase();
 
     try {
@@ -292,7 +292,7 @@ describe("Phase 6 MCP server", () => {
       });
       expect(initialList.total).toBe(1);
 
-      await updateTask(db, adminActor, createdTask.item.id, {
+      const disabledButAssignedTask = await updateTask(db, adminActor, createdTask.item.id, {
         aiAssistanceEnabled: false,
         assigneeUserId: assistantId,
         expectedRevision: createdTask.item.revision,
@@ -302,34 +302,45 @@ describe("Phase 6 MCP server", () => {
       const listAfterDisable = await callTool("list_my_tasks", {});
       expect(listAfterDisable.isError).toBeFalsy();
       expect(listAfterDisable.structuredContent).toMatchObject({
+        items: [
+          {
+            id: createdTask.item.id
+          }
+        ],
+        total: 1
+      });
+
+      const stillVisibleTask = await callTool("get_task", {
+        taskId: createdTask.item.id
+      });
+      expect(stillVisibleTask.isError).toBeFalsy();
+      expect(stillVisibleTask.structuredContent).toMatchObject({
+        item: {
+          id: createdTask.item.id
+        }
+      });
+
+      await updateTask(db, adminActor, createdTask.item.id, {
+        aiAssistanceEnabled: false,
+        assigneeUserId: null,
+        expectedRevision: disabledButAssignedTask.item.revision,
+        title: "Ephemeral assistant task"
+      });
+
+      const listAfterRemoval = await callTool("list_my_tasks", {});
+      expect(listAfterRemoval.isError).toBeFalsy();
+      expect(listAfterRemoval.structuredContent).toMatchObject({
         items: [],
         total: 0
       });
 
       const deniedTransition = await callTool("transition_task_status", {
-        expectedRevision: 1,
+        expectedRevision: disabledButAssignedTask.item.revision + 1,
         status: "In Progress",
         taskId: createdTask.item.id
       });
       expect(deniedTransition.isError).toBe(true);
       expect(firstText(deniedTransition)).toContain("do not have access");
-
-      await updateTask(db, adminActor, createdTask.item.id, {
-        aiAssistanceEnabled: true,
-        assigneeUserId: null,
-        expectedRevision: 1,
-        title: "Ephemeral assistant task"
-      });
-
-      const visibleTask = await callTool("get_task", {
-        taskId: createdTask.item.id
-      });
-      expect(visibleTask.isError).toBeFalsy();
-      expect(visibleTask.structuredContent).toMatchObject({
-        item: {
-          id: createdTask.item.id
-        }
-      });
     } finally {
       databaseClient.close();
     }
