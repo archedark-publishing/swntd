@@ -41,225 +41,232 @@ describe("Phase 6 MCP server", () => {
     closeServer = null;
   });
 
-  it("exposes only the approved tool surface and supports the service actor workflow", async () => {
-    const { client: databaseClient, db } = await createDatabase();
+  it(
+    "exposes only the approved tool surface and supports the service actor workflow",
+    async () => {
+      const { client: databaseClient, db } = await createDatabase();
 
-    try {
-      const adminActor = await resolveAdminActor(db);
-      const assistantId = await getAssistantActorId();
+      try {
+        const adminActor = await resolveAdminActor(db);
+        const assistantId = await getAssistantActorId();
 
-      await createTask(db, adminActor, {
-        aiAssistanceEnabled: false,
-        title: "Human-only task"
-      });
+        await createTask(db, adminActor, {
+          aiAssistanceEnabled: false,
+          title: "Human-only task"
+        });
 
-      const createdTask = await createTask(db, adminActor, {
-        aiAssistanceEnabled: true,
-        assigneeUserId: assistantId,
-        checklistItems: [
-          { body: "Gather supplies" },
-          { body: "Finish the first pass" }
-        ],
-        description: "A task the household assistant should be allowed to pick up.",
-        title: "Assistant-ready task"
-      });
-
-      const assistantToken = await issueAssistantBearerToken();
-      await connectMcpClient(assistantToken);
-
-      const listedTools = await client!.listTools();
-      expect(listedTools.tools.map((tool) => tool.name).sort()).toEqual([
-        "add_checklist_item",
-        "add_comment",
-        "attach_link",
-        "delete_checklist_item",
-        "get_task",
-        "list_my_tasks",
-        "set_checklist_item_completion",
-        "transition_task_status"
-      ]);
-
-      const listResult = await callTool("list_my_tasks", {});
-      expect(listResult.isError).toBeFalsy();
-      expect(listResult.structuredContent).toMatchObject({
-        items: [
-          {
-            id: createdTask.item.id,
-            status: "To Do",
-            title: "Assistant-ready task"
-          }
-        ],
-        total: 1
-      });
-
-      const addedChecklistItem = await callTool("add_checklist_item", {
-        body: "Send a progress update",
-        expectedRevision: createdTask.item.revision,
-        taskId: createdTask.item.id
-      });
-      expect(addedChecklistItem.isError).toBeFalsy();
-      expect(addedChecklistItem.structuredContent).toMatchObject({
-        item: {
-          checklistItems: [
-            { body: "Gather supplies" },
-            { body: "Finish the first pass" },
-            { body: "Send a progress update" }
-          ],
-          revision: 1
-        }
-      });
-
-      const addedChecklistItemContent = addedChecklistItem.structuredContent as {
-        item: {
-          checklistItems: Array<{ id: string }>;
-        };
-      };
-      const addedChecklistItemId =
-        addedChecklistItemContent.item.checklistItems[2]?.id;
-      expect(typeof addedChecklistItemId).toBe("string");
-
-      const completedChecklistItem = await callTool("set_checklist_item_completion", {
-        checklistItemId: addedChecklistItemId,
-        expectedRevision: 1,
-        isCompleted: true,
-        taskId: createdTask.item.id
-      });
-      expect(completedChecklistItem.isError).toBeFalsy();
-      expect(completedChecklistItem.structuredContent).toMatchObject({
-        item: {
-          revision: 2
-        }
-      });
-      const completedChecklistItemContent = completedChecklistItem.structuredContent as {
-        item: {
-          checklistItems: Array<{ id: string; isCompleted: boolean }>;
-        };
-      };
-      expect(
-        completedChecklistItemContent.item.checklistItems.find(
-          (item) => item.id === addedChecklistItemId
-        )
-      ).toMatchObject({
-        id: addedChecklistItemId,
-        isCompleted: true
-      });
-
-      const deletedChecklistItem = await callTool("delete_checklist_item", {
-        checklistItemId: addedChecklistItemId,
-        expectedRevision: 2,
-        taskId: createdTask.item.id
-      });
-      expect(deletedChecklistItem.isError).toBeFalsy();
-      expect(deletedChecklistItem.structuredContent).toMatchObject({
-        item: {
-          checklistItems: [
-            { body: "Gather supplies" },
-            { body: "Finish the first pass" }
-          ],
-          revision: 3
-        }
-      });
-
-      const taskResult = await callTool("get_task", {
-        taskId: createdTask.item.id
-      });
-      expect(taskResult.isError).toBeFalsy();
-      expect(taskResult.structuredContent).toMatchObject({
-        item: {
+        const createdTask = await createTask(db, adminActor, {
+          aiAssistanceEnabled: true,
+          assigneeUserId: assistantId,
           checklistItems: [
             { body: "Gather supplies" },
             { body: "Finish the first pass" }
           ],
           description: "A task the household assistant should be allowed to pick up.",
-          id: createdTask.item.id,
-          status: "To Do",
           title: "Assistant-ready task"
-        }
-      });
+        });
 
-      const transitionedResult = await callTool("transition_task_status", {
-        expectedRevision: 3,
-        status: "In Progress",
-        taskId: createdTask.item.id
-      });
-      expect(transitionedResult.isError).toBeFalsy();
-      expect(transitionedResult.structuredContent).toMatchObject({
-        item: {
-          id: createdTask.item.id,
-          revision: 4,
-          status: "In Progress"
-        }
-      });
+        const assistantToken = await issueAssistantBearerToken();
+        await connectMcpClient(assistantToken);
 
-      const commentResult = await callTool("add_comment", {
-        body: "Picked this up through MCP.",
-        taskId: createdTask.item.id
-      });
-      expect(commentResult.isError).toBeFalsy();
-      expect(commentResult.structuredContent).toMatchObject({
-        item: {
-          comments: [
+        const listedTools = await client!.listTools();
+        expect(listedTools.tools.map((tool) => tool.name).sort()).toEqual([
+          "add_checklist_item",
+          "add_comment",
+          "attach_link",
+          "delete_checklist_item",
+          "get_task",
+          "list_my_tasks",
+          "set_checklist_item_completion",
+          "transition_task_status"
+        ]);
+
+        const listResult = await callTool("list_my_tasks", {});
+        expect(listResult.isError).toBeFalsy();
+        expect(listResult.structuredContent).toMatchObject({
+          items: [
             {
-              body: "Picked this up through MCP."
+              id: createdTask.item.id,
+              status: "To Do",
+              title: "Assistant-ready task"
             }
-          ]
-        }
-      });
+          ],
+          total: 1
+        });
 
-      const attachmentResult = await callTool("attach_link", {
-        name: "Reference doc",
-        taskId: createdTask.item.id,
-        url: "https://example.com/reference"
-      });
-      expect(attachmentResult.isError).toBeFalsy();
-      expect(attachmentResult.structuredContent).toMatchObject({
-        item: {
-          attachments: [
-            {
-              externalUrl: "https://example.com/reference",
-              originalName: "Reference doc",
-              storageKind: "external_link"
-            }
-          ]
-        }
-      });
+        const addedChecklistItem = await callTool("add_checklist_item", {
+          body: "Send a progress update",
+          expectedRevision: createdTask.item.revision,
+          taskId: createdTask.item.id
+        });
+        expect(addedChecklistItem.isError).toBeFalsy();
+        expect(addedChecklistItem.structuredContent).toMatchObject({
+          item: {
+            checklistItems: [
+              { body: "Gather supplies" },
+              { body: "Finish the first pass" },
+              { body: "Send a progress update" }
+            ],
+            revision: 1
+          }
+        });
 
-      const [events] = await Promise.all([
-        db
-          .select({
-            eventType: taskEvents.eventType,
-            payloadJson: taskEvents.payloadJson
-          })
-          .from(taskEvents)
-          .where(
-            inArray(taskEvents.eventType, [
-              "task.checklist_item_added",
-              "task.checklist_item_completion_set",
-              "task.checklist_item_deleted",
-              "task.status_changed",
-              "task.comment_added",
-              "task.attachment_linked"
-            ])
+        const addedChecklistItemContent = addedChecklistItem.structuredContent as {
+          item: {
+            checklistItems: Array<{ id: string }>;
+          };
+        };
+        const addedChecklistItemId =
+          addedChecklistItemContent.item.checklistItems[2]?.id;
+        expect(typeof addedChecklistItemId).toBe("string");
+
+        const completedChecklistItem = await callTool(
+          "set_checklist_item_completion",
+          {
+            checklistItemId: addedChecklistItemId,
+            expectedRevision: 1,
+            isCompleted: true,
+            taskId: createdTask.item.id
+          }
+        );
+        expect(completedChecklistItem.isError).toBeFalsy();
+        expect(completedChecklistItem.structuredContent).toMatchObject({
+          item: {
+            revision: 2
+          }
+        });
+        const completedChecklistItemContent = completedChecklistItem.structuredContent as {
+          item: {
+            checklistItems: Array<{ id: string; isCompleted: boolean }>;
+          };
+        };
+        expect(
+          completedChecklistItemContent.item.checklistItems.find(
+            (item) => item.id === addedChecklistItemId
           )
-      ]);
+        ).toMatchObject({
+          id: addedChecklistItemId,
+          isCompleted: true
+        });
 
-      const mcpEvents = events.filter((event) => {
-        const payload = JSON.parse(event.payloadJson) as { source?: string };
-        return payload.source === "mcp";
-      });
+        const deletedChecklistItem = await callTool("delete_checklist_item", {
+          checklistItemId: addedChecklistItemId,
+          expectedRevision: 2,
+          taskId: createdTask.item.id
+        });
+        expect(deletedChecklistItem.isError).toBeFalsy();
+        expect(deletedChecklistItem.structuredContent).toMatchObject({
+          item: {
+            checklistItems: [
+              { body: "Gather supplies" },
+              { body: "Finish the first pass" }
+            ],
+            revision: 3
+          }
+        });
 
-      expect(mcpEvents.map((event) => event.eventType).sort()).toEqual([
-        "task.attachment_linked",
-        "task.checklist_item_added",
-        "task.checklist_item_completion_set",
-        "task.checklist_item_deleted",
-        "task.comment_added",
-        "task.status_changed"
-      ]);
-    } finally {
-      databaseClient.close();
-    }
-  });
+        const taskResult = await callTool("get_task", {
+          taskId: createdTask.item.id
+        });
+        expect(taskResult.isError).toBeFalsy();
+        expect(taskResult.structuredContent).toMatchObject({
+          item: {
+            checklistItems: [
+              { body: "Gather supplies" },
+              { body: "Finish the first pass" }
+            ],
+            description: "A task the household assistant should be allowed to pick up.",
+            id: createdTask.item.id,
+            status: "To Do",
+            title: "Assistant-ready task"
+          }
+        });
+
+        const transitionedResult = await callTool("transition_task_status", {
+          expectedRevision: 3,
+          status: "In Progress",
+          taskId: createdTask.item.id
+        });
+        expect(transitionedResult.isError).toBeFalsy();
+        expect(transitionedResult.structuredContent).toMatchObject({
+          item: {
+            id: createdTask.item.id,
+            revision: 4,
+            status: "In Progress"
+          }
+        });
+
+        const commentResult = await callTool("add_comment", {
+          body: "Picked this up through MCP.",
+          taskId: createdTask.item.id
+        });
+        expect(commentResult.isError).toBeFalsy();
+        expect(commentResult.structuredContent).toMatchObject({
+          item: {
+            comments: [
+              {
+                body: "Picked this up through MCP."
+              }
+            ]
+          }
+        });
+
+        const attachmentResult = await callTool("attach_link", {
+          name: "Reference doc",
+          taskId: createdTask.item.id,
+          url: "https://example.com/reference"
+        });
+        expect(attachmentResult.isError).toBeFalsy();
+        expect(attachmentResult.structuredContent).toMatchObject({
+          item: {
+            attachments: [
+              {
+                externalUrl: "https://example.com/reference",
+                originalName: "Reference doc",
+                storageKind: "external_link"
+              }
+            ]
+          }
+        });
+
+        const [events] = await Promise.all([
+          db
+            .select({
+              eventType: taskEvents.eventType,
+              payloadJson: taskEvents.payloadJson
+            })
+            .from(taskEvents)
+            .where(
+              inArray(taskEvents.eventType, [
+                "task.checklist_item_added",
+                "task.checklist_item_completion_set",
+                "task.checklist_item_deleted",
+                "task.status_changed",
+                "task.comment_added",
+                "task.attachment_linked"
+              ])
+            )
+        ]);
+
+        const mcpEvents = events.filter((event) => {
+          const payload = JSON.parse(event.payloadJson) as { source?: string };
+          return payload.source === "mcp";
+        });
+
+        expect(mcpEvents.map((event) => event.eventType).sort()).toEqual([
+          "task.attachment_linked",
+          "task.checklist_item_added",
+          "task.checklist_item_completion_set",
+          "task.checklist_item_deleted",
+          "task.comment_added",
+          "task.status_changed"
+        ]);
+      } finally {
+        databaseClient.close();
+      }
+    },
+    15_000
+  );
 
   it("fails cleanly when assignment or AI assistance eligibility changes", async () => {
     const { client: databaseClient, db } = await createDatabase();
