@@ -18,14 +18,19 @@ import {
 } from "./fixtures";
 
 describe("task domain rules", () => {
-  it("allows service actors to mutate only assigned AI-enabled tasks", () => {
+  it("allows service actors to mutate AI-enabled tasks that are open to assistant help", () => {
     const task = createTaskFixture({
-      assigneeUserId: "service-1",
+      assigneeUserId: null,
       aiAssistanceEnabled: true
     });
 
     expect(canServiceActorMutateTask({ actorId: "service-1", task })).toBe(true);
-    expect(canServiceActorMutateTask({ actorId: "service-2", task })).toBe(
+
+    const ineligibleTask = createTaskFixture({
+      assigneeUserId: "service-2",
+      aiAssistanceEnabled: false
+    });
+    expect(canServiceActorMutateTask({ actorId: "service-1", task: ineligibleTask })).toBe(
       false
     );
   });

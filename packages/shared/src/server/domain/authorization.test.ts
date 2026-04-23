@@ -46,9 +46,9 @@ describe("authorization policies", () => {
     expect(canDownloadAttachment(adminActor, task)).toBe(true);
   });
 
-  it("limits service actors to eligible assigned tasks", () => {
+  it("limits service actors to eligible AI-enabled tasks", () => {
     const eligibleTask = createTaskFixture({
-      assigneeUserId: "service-1",
+      assigneeUserId: null,
       aiAssistanceEnabled: true
     });
     const ineligibleTask = createTaskFixture({

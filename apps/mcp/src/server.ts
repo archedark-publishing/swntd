@@ -8,9 +8,12 @@ import type {
 } from "../../api/src/services/api";
 import {
   addAttachmentLinkToTask,
+  addChecklistItemToTask,
   addCommentToTask,
+  deleteChecklistItemFromTask,
   getTaskDetail,
   listTasks,
+  setChecklistItemCompletion,
   transitionTask,
   type TaskEventSource
 } from "../../api/src/services/api";
@@ -109,7 +112,8 @@ export async function createSwntdMcpServer(
       annotations: {
         readOnlyHint: true
       },
-      description: "List open SWNTD tasks currently assigned to the authenticated service actor.",
+      description:
+        "List open SWNTD tasks the authenticated service actor is allowed to help with.",
       inputSchema: {
         limit: z.number().int().positive().max(100).optional(),
         query: z.string().trim().min(1).max(200).optional(),
@@ -145,7 +149,7 @@ export async function createSwntdMcpServer(
       annotations: {
         readOnlyHint: true
       },
-      description: "Get the full details for an assigned SWNTD task.",
+      description: "Get the full details for an assistant-visible SWNTD task.",
       inputSchema: {
         taskId: z.string().trim().min(1)
       },
@@ -168,7 +172,7 @@ export async function createSwntdMcpServer(
     "transition_task_status",
     {
       description:
-        "Move an assigned SWNTD task between To Do, In Progress, Waiting, and Done.",
+        "Move an assistant-visible SWNTD task between To Do, In Progress, Waiting, and Done.",
       inputSchema: {
         expectedRevision: z.number().int().nonnegative(),
         status: taskStatusSchema,
@@ -203,7 +207,7 @@ export async function createSwntdMcpServer(
   server.registerTool(
     "add_comment",
     {
-      description: "Add a comment to an assigned SWNTD task.",
+      description: "Add a comment to an assistant-visible SWNTD task.",
       inputSchema: {
         body: z.string().trim().min(1).max(4000),
         taskId: z.string().trim().min(1)
@@ -236,7 +240,7 @@ export async function createSwntdMcpServer(
   server.registerTool(
     "attach_link",
     {
-      description: "Attach an external link to an assigned SWNTD task.",
+      description: "Attach an external link to an assistant-visible SWNTD task.",
       inputSchema: {
         name: z.string().trim().min(1).max(200),
         taskId: z.string().trim().min(1),
@@ -264,6 +268,114 @@ export async function createSwntdMcpServer(
             item: mapTaskDetail(result.item)
           },
           "Attached link."
+        );
+      })
+  );
+
+  server.registerTool(
+    "add_checklist_item",
+    {
+      description: "Add a checklist item to an assistant-visible SWNTD task.",
+      inputSchema: {
+        body: z.string().trim().min(1).max(1000),
+        expectedRevision: z.number().int().nonnegative(),
+        taskId: z.string().trim().min(1)
+      },
+      outputSchema: taskMutationOutputSchema
+    },
+    async (input) =>
+      withActor(database.db, config, async (actor) => {
+        const result = await addChecklistItemToTask(
+          database.db,
+          actor,
+          input.taskId,
+          {
+            body: input.body,
+            expectedRevision: input.expectedRevision
+          },
+          {
+            eventSource: "mcp"
+          }
+        );
+
+        return okResult(
+          {
+            item: mapTaskDetail(result.item)
+          },
+          "Added checklist item."
+        );
+      })
+  );
+
+  server.registerTool(
+    "set_checklist_item_completion",
+    {
+      description:
+        "Mark a checklist item complete or incomplete on an assistant-visible SWNTD task.",
+      inputSchema: {
+        checklistItemId: z.string().trim().min(1),
+        expectedRevision: z.number().int().nonnegative(),
+        isCompleted: z.boolean(),
+        taskId: z.string().trim().min(1)
+      },
+      outputSchema: taskMutationOutputSchema
+    },
+    async (input) =>
+      withActor(database.db, config, async (actor) => {
+        const result = await setChecklistItemCompletion(
+          database.db,
+          actor,
+          input.taskId,
+          input.checklistItemId,
+          {
+            expectedRevision: input.expectedRevision,
+            isCompleted: input.isCompleted
+          },
+          {
+            eventSource: "mcp"
+          }
+        );
+
+        return okResult(
+          {
+            item: mapTaskDetail(result.item)
+          },
+          "Updated checklist item."
+        );
+      })
+  );
+
+  server.registerTool(
+    "delete_checklist_item",
+    {
+      description: "Delete a checklist item from an assistant-visible SWNTD task.",
+      inputSchema: {
+        checklistItemId: z.string().trim().min(1),
+        expectedRevision: z.number().int().nonnegative(),
+        taskId: z.string().trim().min(1)
+      },
+      outputSchema: taskMutationOutputSchema
+    },
+    async (input) =>
+      withActor(database.db, config, async (actor) => {
+        const result = await deleteChecklistItemFromTask(
+          database.db,
+          actor,
+          input.taskId,
+          input.checklistItemId,
+          {
+            expectedRevision: input.expectedRevision
+          },
+          {
+            eventSource: "mcp"
+          }
+        );
+
+        return okResult(
+          {
+            item: mapTaskDetail(result.item)
+          },
+          "Deleted checklist item."
         );
       })
   );

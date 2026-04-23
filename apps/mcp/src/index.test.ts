@@ -69,10 +69,13 @@ describe("Phase 6 MCP server", () => {
 
       const listedTools = await client!.listTools();
       expect(listedTools.tools.map((tool) => tool.name).sort()).toEqual([
+        "add_checklist_item",
         "add_comment",
         "attach_link",
+        "delete_checklist_item",
         "get_task",
         "list_my_tasks",
+        "set_checklist_item_completion",
         "transition_task_status"
       ]);
 
@@ -87,6 +90,74 @@ describe("Phase 6 MCP server", () => {
           }
         ],
         total: 1
+      });
+
+      const addedChecklistItem = await callTool("add_checklist_item", {
+        body: "Send a progress update",
+        expectedRevision: createdTask.item.revision,
+        taskId: createdTask.item.id
+      });
+      expect(addedChecklistItem.isError).toBeFalsy();
+      expect(addedChecklistItem.structuredContent).toMatchObject({
+        item: {
+          checklistItems: [
+            { body: "Gather supplies" },
+            { body: "Finish the first pass" },
+            { body: "Send a progress update" }
+          ],
+          revision: 1
+        }
+      });
+
+      const addedChecklistItemContent = addedChecklistItem.structuredContent as {
+        item: {
+          checklistItems: Array<{ id: string }>;
+        };
+      };
+      const addedChecklistItemId =
+        addedChecklistItemContent.item.checklistItems[2]?.id;
+      expect(typeof addedChecklistItemId).toBe("string");
+
+      const completedChecklistItem = await callTool("set_checklist_item_completion", {
+        checklistItemId: addedChecklistItemId,
+        expectedRevision: 1,
+        isCompleted: true,
+        taskId: createdTask.item.id
+      });
+      expect(completedChecklistItem.isError).toBeFalsy();
+      expect(completedChecklistItem.structuredContent).toMatchObject({
+        item: {
+          revision: 2
+        }
+      });
+      const completedChecklistItemContent = completedChecklistItem.structuredContent as {
+        item: {
+          checklistItems: Array<{ id: string; isCompleted: boolean }>;
+        };
+      };
+      expect(
+        completedChecklistItemContent.item.checklistItems.find(
+          (item) => item.id === addedChecklistItemId
+        )
+      ).toMatchObject({
+        id: addedChecklistItemId,
+        isCompleted: true
+      });
+
+      const deletedChecklistItem = await callTool("delete_checklist_item", {
+        checklistItemId: addedChecklistItemId,
+        expectedRevision: 2,
+        taskId: createdTask.item.id
+      });
+      expect(deletedChecklistItem.isError).toBeFalsy();
+      expect(deletedChecklistItem.structuredContent).toMatchObject({
+        item: {
+          checklistItems: [
+            { body: "Gather supplies" },
+            { body: "Finish the first pass" }
+          ],
+          revision: 3
+        }
       });
 
       const taskResult = await callTool("get_task", {
@@ -107,7 +178,7 @@ describe("Phase 6 MCP server", () => {
       });
 
       const transitionedResult = await callTool("transition_task_status", {
-        expectedRevision: createdTask.item.revision,
+        expectedRevision: 3,
         status: "In Progress",
         taskId: createdTask.item.id
       });
@@ -115,7 +186,7 @@ describe("Phase 6 MCP server", () => {
       expect(transitionedResult.structuredContent).toMatchObject({
         item: {
           id: createdTask.item.id,
-          revision: 1,
+          revision: 4,
           status: "In Progress"
         }
       });
@@ -162,6 +233,9 @@ describe("Phase 6 MCP server", () => {
           .from(taskEvents)
           .where(
             inArray(taskEvents.eventType, [
+              "task.checklist_item_added",
+              "task.checklist_item_completion_set",
+              "task.checklist_item_deleted",
               "task.status_changed",
               "task.comment_added",
               "task.attachment_linked"
@@ -176,6 +250,9 @@ describe("Phase 6 MCP server", () => {
 
       expect(mcpEvents.map((event) => event.eventType).sort()).toEqual([
         "task.attachment_linked",
+        "task.checklist_item_added",
+        "task.checklist_item_completion_set",
+        "task.checklist_item_deleted",
         "task.comment_added",
         "task.status_changed"
       ]);
@@ -237,11 +314,15 @@ describe("Phase 6 MCP server", () => {
         title: "Ephemeral assistant task"
       });
 
-      const deniedGet = await callTool("get_task", {
+      const visibleTask = await callTool("get_task", {
         taskId: createdTask.item.id
       });
-      expect(deniedGet.isError).toBe(true);
-      expect(firstText(deniedGet)).toContain("do not have access");
+      expect(visibleTask.isError).toBeFalsy();
+      expect(visibleTask.structuredContent).toMatchObject({
+        item: {
+          id: createdTask.item.id
+        }
+      });
     } finally {
       databaseClient.close();
     }

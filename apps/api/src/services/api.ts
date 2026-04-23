@@ -1,6 +1,7 @@
 import {
   and,
   count,
+  desc,
   eq,
   inArray,
   isNotNull,
@@ -226,6 +227,20 @@ export type AddCommentInput = {
 export type AddAttachmentLinkInput = {
   name: string;
   url: string;
+};
+
+export type AddChecklistItemInput = {
+  body: string;
+  expectedRevision: number;
+};
+
+export type SetChecklistItemCompletionInput = {
+  expectedRevision: number;
+  isCompleted: boolean;
+};
+
+export type DeleteChecklistItemInput = {
+  expectedRevision: number;
 };
 
 export type CreateUploadAttachmentInput = {
@@ -458,6 +473,45 @@ async function getTaskOrThrow(db: DatabaseClient, actor: AuthenticatedActor, tas
   }
 
   return task;
+}
+
+async function getChecklistItemOrThrow(
+  db: DatabaseClient,
+  taskId: string,
+  checklistItemId: string
+) {
+  const [item] = await db
+    .select()
+    .from(checklistItems)
+    .where(and(eq(checklistItems.id, checklistItemId), eq(checklistItems.taskId, taskId)));
+
+  if (!item) {
+    throw new ApiError(404, "checklist_item_not_found", "Checklist item not found.");
+  }
+
+  return item;
+}
+
+async function resequenceChecklistItems(db: DatabaseClient, taskId: string) {
+  const remainingItems = await db
+    .select({
+      id: checklistItems.id
+    })
+    .from(checklistItems)
+    .where(eq(checklistItems.taskId, taskId))
+    .orderBy(checklistItems.sortOrder, checklistItems.createdAt);
+
+  await Promise.all(
+    remainingItems.map((item, index) =>
+      db
+        .update(checklistItems)
+        .set({
+          sortOrder: index,
+          updatedAt: new Date()
+        })
+        .where(eq(checklistItems.id, item.id))
+    )
+  );
 }
 
 async function getTaskOrThrowForAdmin(
@@ -1696,7 +1750,6 @@ export async function listTasks(
   const conditions: SQL[] = [eq(tasks.householdId, actor.householdId)];
 
   if (actor.role === "service") {
-    conditions.push(eq(tasks.assigneeUserId, actor.id));
     conditions.push(eq(tasks.aiAssistanceEnabled, true));
     conditions.push(isNull(tasks.archivedAt));
   } else {
@@ -1931,6 +1984,153 @@ export async function updateTask(
   await createTaskEventRecord(db, taskId, actor.id, "task.updated", {
     revision: current.revision + 1
   });
+
+  return getTaskDetail(db, actor, taskId);
+}
+
+export async function addChecklistItemToTask(
+  db: DatabaseClient,
+  actor: AuthenticatedActor,
+  taskId: string,
+  input: AddChecklistItemInput,
+  options: MutationAuditOptions = {}
+) {
+  const current = await getTaskOrThrow(db, actor, taskId);
+  assertExpectedRevision(current.revision, input.expectedRevision);
+
+  if (current.archivedAt) {
+    throw new ApiError(409, "task_archived", "Archived tasks cannot be edited.");
+  }
+
+  const [lastChecklistItem] = await db
+    .select({
+      sortOrder: checklistItems.sortOrder
+    })
+    .from(checklistItems)
+    .where(eq(checklistItems.taskId, taskId))
+    .orderBy(desc(checklistItems.sortOrder))
+    .limit(1);
+
+  await db.insert(checklistItems).values({
+    body: input.body.trim(),
+    isCompleted: false,
+    sortOrder: (lastChecklistItem?.sortOrder ?? -1) + 1,
+    taskId
+  });
+
+  await db
+    .update(tasks)
+    .set({
+      revision: current.revision + 1,
+      updatedAt: new Date(),
+      updatedByUserId: actor.id
+    })
+    .where(eq(tasks.id, taskId));
+
+  await createTaskEventRecord(
+    db,
+    taskId,
+    actor.id,
+    "task.checklist_item_added",
+    {
+      revision: current.revision + 1
+    },
+    options
+  );
+
+  return getTaskDetail(db, actor, taskId);
+}
+
+export async function setChecklistItemCompletion(
+  db: DatabaseClient,
+  actor: AuthenticatedActor,
+  taskId: string,
+  checklistItemId: string,
+  input: SetChecklistItemCompletionInput,
+  options: MutationAuditOptions = {}
+) {
+  const current = await getTaskOrThrow(db, actor, taskId);
+  assertExpectedRevision(current.revision, input.expectedRevision);
+
+  if (current.archivedAt) {
+    throw new ApiError(409, "task_archived", "Archived tasks cannot be edited.");
+  }
+
+  const checklistItem = await getChecklistItemOrThrow(db, taskId, checklistItemId);
+
+  await db
+    .update(checklistItems)
+    .set({
+      isCompleted: input.isCompleted,
+      updatedAt: new Date()
+    })
+    .where(eq(checklistItems.id, checklistItem.id));
+
+  await db
+    .update(tasks)
+    .set({
+      revision: current.revision + 1,
+      updatedAt: new Date(),
+      updatedByUserId: actor.id
+    })
+    .where(eq(tasks.id, taskId));
+
+  await createTaskEventRecord(
+    db,
+    taskId,
+    actor.id,
+    "task.checklist_item_completion_set",
+    {
+      checklistItemId,
+      isCompleted: input.isCompleted,
+      revision: current.revision + 1
+    },
+    options
+  );
+
+  return getTaskDetail(db, actor, taskId);
+}
+
+export async function deleteChecklistItemFromTask(
+  db: DatabaseClient,
+  actor: AuthenticatedActor,
+  taskId: string,
+  checklistItemId: string,
+  input: DeleteChecklistItemInput,
+  options: MutationAuditOptions = {}
+) {
+  const current = await getTaskOrThrow(db, actor, taskId);
+  assertExpectedRevision(current.revision, input.expectedRevision);
+
+  if (current.archivedAt) {
+    throw new ApiError(409, "task_archived", "Archived tasks cannot be edited.");
+  }
+
+  await getChecklistItemOrThrow(db, taskId, checklistItemId);
+
+  await db.delete(checklistItems).where(eq(checklistItems.id, checklistItemId));
+  await resequenceChecklistItems(db, taskId);
+
+  await db
+    .update(tasks)
+    .set({
+      revision: current.revision + 1,
+      updatedAt: new Date(),
+      updatedByUserId: actor.id
+    })
+    .where(eq(tasks.id, taskId));
+
+  await createTaskEventRecord(
+    db,
+    taskId,
+    actor.id,
+    "task.checklist_item_deleted",
+    {
+      checklistItemId,
+      revision: current.revision + 1
+    },
+    options
+  );
 
   return getTaskDetail(db, actor, taskId);
 }
