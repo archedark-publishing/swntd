@@ -25,6 +25,17 @@ describe("task domain rules", () => {
     });
 
     expect(canServiceActorMutateTask({ actorId: "service-1", task })).toBe(true);
+  });
+
+  it("allows service actors to mutate tasks assigned directly to them", () => {
+    const assignedTask = createTaskFixture({
+      assigneeUserId: "service-1",
+      aiAssistanceEnabled: false
+    });
+
+    expect(canServiceActorMutateTask({ actorId: "service-1", task: assignedTask })).toBe(
+      true
+    );
 
     const ineligibleTask = createTaskFixture({
       assigneeUserId: "service-2",

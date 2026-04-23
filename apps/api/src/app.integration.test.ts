@@ -834,6 +834,22 @@ describe("Phase 3 API", () => {
     expect(createHumanTaskResponse.status).toBe(201);
     const humanTask = await parseJson<TaskItemResponse>(createHumanTaskResponse);
 
+    const createAssignedHumanTaskResponse = await app.request(
+      "/api/v1/tasks",
+      jsonRequest({
+        body: {
+          assigneeUserId: assistantUserId,
+          title: "Assigned human-only follow-up"
+        },
+        headers: adminHeaders,
+        method: "POST"
+      })
+    );
+    expect(createAssignedHumanTaskResponse.status).toBe(201);
+    const assignedHumanTask = await parseJson<TaskItemResponse>(
+      createAssignedHumanTaskResponse
+    );
+
     const assistantToken = await issueAssistantBearerToken();
     const serviceHeaders = {
       authorization: `Bearer ${assistantToken}`
@@ -873,10 +889,10 @@ describe("Phase 3 API", () => {
     });
     expect(listTasksResponse.status).toBe(200);
     const taskList = await parseJson<TaskListResponse>(listTasksResponse);
-    expect(taskList.total).toBe(2);
-    expect(taskList.items).toHaveLength(2);
+    expect(taskList.total).toBe(3);
+    expect(taskList.items).toHaveLength(3);
     expect(taskList.items.map((task) => task.id).sort()).toEqual(
-      [assignedEligibleTask.item.id, eligibleTask.item.id].sort()
+      [assignedEligibleTask.item.id, assignedHumanTask.item.id, eligibleTask.item.id].sort()
     );
 
     const getEligibleTaskResponse = await app.request(
@@ -1014,5 +1030,13 @@ describe("Phase 3 API", () => {
       }
     );
     expect(forbiddenTaskResponse.status).toBe(403);
+
+    const assignedHumanTaskResponse = await app.request(
+      `/api/v1/tasks/${assignedHumanTask.item.id}`,
+      {
+        headers: serviceHeaders
+      }
+    );
+    expect(assignedHumanTaskResponse.status).toBe(200);
   });
 });

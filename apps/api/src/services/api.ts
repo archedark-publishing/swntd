@@ -1750,7 +1750,9 @@ export async function listTasks(
   const conditions: SQL[] = [eq(tasks.householdId, actor.householdId)];
 
   if (actor.role === "service") {
-    conditions.push(eq(tasks.aiAssistanceEnabled, true));
+    conditions.push(
+      or(eq(tasks.aiAssistanceEnabled, true), eq(tasks.assigneeUserId, actor.id))!
+    );
     conditions.push(isNull(tasks.archivedAt));
   } else {
     if (filters.assigneeUserId) {

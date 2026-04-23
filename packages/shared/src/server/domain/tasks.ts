@@ -80,7 +80,8 @@ export function canServiceActorMutateTask(args: {
   >;
 }) {
   return (
-    args.task.aiAssistanceEnabled &&
+    (args.task.aiAssistanceEnabled ||
+      args.task.assigneeUserId === args.actorId) &&
     args.task.archivedAt === null
   );
 }
