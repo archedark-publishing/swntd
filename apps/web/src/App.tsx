@@ -97,6 +97,7 @@ import {
   downloadIcsFile
 } from "./calendar";
 import { getTaskDueState } from "./due-status";
+import { applyOptimisticTaskPlacement } from "./task-ordering";
 import { toast } from "sonner";
 import "./styles.css";
 
@@ -1066,14 +1067,17 @@ export function App() {
       return;
     }
 
-    await runMutation(
-      () =>
+    await runOptimisticTaskPlacement({
+      action: () =>
         api.reorderTask(task.id, {
           expectedRevision: task.revision,
           targetIndex
         }),
-      "Task order updated."
-    );
+      successMessage: "Task order updated.",
+      targetIndex,
+      targetStatus: task.status,
+      taskId: task.id
+    });
   }
 
   async function handleTaskDrop(input: {
@@ -1104,33 +1108,116 @@ export function App() {
         return;
       }
 
-      await runMutation(
-        () =>
+      await runOptimisticTaskPlacement({
+        action: () =>
           api.reorderTask(task.id, {
             expectedRevision: task.revision,
             targetIndex: safeTargetIndex
           }),
-        "Task order updated."
-      );
+        successMessage: "Task order updated.",
+        targetIndex: safeTargetIndex,
+        targetStatus: input.targetStatus,
+        taskId: task.id
+      });
 
       return;
     }
 
-    await runMutation(async () => {
-      const transitioned = await api.transitionTask(task.id, {
-        expectedRevision: task.revision,
-        status: input.targetStatus
+    await runOptimisticTaskPlacement({
+      action: async () => {
+        const transitioned = await api.transitionTask(task.id, {
+          expectedRevision: task.revision,
+          status: input.targetStatus
+        });
+
+        if (safeTargetIndex === 0) {
+          return transitioned;
+        }
+
+        return api.reorderTask(task.id, {
+          expectedRevision: transitioned.item.revision,
+          targetIndex: safeTargetIndex
+        });
+      },
+      successMessage: `Moved "${task.title}" to ${input.targetStatus}.`,
+      targetIndex: safeTargetIndex,
+      targetStatus: input.targetStatus,
+      taskId: task.id
+    });
+  }
+
+  async function runOptimisticTaskPlacement<T>(args: {
+    action: () => Promise<T>;
+    successMessage: string;
+    targetIndex: number;
+    targetStatus: TaskStatus;
+    taskId: string;
+  }) {
+    let previousSnapshot: AppSnapshot | null = null;
+    const previousSelectedTask = selectedTask;
+    let didApply = false;
+    let nextRevision: number | null = null;
+    let nextStatus: TaskStatus | null = null;
+
+    setSnapshot((current) => {
+      const nextPlacement = applyOptimisticTaskPlacement({
+        targetIndex: args.targetIndex,
+        targetStatus: args.targetStatus,
+        taskId: args.taskId,
+        tasks: current.activeTasks
       });
 
-      if (safeTargetIndex === 0) {
-        return transitioned;
+      if (!nextPlacement) {
+        return current;
       }
 
-      return api.reorderTask(task.id, {
-        expectedRevision: transitioned.item.revision,
-        targetIndex: safeTargetIndex
+      previousSnapshot = current;
+      didApply = true;
+      nextRevision = nextPlacement.updatedTask.revision;
+      nextStatus = nextPlacement.updatedTask.status;
+
+      return {
+        ...current,
+        activeTasks: nextPlacement.tasks
+      };
+    });
+
+    if (!didApply) {
+      return null;
+    }
+
+    if (selectedTask?.id === args.taskId && nextRevision !== null && nextStatus !== null) {
+      setSelectedTask({
+        ...selectedTask,
+        revision: nextRevision,
+        status: nextStatus
       });
-    }, `Moved "${task.title}" to ${input.targetStatus}.`);
+    }
+
+    try {
+      const result = await args.action();
+      toast.success(args.successMessage);
+      startTransition(() => {
+        void refreshApp({ background: true });
+      });
+      return result;
+    } catch (error) {
+      if (previousSnapshot) {
+        setSnapshot(previousSnapshot);
+      }
+
+      setSelectedTask(previousSelectedTask);
+      showErrorToast(
+        buildFlashMessage(error),
+        isConflictError(error) ? "mutation-conflict" : undefined
+      );
+
+      if (isConflictError(error)) {
+        await refreshApp({ background: true });
+      }
+
+      return null;
+    }
   }
 
   async function handleStatusChange(task: TaskDetail, status: TaskStatus) {
