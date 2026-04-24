@@ -1824,6 +1824,21 @@ a {
   overscroll-behavior: contain;
 }
 
+@media (max-width: 51.999rem) {
+  .settings-page-stack {
+    min-height: 0;
+  }
+
+  .settings-page-stack > * {
+    height: auto;
+  }
+
+  .settings-card {
+    min-height: 0;
+    overflow: visible;
+  }
+}
+
 .template-row {
   display: grid;
   justify-items: start;
