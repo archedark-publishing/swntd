@@ -688,7 +688,7 @@ async function getTaskRelations(
   }
 
   for (const rows of commentsByTaskId.values()) {
-    rows.sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime());
+    rows.sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime());
   }
 
   return {

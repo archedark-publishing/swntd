@@ -97,7 +97,9 @@ type TaskItemResponse = {
       total?: number;
     };
     commentCount: number;
-    comments: unknown[];
+    comments: Array<{
+      body: string;
+    }>;
     id: string;
     labels: unknown[];
     revision: number;
@@ -936,6 +938,27 @@ describe("Phase 3 API", () => {
       })
     );
     expect(commentResponse.status).toBe(201);
+    const taskWithFirstComment = await parseJson<TaskItemResponse>(commentResponse);
+
+    const secondCommentResponse = await app.request(
+      `/api/v1/tasks/${eligibleTask.item.id}/comments`,
+      jsonRequest({
+        body: {
+          body: "Adding a newer note afterward."
+        },
+        headers: serviceHeaders,
+        method: "POST"
+      })
+    );
+    expect(secondCommentResponse.status).toBe(201);
+    const taskWithSecondComment = await parseJson<TaskItemResponse>(secondCommentResponse);
+    expect(taskWithFirstComment.item.comments.map((comment) => comment.body)).toEqual([
+      "Started drafting a summary."
+    ]);
+    expect(taskWithSecondComment.item.comments.map((comment) => comment.body)).toEqual([
+      "Adding a newer note afterward.",
+      "Started drafting a summary."
+    ]);
 
     const linkResponse = await app.request(
       `/api/v1/tasks/${eligibleTask.item.id}/attachment-links`,
