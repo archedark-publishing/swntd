@@ -1029,6 +1029,25 @@ a {
 }
 
 @media (max-width: 40rem) {
+  .header-action-row,
+  .sheet-actions,
+  .cast-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .header-action-row > *,
+  .sheet-actions > *,
+  .cast-row > * {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .sheet-actions button,
+  .sheet-actions a {
+    flex-basis: auto;
+  }
+
   .label-color-preview-row {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -1495,6 +1514,15 @@ a {
   gap: 1rem;
 }
 
+.cast-row > :first-child {
+  min-width: 0;
+}
+
+.cast-row strong,
+.cast-row span {
+  overflow-wrap: anywhere;
+}
+
 .secondary-link {
   display: inline-flex;
   align-items: center;
@@ -1943,6 +1971,10 @@ a {
 
   .sheet-body {
     padding-bottom: 2rem;
+  }
+
+  .template-editor {
+    min-width: 0;
   }
 
   .detail-control-panel-grid {
