@@ -3861,44 +3861,56 @@ function TaskForm(props: {
                   }}
                 >
                   <span aria-hidden="true" className="checklist-row-spacer" />
-                  <FormInput
-                    disabled={!props.canEdit}
-                    enterKeyHint="done"
-                    onChange={(event) => setChecklistComposerValue(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Escape") {
-                        event.preventDefault();
-                        dismissChecklistComposer();
-                      }
-                    }}
-                    placeholder="What needs doing?"
-                    ref={checklistComposerInputRef}
-                    value={checklistComposerValue}
-                  />
-                  <div className="checklist-edit-actions">
-                    <Button
-                      disabled={!props.canEdit || !checklistComposerValue.trim()}
-                      onClick={() => {
-                        void submitChecklistComposer();
-                      }}
-                      size="icon"
-                      type="button"
-                      variant="outline"
-                    >
-                      <Check className="size-4" />
-                      <span className="sr-only">Save checklist item</span>
-                    </Button>
-                    <Button
+                  <div className="checklist-edit-shell">
+                    <FormInput
                       disabled={!props.canEdit}
-                      onClick={dismissChecklistComposer}
-                      size="icon"
-                      type="button"
-                      variant="ghost"
-                    >
-                      <X className="size-4" />
-                      <span className="sr-only">Cancel checklist item</span>
-                    </Button>
+                      enterKeyHint="done"
+                      onBlur={() => {
+                        if (isChecklistComposerSubmittingRef.current) {
+                          return;
+                        }
+
+                        if (!checklistComposerValue.trim()) {
+                          dismissChecklistComposer();
+                        }
+                      }}
+                      onChange={(event) => setChecklistComposerValue(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Escape") {
+                          event.preventDefault();
+                          dismissChecklistComposer();
+                        }
+                      }}
+                      placeholder="What needs doing?"
+                      ref={checklistComposerInputRef}
+                      value={checklistComposerValue}
+                    />
+                    <div className="checklist-edit-actions">
+                      <Button
+                        disabled={!props.canEdit || !checklistComposerValue.trim()}
+                        onClick={() => {
+                          void submitChecklistComposer();
+                        }}
+                        size="icon"
+                        type="button"
+                        variant="outline"
+                      >
+                        <Check className="size-4" />
+                        <span className="sr-only">Save checklist item</span>
+                      </Button>
+                      <Button
+                        disabled={!props.canEdit}
+                        onClick={dismissChecklistComposer}
+                        size="icon"
+                        type="button"
+                        variant="ghost"
+                      >
+                        <X className="size-4" />
+                        <span className="sr-only">Cancel checklist item</span>
+                      </Button>
+                    </div>
                   </div>
+                  <span aria-hidden="true" className="checklist-row-spacer" />
                 </form>
               ) : null}
             </div>
