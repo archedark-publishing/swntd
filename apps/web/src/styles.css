@@ -1863,7 +1863,7 @@ a {
 
   .settings-card {
     min-height: 0;
-    overflow: visible;
+    overflow: hidden;
   }
 }
 
