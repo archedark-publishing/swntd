@@ -1854,16 +1854,23 @@ a {
 
 @media (max-width: 51.999rem) {
   .settings-page-stack {
+    display: block;
     min-height: 0;
   }
 
   .settings-page-stack > * {
     height: auto;
+    display: block;
   }
 
   .settings-card {
+    height: auto;
     min-height: 0;
-    overflow: hidden;
+    overflow: visible;
+  }
+
+  .template-grid {
+    min-height: 0;
   }
 }
 
