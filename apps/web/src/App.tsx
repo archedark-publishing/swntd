@@ -3864,13 +3864,6 @@ function TaskForm(props: {
                   <FormInput
                     disabled={!props.canEdit}
                     enterKeyHint="done"
-                    onBlur={() => {
-                      if (isChecklistComposerSubmittingRef.current) {
-                        return;
-                      }
-
-                      dismissChecklistComposer();
-                    }}
                     onChange={(event) => setChecklistComposerValue(event.target.value)}
                     onKeyDown={(event) => {
                       if (event.key === "Escape") {
@@ -3882,7 +3875,30 @@ function TaskForm(props: {
                     ref={checklistComposerInputRef}
                     value={checklistComposerValue}
                   />
-                  <span aria-hidden="true" className="checklist-row-spacer" />
+                  <div className="checklist-edit-actions">
+                    <Button
+                      disabled={!props.canEdit || !checklistComposerValue.trim()}
+                      onClick={() => {
+                        void submitChecklistComposer();
+                      }}
+                      size="icon"
+                      type="button"
+                      variant="outline"
+                    >
+                      <Check className="size-4" />
+                      <span className="sr-only">Save checklist item</span>
+                    </Button>
+                    <Button
+                      disabled={!props.canEdit}
+                      onClick={dismissChecklistComposer}
+                      size="icon"
+                      type="button"
+                      variant="ghost"
+                    >
+                      <X className="size-4" />
+                      <span className="sr-only">Cancel checklist item</span>
+                    </Button>
+                  </div>
                 </form>
               ) : null}
             </div>
