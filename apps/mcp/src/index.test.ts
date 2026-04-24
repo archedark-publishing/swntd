@@ -211,6 +211,24 @@ describe("Phase 6 MCP server", () => {
           }
         });
 
+        const secondCommentResult = await callTool("add_comment", {
+          body: "Latest update comes first.",
+          taskId: createdTask.item.id
+        });
+        expect(secondCommentResult.isError).toBeFalsy();
+        expect(secondCommentResult.structuredContent).toMatchObject({
+          item: {
+            comments: [
+              {
+                body: "Latest update comes first."
+              },
+              {
+                body: "Picked this up through MCP."
+              }
+            ]
+          }
+        });
+
         const attachmentResult = await callTool("attach_link", {
           name: "Reference doc",
           taskId: createdTask.item.id,
@@ -258,6 +276,7 @@ describe("Phase 6 MCP server", () => {
           "task.checklist_item_added",
           "task.checklist_item_completion_set",
           "task.checklist_item_deleted",
+          "task.comment_added",
           "task.comment_added",
           "task.status_changed"
         ]);

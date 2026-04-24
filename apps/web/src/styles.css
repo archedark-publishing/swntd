@@ -748,6 +748,18 @@ a {
   overflow: hidden;
 }
 
+.task-card-near-due {
+  box-shadow:
+    0 0 0 1px rgb(212 124 42 / 0.18),
+    0 0 1.1rem rgb(212 124 42 / 0.22);
+}
+
+.task-card-past-due {
+  box-shadow:
+    0 0 0 1px rgb(185 46 46 / 0.24),
+    0 0 1.4rem rgb(185 46 46 / 0.28);
+}
+
 .task-card-placeholder {
   border-style: dashed;
   border-color: rgb(41 77 67 / 0.25);
@@ -852,6 +864,18 @@ a {
 .task-indicator-pill {
   background: rgb(41 77 67 / 0.09);
   color: rgb(32 23 15 / 0.84);
+}
+
+.task-meta-pill-near-due {
+  border-color: rgb(212 124 42 / 0.22);
+  background: rgb(255 244 234 / 0.92);
+  color: rgb(155 82 18 / 0.92);
+}
+
+.task-meta-pill-past-due {
+  border-color: rgb(185 46 46 / 0.28);
+  background: rgb(255 237 237 / 0.96);
+  color: rgb(167 27 27 / 0.96);
 }
 
 .label-row {
@@ -1005,6 +1029,25 @@ a {
 }
 
 @media (max-width: 40rem) {
+  .header-action-row,
+  .sheet-actions,
+  .cast-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .header-action-row > *,
+  .sheet-actions > *,
+  .cast-row > * {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .sheet-actions button,
+  .sheet-actions a {
+    flex-basis: auto;
+  }
+
   .label-color-preview-row {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -1471,6 +1514,15 @@ a {
   gap: 1rem;
 }
 
+.cast-row > :first-child {
+  min-width: 0;
+}
+
+.cast-row strong,
+.cast-row span {
+  overflow-wrap: anywhere;
+}
+
 .secondary-link {
   display: inline-flex;
   align-items: center;
@@ -1548,6 +1600,17 @@ a {
 
 .checklist-item-button:disabled {
   cursor: default;
+}
+
+.checklist-edit-shell {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.checklist-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.35rem;
 }
 
 .checklist-item-button-complete {
@@ -1789,6 +1852,28 @@ a {
   overscroll-behavior: contain;
 }
 
+@media (max-width: 51.999rem) {
+  .settings-page-stack {
+    display: block;
+    min-height: 0;
+  }
+
+  .settings-page-stack > * {
+    height: auto;
+    display: block;
+  }
+
+  .settings-card {
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+  }
+
+  .template-grid {
+    min-height: 0;
+  }
+}
+
 .template-row {
   display: grid;
   justify-items: start;
@@ -1893,6 +1978,10 @@ a {
 
   .sheet-body {
     padding-bottom: 2rem;
+  }
+
+  .template-editor {
+    min-width: 0;
   }
 
   .detail-control-panel-grid {

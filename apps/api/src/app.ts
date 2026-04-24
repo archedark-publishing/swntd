@@ -165,7 +165,8 @@ const settingsSchema = z
   .object({
     defaultCalendarExportKind: z.enum(["google", "ics"]).optional(),
     defaultTimezone: z.string().trim().min(1).optional(),
-    doneArchiveAfterDays: z.number().int().positive().optional()
+    doneArchiveAfterDays: z.number().int().positive().optional(),
+    nearDueThresholdDays: z.number().int().positive().optional()
   })
   .refine((value) => Object.keys(value).length > 0, {
     message: "At least one setting must be updated."

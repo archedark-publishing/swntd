@@ -96,6 +96,8 @@ import {
   buildGoogleCalendarUrl,
   downloadIcsFile
 } from "./calendar";
+import { getTaskDueState } from "./due-status";
+import { applyOptimisticTaskPlacement } from "./task-ordering";
 import { toast } from "sonner";
 import "./styles.css";
 
@@ -432,7 +434,8 @@ function normalizeSettingsDraft(settings: Settings) {
   return {
     defaultCalendarExportKind: settings.defaultCalendarExportKind,
     defaultTimezone: settings.defaultTimezone.trim(),
-    doneArchiveAfterDays: settings.doneArchiveAfterDays
+    doneArchiveAfterDays: settings.doneArchiveAfterDays,
+    nearDueThresholdDays: settings.nearDueThresholdDays
   };
 }
 
@@ -1064,14 +1067,17 @@ export function App() {
       return;
     }
 
-    await runMutation(
-      () =>
+    await runOptimisticTaskPlacement({
+      action: () =>
         api.reorderTask(task.id, {
           expectedRevision: task.revision,
           targetIndex
         }),
-      "Task order updated."
-    );
+      successMessage: "Task order updated.",
+      targetIndex,
+      targetStatus: task.status,
+      taskId: task.id
+    });
   }
 
   async function handleTaskDrop(input: {
@@ -1102,33 +1108,116 @@ export function App() {
         return;
       }
 
-      await runMutation(
-        () =>
+      await runOptimisticTaskPlacement({
+        action: () =>
           api.reorderTask(task.id, {
             expectedRevision: task.revision,
             targetIndex: safeTargetIndex
           }),
-        "Task order updated."
-      );
+        successMessage: "Task order updated.",
+        targetIndex: safeTargetIndex,
+        targetStatus: input.targetStatus,
+        taskId: task.id
+      });
 
       return;
     }
 
-    await runMutation(async () => {
-      const transitioned = await api.transitionTask(task.id, {
-        expectedRevision: task.revision,
-        status: input.targetStatus
+    await runOptimisticTaskPlacement({
+      action: async () => {
+        const transitioned = await api.transitionTask(task.id, {
+          expectedRevision: task.revision,
+          status: input.targetStatus
+        });
+
+        if (safeTargetIndex === 0) {
+          return transitioned;
+        }
+
+        return api.reorderTask(task.id, {
+          expectedRevision: transitioned.item.revision,
+          targetIndex: safeTargetIndex
+        });
+      },
+      successMessage: `Moved "${task.title}" to ${input.targetStatus}.`,
+      targetIndex: safeTargetIndex,
+      targetStatus: input.targetStatus,
+      taskId: task.id
+    });
+  }
+
+  async function runOptimisticTaskPlacement<T>(args: {
+    action: () => Promise<T>;
+    successMessage: string;
+    targetIndex: number;
+    targetStatus: TaskStatus;
+    taskId: string;
+  }) {
+    let previousSnapshot: AppSnapshot | null = null;
+    const previousSelectedTask = selectedTask;
+    let didApply = false;
+    let nextRevision: number | null = null;
+    let nextStatus: TaskStatus | null = null;
+
+    setSnapshot((current) => {
+      const nextPlacement = applyOptimisticTaskPlacement({
+        targetIndex: args.targetIndex,
+        targetStatus: args.targetStatus,
+        taskId: args.taskId,
+        tasks: current.activeTasks
       });
 
-      if (safeTargetIndex === 0) {
-        return transitioned;
+      if (!nextPlacement) {
+        return current;
       }
 
-      return api.reorderTask(task.id, {
-        expectedRevision: transitioned.item.revision,
-        targetIndex: safeTargetIndex
+      previousSnapshot = current;
+      didApply = true;
+      nextRevision = nextPlacement.updatedTask.revision;
+      nextStatus = nextPlacement.updatedTask.status;
+
+      return {
+        ...current,
+        activeTasks: nextPlacement.tasks
+      };
+    });
+
+    if (!didApply) {
+      return null;
+    }
+
+    if (selectedTask?.id === args.taskId && nextRevision !== null && nextStatus !== null) {
+      setSelectedTask({
+        ...selectedTask,
+        revision: nextRevision,
+        status: nextStatus
       });
-    }, `Moved "${task.title}" to ${input.targetStatus}.`);
+    }
+
+    try {
+      const result = await args.action();
+      toast.success(args.successMessage);
+      startTransition(() => {
+        void refreshApp({ background: true });
+      });
+      return result;
+    } catch (error) {
+      if (previousSnapshot) {
+        setSnapshot(previousSnapshot);
+      }
+
+      setSelectedTask(previousSelectedTask);
+      showErrorToast(
+        buildFlashMessage(error),
+        isConflictError(error) ? "mutation-conflict" : undefined
+      );
+
+      if (isConflictError(error)) {
+        await refreshApp({ background: true });
+      }
+
+      return null;
+    }
   }
 
   async function handleStatusChange(task: TaskDetail, status: TaskStatus) {
@@ -1205,7 +1294,8 @@ export function App() {
         api.updateSettings({
           defaultCalendarExportKind: nextSettings.defaultCalendarExportKind,
           defaultTimezone: nextSettings.defaultTimezone,
-          doneArchiveAfterDays: nextSettings.doneArchiveAfterDays
+          doneArchiveAfterDays: nextSettings.doneArchiveAfterDays,
+          nearDueThresholdDays: nextSettings.nearDueThresholdDays
         }),
       "Household settings saved.",
       { silentSuccess: true }
@@ -1486,6 +1576,7 @@ export function App() {
                   onQuickMove={handleQuickMove}
                   onReorder={handleReorder}
                   onToggleActorFilter={() => setOnlyMyTasks((current) => !current)}
+                  settings={snapshot.settings}
                   visibleTasks={onlyMyTasks ? myTasks : activeTasks}
                 />
               ) : null}
@@ -1511,6 +1602,7 @@ export function App() {
                     onOpenTask={openTask}
                     onQuickMove={() => Promise.resolve()}
                     onReorder={() => Promise.resolve()}
+                    settings={snapshot.settings}
                     showHeader={false}
                     tasks={archivedTasks}
                     title="Archive"
@@ -1753,6 +1845,7 @@ function BoardView(props: {
   onQuickMove: (task: TaskListItem, direction: -1 | 1) => Promise<void>;
   onReorder: (task: TaskListItem, direction: -1 | 1) => Promise<void>;
   onToggleActorFilter: () => void;
+  settings: Settings | null;
   visibleTasks: TaskListItem[];
 }) {
   const [activeTaskId, setActiveTaskId] = useState<UniqueIdentifier | null>(null);
@@ -2081,6 +2174,7 @@ function BoardView(props: {
                 onQuickMove={props.onQuickMove}
                 onReorder={props.onReorder}
                 onRegisterTaskNode={setTaskNode}
+                settings={props.settings}
                 status={status}
                 taskCount={getTaskColumnOrder(props.visibleTasks, status).length}
               />
@@ -2100,6 +2194,7 @@ function BoardView(props: {
                 onOpen={() => undefined}
                 onQuickMove={() => Promise.resolve()}
                 onReorder={() => Promise.resolve()}
+                settings={props.settings}
                 task={activeTask}
                 total={1}
               />
@@ -2129,6 +2224,7 @@ function BoardColumn(props: {
   onQuickMove: (task: TaskListItem, direction: -1 | 1) => Promise<void>;
   onRegisterTaskNode: (taskId: string, node: HTMLDivElement | null) => void;
   onReorder: (task: TaskListItem, direction: -1 | 1) => Promise<void>;
+  settings: Settings | null;
   status: TaskStatus;
   taskCount: number;
 }) {
@@ -2189,6 +2285,7 @@ function BoardColumn(props: {
                 onOpen={() => undefined}
                 onQuickMove={() => Promise.resolve()}
                 onReorder={() => Promise.resolve()}
+                settings={props.settings}
                 task={item.task}
                 total={props.items.length}
               />
@@ -2202,6 +2299,7 @@ function BoardColumn(props: {
                 onQuickMove={props.onQuickMove}
                 onRegisterNode={props.onRegisterTaskNode}
                 onReorder={props.onReorder}
+                settings={props.settings}
                 task={item.task}
                 total={props.items.length}
               />
@@ -2292,6 +2390,7 @@ function TaskListView(props: {
   onOpenTask: (taskId: string) => void;
   onQuickMove: (task: TaskListItem, direction: -1 | 1) => Promise<void>;
   onReorder: (task: TaskListItem, direction: -1 | 1) => Promise<void>;
+  settings: Settings | null;
   showHeader?: boolean;
   tasks: TaskListItem[];
   title: string;
@@ -2317,6 +2416,7 @@ function TaskListView(props: {
             onOpen={props.onOpenTask}
             onQuickMove={props.onQuickMove}
             onReorder={props.onReorder}
+            settings={props.settings}
             task={task}
             total={props.tasks.length}
           />
@@ -2336,6 +2436,7 @@ type TaskCardProps = {
   onOpen: (taskId: string) => void;
   onQuickMove: (task: TaskListItem, direction: -1 | 1) => Promise<void>;
   onReorder: (task: TaskListItem, direction: -1 | 1) => Promise<void>;
+  settings: Settings | null;
   task: TaskListItem;
   total: number;
 };
@@ -2348,13 +2449,16 @@ function TaskCard(props: TaskCardProps) {
   const allowManualReorder = props.allowManualReorder ?? true;
   const hideActions = props.hideActions ?? false;
   const isPlaceholder = props.isPlaceholder ?? false;
+  const dueState = getTaskDueState(props.task, props.settings?.nearDueThresholdDays ?? 3);
 
   return (
     <SurfaceCard
       className={cn(
         "task-card gap-0 py-0",
         props.isDragging && "task-card-dragging",
-        isPlaceholder && "task-card-placeholder"
+        isPlaceholder && "task-card-placeholder",
+        dueState === "near" && "task-card-near-due",
+        dueState === "past" && "task-card-past-due"
       )}
     >
       <button
@@ -2377,7 +2481,14 @@ function TaskCard(props: TaskCardProps) {
             {props.task.assignee?.displayName ?? "Unassigned"}
           </Badge>
           {props.task.dueOn ? (
-            <Badge className="task-meta-pill" variant="outline">
+            <Badge
+              className={cn(
+                "task-meta-pill",
+                dueState === "near" && "task-meta-pill-near-due",
+                dueState === "past" && "task-meta-pill-past-due"
+              )}
+              variant="outline"
+            >
               {formatDate(props.task.dueOn, props.task.dueTime)}
             </Badge>
           ) : null}
@@ -3648,26 +3759,65 @@ function TaskForm(props: {
                           }}
                         />
                         {editingChecklistItemId === item.clientId ? (
-                          <FormInput
-                            disabled={!props.canEdit}
-                            onBlur={cancelChecklistEdit}
-                            onChange={(event) => setEditingChecklistValue(event.target.value)}
-                            onKeyDown={(event) => {
-                              if (event.key === "Enter") {
-                                event.preventDefault();
-                                void submitChecklistEdit(item);
+                          <div
+                            className="checklist-edit-shell"
+                            onBlur={(event) => {
+                              const nextFocusTarget = event.relatedTarget;
+
+                              if (
+                                nextFocusTarget instanceof Node &&
+                                event.currentTarget.contains(nextFocusTarget)
+                              ) {
                                 return;
                               }
 
-                              if (event.key === "Escape") {
-                                event.preventDefault();
-                                cancelChecklistEdit();
-                              }
+                              cancelChecklistEdit();
                             }}
-                            placeholder="Subtask description"
-                            ref={checklistEditInputRef}
-                            value={editingChecklistValue}
-                          />
+                          >
+                            <FormInput
+                              disabled={!props.canEdit}
+                              onChange={(event) => setEditingChecklistValue(event.target.value)}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter") {
+                                  event.preventDefault();
+                                  void submitChecklistEdit(item);
+                                  return;
+                                }
+
+                                if (event.key === "Escape") {
+                                  event.preventDefault();
+                                  cancelChecklistEdit();
+                                }
+                              }}
+                              placeholder="Subtask description"
+                              ref={checklistEditInputRef}
+                              value={editingChecklistValue}
+                            />
+                            <div className="checklist-edit-actions">
+                              <Button
+                                disabled={!props.canEdit || !editingChecklistValue.trim()}
+                                onClick={() => {
+                                  void submitChecklistEdit(item);
+                                }}
+                                size="icon"
+                                type="button"
+                                variant="outline"
+                              >
+                                <Check className="size-4" />
+                                <span className="sr-only">Save checklist item</span>
+                              </Button>
+                              <Button
+                                disabled={!props.canEdit}
+                                onClick={cancelChecklistEdit}
+                                size="icon"
+                                type="button"
+                                variant="ghost"
+                              >
+                                <X className="size-4" />
+                                <span className="sr-only">Cancel checklist edit</span>
+                              </Button>
+                            </div>
+                          </div>
                         ) : (
                           <button
                             className={cn(
@@ -3687,28 +3837,30 @@ function TaskForm(props: {
                             <span className="checklist-item-body">{item.body}</span>
                           </button>
                         )}
-                        <Button
-                          className="checklist-remove-button"
-                          disabled={!props.canEdit}
-                          onClick={() => {
-                            if (editingChecklistItemId === item.clientId) {
-                              cancelChecklistEdit();
-                            }
+                        {editingChecklistItemId === item.clientId ? null : (
+                          <Button
+                            className="checklist-remove-button"
+                            disabled={!props.canEdit}
+                            onClick={() => {
+                              if (editingChecklistItemId === item.clientId) {
+                                cancelChecklistEdit();
+                              }
 
-                            void commitChecklistChange((current) => ({
-                              ...current,
-                              checklistItems: current.checklistItems.filter(
-                                (entry) => entry.clientId !== item.clientId
-                              )
-                            }));
-                          }}
-                          size="icon"
-                          type="button"
-                          variant="ghost"
-                        >
-                          <Trash2 className="size-4" />
-                          <span className="sr-only">Remove checklist item</span>
-                        </Button>
+                              void commitChecklistChange((current) => ({
+                                ...current,
+                                checklistItems: current.checklistItems.filter(
+                                  (entry) => entry.clientId !== item.clientId
+                                )
+                              }));
+                            }}
+                            size="icon"
+                            type="button"
+                            variant="ghost"
+                          >
+                            <Trash2 className="size-4" />
+                            <span className="sr-only">Remove checklist item</span>
+                          </Button>
+                        )}
                       </div>
                     </SortableChecklistRow>
                   ))}
@@ -3723,27 +3875,55 @@ function TaskForm(props: {
                   }}
                 >
                   <span aria-hidden="true" className="checklist-row-spacer" />
-                  <FormInput
-                    disabled={!props.canEdit}
-                    enterKeyHint="done"
-                    onBlur={() => {
-                      if (isChecklistComposerSubmittingRef.current) {
-                        return;
-                      }
+                  <div className="checklist-edit-shell">
+                    <FormInput
+                      disabled={!props.canEdit}
+                      enterKeyHint="done"
+                      onBlur={() => {
+                        if (isChecklistComposerSubmittingRef.current) {
+                          return;
+                        }
 
-                      dismissChecklistComposer();
-                    }}
-                    onChange={(event) => setChecklistComposerValue(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Escape") {
-                        event.preventDefault();
-                        dismissChecklistComposer();
-                      }
-                    }}
-                    placeholder="What needs doing?"
-                    ref={checklistComposerInputRef}
-                    value={checklistComposerValue}
-                  />
+                        if (!checklistComposerValue.trim()) {
+                          dismissChecklistComposer();
+                        }
+                      }}
+                      onChange={(event) => setChecklistComposerValue(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Escape") {
+                          event.preventDefault();
+                          dismissChecklistComposer();
+                        }
+                      }}
+                      placeholder="What needs doing?"
+                      ref={checklistComposerInputRef}
+                      value={checklistComposerValue}
+                    />
+                    <div className="checklist-edit-actions">
+                      <Button
+                        disabled={!props.canEdit || !checklistComposerValue.trim()}
+                        onClick={() => {
+                          void submitChecklistComposer();
+                        }}
+                        size="icon"
+                        type="button"
+                        variant="outline"
+                      >
+                        <Check className="size-4" />
+                        <span className="sr-only">Save checklist item</span>
+                      </Button>
+                      <Button
+                        disabled={!props.canEdit}
+                        onClick={dismissChecklistComposer}
+                        size="icon"
+                        type="button"
+                        variant="ghost"
+                      >
+                        <X className="size-4" />
+                        <span className="sr-only">Cancel checklist item</span>
+                      </Button>
+                    </div>
+                  </div>
                   <span aria-hidden="true" className="checklist-row-spacer" />
                 </form>
               ) : null}
@@ -3903,11 +4083,15 @@ function SettingsView(props: {
   const submitSettingsAutosave = useEffectEvent(async (nextSettings: Settings) => {
     const normalized = normalizeSettingsDraft(nextSettings);
 
-    if (!normalized.defaultTimezone || !Number.isFinite(normalized.doneArchiveAfterDays)) {
+    if (
+      !normalized.defaultTimezone ||
+      !Number.isFinite(normalized.doneArchiveAfterDays) ||
+      !Number.isFinite(normalized.nearDueThresholdDays)
+    ) {
       return;
     }
 
-    if (normalized.doneArchiveAfterDays < 1) {
+    if (normalized.doneArchiveAfterDays < 1 || normalized.nearDueThresholdDays < 1) {
       return;
     }
 
@@ -3955,11 +4139,15 @@ function SettingsView(props: {
 
     const normalized = normalizeSettingsDraft(settingsDraft);
 
-    if (!normalized.defaultTimezone || !Number.isFinite(normalized.doneArchiveAfterDays)) {
+    if (
+      !normalized.defaultTimezone ||
+      !Number.isFinite(normalized.doneArchiveAfterDays) ||
+      !Number.isFinite(normalized.nearDueThresholdDays)
+    ) {
       return;
     }
 
-    if (normalized.doneArchiveAfterDays < 1) {
+    if (normalized.doneArchiveAfterDays < 1 || normalized.nearDueThresholdDays < 1) {
       return;
     }
 
@@ -4052,7 +4240,7 @@ function SettingsView(props: {
         {props.activePage === "general" ? (
           <SurfaceCard className="settings-card gap-0 py-0">
             <SectionHeading
-              description="Tune the default timezone, archive cadence, and calendar preference."
+              description="Tune the default timezone, archive cadence, due-date warning threshold, and calendar preference."
               eyebrow="House Rules"
               title="General Settings"
             />
@@ -4079,6 +4267,19 @@ function SettingsView(props: {
                   }
                   type="number"
                   value={settingsDraft.doneArchiveAfterDays}
+                />
+              </FormField>
+              <FormField label="Near due threshold (days)">
+                <FormInput
+                  min={1}
+                  onChange={(event) =>
+                    setSettingsDraft({
+                      ...settingsDraft,
+                      nearDueThresholdDays: Number(event.target.value)
+                    })
+                  }
+                  type="number"
+                  value={settingsDraft.nearDueThresholdDays}
                 />
               </FormField>
               <FormSelect
@@ -4258,11 +4459,6 @@ function SettingsView(props: {
                       ) : null}
                     </div>
                     {userActionMessage ? <EmptyStateCard message={userActionMessage} /> : null}
-                    {props.selectedUser ? (
-                      <EmptyStateCard
-                        message="Removing an actor is permanent. They stay attached to past comments and history, but disappear from the household cast, cannot be assigned to anything new, and assistants lose any active tokens."
-                      />
-                    ) : null}
 
                     {props.selectedUser?.role === "service" ? (
                       <section className="sheet-section">
