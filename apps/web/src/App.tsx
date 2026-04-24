@@ -3759,26 +3759,51 @@ function TaskForm(props: {
                           }}
                         />
                         {editingChecklistItemId === item.clientId ? (
-                          <FormInput
-                            disabled={!props.canEdit}
-                            onBlur={cancelChecklistEdit}
-                            onChange={(event) => setEditingChecklistValue(event.target.value)}
-                            onKeyDown={(event) => {
-                              if (event.key === "Enter") {
-                                event.preventDefault();
-                                void submitChecklistEdit(item);
-                                return;
-                              }
+                          <div className="checklist-edit-shell">
+                            <FormInput
+                              disabled={!props.canEdit}
+                              onChange={(event) => setEditingChecklistValue(event.target.value)}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter") {
+                                  event.preventDefault();
+                                  void submitChecklistEdit(item);
+                                  return;
+                                }
 
-                              if (event.key === "Escape") {
-                                event.preventDefault();
-                                cancelChecklistEdit();
-                              }
-                            }}
-                            placeholder="Subtask description"
-                            ref={checklistEditInputRef}
-                            value={editingChecklistValue}
-                          />
+                                if (event.key === "Escape") {
+                                  event.preventDefault();
+                                  cancelChecklistEdit();
+                                }
+                              }}
+                              placeholder="Subtask description"
+                              ref={checklistEditInputRef}
+                              value={editingChecklistValue}
+                            />
+                            <div className="checklist-edit-actions">
+                              <Button
+                                disabled={!props.canEdit || !editingChecklistValue.trim()}
+                                onClick={() => {
+                                  void submitChecklistEdit(item);
+                                }}
+                                size="icon"
+                                type="button"
+                                variant="outline"
+                              >
+                                <Check className="size-4" />
+                                <span className="sr-only">Save checklist item</span>
+                              </Button>
+                              <Button
+                                disabled={!props.canEdit}
+                                onClick={cancelChecklistEdit}
+                                size="icon"
+                                type="button"
+                                variant="ghost"
+                              >
+                                <X className="size-4" />
+                                <span className="sr-only">Cancel checklist edit</span>
+                              </Button>
+                            </div>
+                          </div>
                         ) : (
                           <button
                             className={cn(
@@ -3798,28 +3823,30 @@ function TaskForm(props: {
                             <span className="checklist-item-body">{item.body}</span>
                           </button>
                         )}
-                        <Button
-                          className="checklist-remove-button"
-                          disabled={!props.canEdit}
-                          onClick={() => {
-                            if (editingChecklistItemId === item.clientId) {
-                              cancelChecklistEdit();
-                            }
+                        {editingChecklistItemId === item.clientId ? null : (
+                          <Button
+                            className="checklist-remove-button"
+                            disabled={!props.canEdit}
+                            onClick={() => {
+                              if (editingChecklistItemId === item.clientId) {
+                                cancelChecklistEdit();
+                              }
 
-                            void commitChecklistChange((current) => ({
-                              ...current,
-                              checklistItems: current.checklistItems.filter(
-                                (entry) => entry.clientId !== item.clientId
-                              )
-                            }));
-                          }}
-                          size="icon"
-                          type="button"
-                          variant="ghost"
-                        >
-                          <Trash2 className="size-4" />
-                          <span className="sr-only">Remove checklist item</span>
-                        </Button>
+                              void commitChecklistChange((current) => ({
+                                ...current,
+                                checklistItems: current.checklistItems.filter(
+                                  (entry) => entry.clientId !== item.clientId
+                                )
+                              }));
+                            }}
+                            size="icon"
+                            type="button"
+                            variant="ghost"
+                          >
+                            <Trash2 className="size-4" />
+                            <span className="sr-only">Remove checklist item</span>
+                          </Button>
+                        )}
                       </div>
                     </SortableChecklistRow>
                   ))}

@@ -1574,6 +1574,17 @@ a {
   cursor: default;
 }
 
+.checklist-edit-shell {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.checklist-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.35rem;
+}
+
 .checklist-item-button-complete {
   color: rgb(47 33 22 / 0.58);
 }
