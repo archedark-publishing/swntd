@@ -42,6 +42,7 @@ export async function bootstrapDatabase() {
         .values({
           householdId: DEFAULT_HOUSEHOLD_ID,
           doneArchiveAfterDays: config.doneArchiveAfterDays,
+          nearDueThresholdDays: 3,
           defaultTimezone: config.defaultTimezone,
           defaultCalendarExportKind: config.defaultCalendarExportKind
         })
@@ -49,6 +50,7 @@ export async function bootstrapDatabase() {
           target: householdSettings.householdId,
           set: {
             doneArchiveAfterDays: config.doneArchiveAfterDays,
+            nearDueThresholdDays: 3,
             defaultTimezone: config.defaultTimezone,
             defaultCalendarExportKind: config.defaultCalendarExportKind,
             updatedAt: new Date()

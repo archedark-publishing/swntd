@@ -335,6 +335,7 @@ export const householdSettings = sqliteTable("household_settings", {
     .primaryKey()
     .references(() => households.id, { onDelete: "cascade" }),
   doneArchiveAfterDays: integer("done_archive_after_days").notNull().default(30),
+  nearDueThresholdDays: integer("near_due_threshold_days").notNull().default(3),
   defaultTimezone: text("default_timezone").notNull(),
   defaultCalendarExportKind: text("default_calendar_export_kind", {
     enum: ["google", "ics"]

@@ -73,6 +73,7 @@ type SettingsResponse = {
   settings: {
     defaultCalendarExportKind: "google" | "ics";
     doneArchiveAfterDays: number;
+    nearDueThresholdDays: number;
   };
 };
 
@@ -450,7 +451,8 @@ describe("Phase 3 API", () => {
       jsonRequest({
         body: {
           defaultCalendarExportKind: "ics",
-          doneArchiveAfterDays: 14
+          doneArchiveAfterDays: 14,
+          nearDueThresholdDays: 5
         },
         headers: adminHeaders,
         method: "PATCH"
@@ -460,6 +462,7 @@ describe("Phase 3 API", () => {
     const settingsPatch = await parseJson<SettingsResponse>(settingsPatchResponse);
     expect(settingsPatch.settings.defaultCalendarExportKind).toBe("ics");
     expect(settingsPatch.settings.doneArchiveAfterDays).toBe(14);
+    expect(settingsPatch.settings.nearDueThresholdDays).toBe(5);
 
     const labelResponse = await app.request(
       "/api/v1/labels",

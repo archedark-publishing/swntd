@@ -200,6 +200,7 @@ export type UpdateSettingsInput = {
   defaultCalendarExportKind?: "google" | "ics" | undefined;
   defaultTimezone?: string | undefined;
   doneArchiveAfterDays?: number | undefined;
+  nearDueThresholdDays?: number | undefined;
 };
 
 export type CreateRecurringTemplateInput = {
@@ -1487,6 +1488,7 @@ export async function updateSettings(
         input.defaultCalendarExportKind ?? current.defaultCalendarExportKind,
       defaultTimezone: input.defaultTimezone ?? current.defaultTimezone,
       doneArchiveAfterDays: input.doneArchiveAfterDays ?? current.doneArchiveAfterDays,
+      nearDueThresholdDays: input.nearDueThresholdDays ?? current.nearDueThresholdDays,
       updatedAt: new Date()
     })
     .where(eq(householdSettings.householdId, actor.householdId))

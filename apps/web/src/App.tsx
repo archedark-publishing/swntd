@@ -96,6 +96,7 @@ import {
   buildGoogleCalendarUrl,
   downloadIcsFile
 } from "./calendar";
+import { getTaskDueState } from "./due-status";
 import { toast } from "sonner";
 import "./styles.css";
 
@@ -432,7 +433,8 @@ function normalizeSettingsDraft(settings: Settings) {
   return {
     defaultCalendarExportKind: settings.defaultCalendarExportKind,
     defaultTimezone: settings.defaultTimezone.trim(),
-    doneArchiveAfterDays: settings.doneArchiveAfterDays
+    doneArchiveAfterDays: settings.doneArchiveAfterDays,
+    nearDueThresholdDays: settings.nearDueThresholdDays
   };
 }
 
@@ -1205,7 +1207,8 @@ export function App() {
         api.updateSettings({
           defaultCalendarExportKind: nextSettings.defaultCalendarExportKind,
           defaultTimezone: nextSettings.defaultTimezone,
-          doneArchiveAfterDays: nextSettings.doneArchiveAfterDays
+          doneArchiveAfterDays: nextSettings.doneArchiveAfterDays,
+          nearDueThresholdDays: nextSettings.nearDueThresholdDays
         }),
       "Household settings saved.",
       { silentSuccess: true }
@@ -1486,6 +1489,7 @@ export function App() {
                   onQuickMove={handleQuickMove}
                   onReorder={handleReorder}
                   onToggleActorFilter={() => setOnlyMyTasks((current) => !current)}
+                  settings={snapshot.settings}
                   visibleTasks={onlyMyTasks ? myTasks : activeTasks}
                 />
               ) : null}
@@ -1511,6 +1515,7 @@ export function App() {
                     onOpenTask={openTask}
                     onQuickMove={() => Promise.resolve()}
                     onReorder={() => Promise.resolve()}
+                    settings={snapshot.settings}
                     showHeader={false}
                     tasks={archivedTasks}
                     title="Archive"
@@ -1753,6 +1758,7 @@ function BoardView(props: {
   onQuickMove: (task: TaskListItem, direction: -1 | 1) => Promise<void>;
   onReorder: (task: TaskListItem, direction: -1 | 1) => Promise<void>;
   onToggleActorFilter: () => void;
+  settings: Settings | null;
   visibleTasks: TaskListItem[];
 }) {
   const [activeTaskId, setActiveTaskId] = useState<UniqueIdentifier | null>(null);
@@ -2081,6 +2087,7 @@ function BoardView(props: {
                 onQuickMove={props.onQuickMove}
                 onReorder={props.onReorder}
                 onRegisterTaskNode={setTaskNode}
+                settings={props.settings}
                 status={status}
                 taskCount={getTaskColumnOrder(props.visibleTasks, status).length}
               />
@@ -2100,6 +2107,7 @@ function BoardView(props: {
                 onOpen={() => undefined}
                 onQuickMove={() => Promise.resolve()}
                 onReorder={() => Promise.resolve()}
+                settings={props.settings}
                 task={activeTask}
                 total={1}
               />
@@ -2129,6 +2137,7 @@ function BoardColumn(props: {
   onQuickMove: (task: TaskListItem, direction: -1 | 1) => Promise<void>;
   onRegisterTaskNode: (taskId: string, node: HTMLDivElement | null) => void;
   onReorder: (task: TaskListItem, direction: -1 | 1) => Promise<void>;
+  settings: Settings | null;
   status: TaskStatus;
   taskCount: number;
 }) {
@@ -2189,6 +2198,7 @@ function BoardColumn(props: {
                 onOpen={() => undefined}
                 onQuickMove={() => Promise.resolve()}
                 onReorder={() => Promise.resolve()}
+                settings={props.settings}
                 task={item.task}
                 total={props.items.length}
               />
@@ -2202,6 +2212,7 @@ function BoardColumn(props: {
                 onQuickMove={props.onQuickMove}
                 onRegisterNode={props.onRegisterTaskNode}
                 onReorder={props.onReorder}
+                settings={props.settings}
                 task={item.task}
                 total={props.items.length}
               />
@@ -2292,6 +2303,7 @@ function TaskListView(props: {
   onOpenTask: (taskId: string) => void;
   onQuickMove: (task: TaskListItem, direction: -1 | 1) => Promise<void>;
   onReorder: (task: TaskListItem, direction: -1 | 1) => Promise<void>;
+  settings: Settings | null;
   showHeader?: boolean;
   tasks: TaskListItem[];
   title: string;
@@ -2317,6 +2329,7 @@ function TaskListView(props: {
             onOpen={props.onOpenTask}
             onQuickMove={props.onQuickMove}
             onReorder={props.onReorder}
+            settings={props.settings}
             task={task}
             total={props.tasks.length}
           />
@@ -2336,6 +2349,7 @@ type TaskCardProps = {
   onOpen: (taskId: string) => void;
   onQuickMove: (task: TaskListItem, direction: -1 | 1) => Promise<void>;
   onReorder: (task: TaskListItem, direction: -1 | 1) => Promise<void>;
+  settings: Settings | null;
   task: TaskListItem;
   total: number;
 };
@@ -2348,13 +2362,16 @@ function TaskCard(props: TaskCardProps) {
   const allowManualReorder = props.allowManualReorder ?? true;
   const hideActions = props.hideActions ?? false;
   const isPlaceholder = props.isPlaceholder ?? false;
+  const dueState = getTaskDueState(props.task, props.settings?.nearDueThresholdDays ?? 3);
 
   return (
     <SurfaceCard
       className={cn(
         "task-card gap-0 py-0",
         props.isDragging && "task-card-dragging",
-        isPlaceholder && "task-card-placeholder"
+        isPlaceholder && "task-card-placeholder",
+        dueState === "near" && "task-card-near-due",
+        dueState === "past" && "task-card-past-due"
       )}
     >
       <button
@@ -2377,7 +2394,14 @@ function TaskCard(props: TaskCardProps) {
             {props.task.assignee?.displayName ?? "Unassigned"}
           </Badge>
           {props.task.dueOn ? (
-            <Badge className="task-meta-pill" variant="outline">
+            <Badge
+              className={cn(
+                "task-meta-pill",
+                dueState === "near" && "task-meta-pill-near-due",
+                dueState === "past" && "task-meta-pill-past-due"
+              )}
+              variant="outline"
+            >
               {formatDate(props.task.dueOn, props.task.dueTime)}
             </Badge>
           ) : null}
@@ -3903,11 +3927,15 @@ function SettingsView(props: {
   const submitSettingsAutosave = useEffectEvent(async (nextSettings: Settings) => {
     const normalized = normalizeSettingsDraft(nextSettings);
 
-    if (!normalized.defaultTimezone || !Number.isFinite(normalized.doneArchiveAfterDays)) {
+    if (
+      !normalized.defaultTimezone ||
+      !Number.isFinite(normalized.doneArchiveAfterDays) ||
+      !Number.isFinite(normalized.nearDueThresholdDays)
+    ) {
       return;
     }
 
-    if (normalized.doneArchiveAfterDays < 1) {
+    if (normalized.doneArchiveAfterDays < 1 || normalized.nearDueThresholdDays < 1) {
       return;
     }
 
@@ -3955,11 +3983,15 @@ function SettingsView(props: {
 
     const normalized = normalizeSettingsDraft(settingsDraft);
 
-    if (!normalized.defaultTimezone || !Number.isFinite(normalized.doneArchiveAfterDays)) {
+    if (
+      !normalized.defaultTimezone ||
+      !Number.isFinite(normalized.doneArchiveAfterDays) ||
+      !Number.isFinite(normalized.nearDueThresholdDays)
+    ) {
       return;
     }
 
-    if (normalized.doneArchiveAfterDays < 1) {
+    if (normalized.doneArchiveAfterDays < 1 || normalized.nearDueThresholdDays < 1) {
       return;
     }
 
@@ -4052,7 +4084,7 @@ function SettingsView(props: {
         {props.activePage === "general" ? (
           <SurfaceCard className="settings-card gap-0 py-0">
             <SectionHeading
-              description="Tune the default timezone, archive cadence, and calendar preference."
+              description="Tune the default timezone, archive cadence, due-date warning threshold, and calendar preference."
               eyebrow="House Rules"
               title="General Settings"
             />
@@ -4079,6 +4111,19 @@ function SettingsView(props: {
                   }
                   type="number"
                   value={settingsDraft.doneArchiveAfterDays}
+                />
+              </FormField>
+              <FormField label="Near due threshold (days)">
+                <FormInput
+                  min={1}
+                  onChange={(event) =>
+                    setSettingsDraft({
+                      ...settingsDraft,
+                      nearDueThresholdDays: Number(event.target.value)
+                    })
+                  }
+                  type="number"
+                  value={settingsDraft.nearDueThresholdDays}
                 />
               </FormField>
               <FormSelect

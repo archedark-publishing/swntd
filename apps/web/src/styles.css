@@ -748,6 +748,18 @@ a {
   overflow: hidden;
 }
 
+.task-card-near-due {
+  box-shadow:
+    0 0 0 1px rgb(212 124 42 / 0.18),
+    0 0 1.1rem rgb(212 124 42 / 0.22);
+}
+
+.task-card-past-due {
+  box-shadow:
+    0 0 0 1px rgb(185 46 46 / 0.24),
+    0 0 1.4rem rgb(185 46 46 / 0.28);
+}
+
 .task-card-placeholder {
   border-style: dashed;
   border-color: rgb(41 77 67 / 0.25);
@@ -852,6 +864,18 @@ a {
 .task-indicator-pill {
   background: rgb(41 77 67 / 0.09);
   color: rgb(32 23 15 / 0.84);
+}
+
+.task-meta-pill-near-due {
+  border-color: rgb(212 124 42 / 0.22);
+  background: rgb(255 244 234 / 0.92);
+  color: rgb(155 82 18 / 0.92);
+}
+
+.task-meta-pill-past-due {
+  border-color: rgb(185 46 46 / 0.28);
+  background: rgb(255 237 237 / 0.96);
+  color: rgb(167 27 27 / 0.96);
 }
 
 .label-row {

@@ -112,6 +112,7 @@ export type Settings = {
   defaultCalendarExportKind: "google" | "ics";
   defaultTimezone: string;
   doneArchiveAfterDays: number;
+  nearDueThresholdDays: number;
   householdId: string;
   updatedAt: string;
 };
@@ -523,6 +524,7 @@ export const api = {
     defaultCalendarExportKind?: "google" | "ics";
     defaultTimezone?: string;
     doneArchiveAfterDays?: number;
+    nearDueThresholdDays?: number;
   }) {
     return request<{ settings: Settings }>("/api/v1/settings", {
       body: JSON.stringify(input),
