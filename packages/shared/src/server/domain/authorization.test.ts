@@ -46,13 +46,17 @@ describe("authorization policies", () => {
     expect(canDownloadAttachment(adminActor, task)).toBe(true);
   });
 
-  it("limits service actors to eligible assigned tasks", () => {
+  it("limits service actors to eligible AI-enabled tasks or work assigned to them", () => {
     const eligibleTask = createTaskFixture({
-      assigneeUserId: "service-1",
+      assigneeUserId: null,
       aiAssistanceEnabled: true
     });
-    const ineligibleTask = createTaskFixture({
+    const assignedTask = createTaskFixture({
       assigneeUserId: "service-1",
+      aiAssistanceEnabled: false
+    });
+    const ineligibleTask = createTaskFixture({
+      assigneeUserId: "service-2",
       aiAssistanceEnabled: false
     });
 
@@ -61,7 +65,9 @@ describe("authorization policies", () => {
     expect(canManageSettings(serviceActor)).toBe(false);
     expect(canUploadBinaryAttachment(serviceActor)).toBe(false);
     expect(canReadTask(serviceActor, eligibleTask)).toBe(true);
+    expect(canReadTask(serviceActor, assignedTask)).toBe(true);
     expect(canAttachExternalLink(serviceActor, eligibleTask)).toBe(true);
+    expect(canTransitionTask(serviceActor, assignedTask)).toBe(true);
     expect(canTransitionTask(serviceActor, eligibleTask)).toBe(true);
     expect(canDownloadAttachment(serviceActor, eligibleTask)).toBe(true);
     expect(canTransitionTask(serviceActor, ineligibleTask)).toBe(false);

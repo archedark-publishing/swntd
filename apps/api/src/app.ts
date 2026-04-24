@@ -17,6 +17,7 @@ import {
 import { resolveRequestActor } from "./auth/resolve-actor";
 import {
   addAttachmentLinkToTask,
+  addChecklistItemToTask,
   addCommentToTask,
   addUploadToTask,
   archiveTask,
@@ -26,6 +27,7 @@ import {
   createTask,
   claimBootstrapOwnership,
   deleteArchivedTask,
+  deleteChecklistItemFromTask,
   deleteLabel,
   getBootstrapContext,
   getCurrentActor,
@@ -42,6 +44,7 @@ import {
   removeHouseholdUser,
   reorderTask,
   revokeServiceToken,
+  setChecklistItemCompletion,
   transitionTask,
   unarchiveTask,
   updateLabel,
@@ -97,6 +100,20 @@ const reorderTaskSchema = z.object({
 
 const commentSchema = z.object({
   body: z.string().trim().min(1)
+});
+
+const addChecklistItemSchema = z.object({
+  body: z.string().trim().min(1),
+  expectedRevision: z.number().int().nonnegative()
+});
+
+const setChecklistItemCompletionSchema = z.object({
+  expectedRevision: z.number().int().nonnegative(),
+  isCompleted: z.boolean()
+});
+
+const deleteChecklistItemSchema = z.object({
+  expectedRevision: z.number().int().nonnegative()
 });
 
 const attachmentLinkSchema = z.object({
@@ -497,6 +514,46 @@ export function createApp() {
     jsonOk(c, await getTaskDetail(c.var.db, c.var.actor, c.req.param("taskId")))
   );
 
+  app.post("/api/v1/tasks/:taskId/checklist-items", async (c) => {
+    const input = await parseJsonBody(c, addChecklistItemSchema);
+
+    return jsonOk(
+      c,
+      await addChecklistItemToTask(c.var.db, c.var.actor, c.req.param("taskId"), input),
+      201
+    );
+  });
+
+  app.post("/api/v1/tasks/:taskId/checklist-items/:checklistItemId/completion", async (c) => {
+    const input = await parseJsonBody(c, setChecklistItemCompletionSchema);
+
+    return jsonOk(
+      c,
+      await setChecklistItemCompletion(
+        c.var.db,
+        c.var.actor,
+        c.req.param("taskId"),
+        c.req.param("checklistItemId"),
+        input
+      )
+    );
+  });
+
+  app.delete("/api/v1/tasks/:taskId/checklist-items/:checklistItemId", async (c) => {
+    const input = await parseJsonBody(c, deleteChecklistItemSchema);
+
+    return jsonOk(
+      c,
+      await deleteChecklistItemFromTask(
+        c.var.db,
+        c.var.actor,
+        c.req.param("taskId"),
+        c.req.param("checklistItemId"),
+        input
+      )
+    );
+  });
+
   app.patch("/api/v1/tasks/:taskId", async (c) => {
     const input = await parseJsonBody(c, updateTaskSchema);
 
@@ -661,6 +718,9 @@ export function createApp() {
         "/api/v1/tasks/{taskId}": ["get", "patch", "delete"],
         "/api/v1/tasks/{taskId}/archive": ["post"],
         "/api/v1/tasks/{taskId}/attachment-links": ["post"],
+        "/api/v1/tasks/{taskId}/checklist-items": ["post"],
+        "/api/v1/tasks/{taskId}/checklist-items/{checklistItemId}": ["delete"],
+        "/api/v1/tasks/{taskId}/checklist-items/{checklistItemId}/completion": ["post"],
         "/api/v1/tasks/{taskId}/attachments/{attachmentId}/download": ["get"],
         "/api/v1/tasks/{taskId}/comments": ["post"],
         "/api/v1/tasks/{taskId}/reorder": ["post"],

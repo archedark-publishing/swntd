@@ -87,8 +87,14 @@ type TaskItemResponse = {
       downloadUrl: string | null;
       storageKind: string;
     }>;
+    checklistItems: Array<{
+      body: string;
+      id: string;
+      isCompleted: boolean;
+    }>;
     checklistProgress: {
       completed: number;
+      total?: number;
     };
     commentCount: number;
     comments: unknown[];
@@ -530,6 +536,7 @@ describe("Phase 3 API", () => {
     expect(openApiResponse.status).toBe(200);
     const openApi = await parseJson<OpenApiResponse>(openApiResponse);
     expect(openApi.paths["/api/v1/tasks/{taskId}/status"]).toContain("post");
+    expect(openApi.paths["/api/v1/tasks/{taskId}/checklist-items"]).toContain("post");
     expect(openApi.paths["/api/v1/users/{userId}/service-tokens"]).toContain("post");
     expect(openApi.paths["/api/v1/users/{userId}/remove"]).toContain("post");
   });
@@ -785,7 +792,7 @@ describe("Phase 3 API", () => {
       jsonRequest({
         body: {
           aiAssistanceEnabled: true,
-          assigneeUserId: assistantUserId,
+          checklistItems: [{ body: "Review current state" }],
           title: "Draft grocery recap"
         },
         headers: adminHeaders,
@@ -795,6 +802,23 @@ describe("Phase 3 API", () => {
     expect(createEligibleTaskResponse.status).toBe(201);
     const eligibleTask = await parseJson<TaskItemResponse>(
       createEligibleTaskResponse
+    );
+
+    const createAssignedEligibleTaskResponse = await app.request(
+      "/api/v1/tasks",
+      jsonRequest({
+        body: {
+          aiAssistanceEnabled: true,
+          assigneeUserId: assistantUserId,
+          title: "Assigned assistant follow-up"
+        },
+        headers: adminHeaders,
+        method: "POST"
+      })
+    );
+    expect(createAssignedEligibleTaskResponse.status).toBe(201);
+    const assignedEligibleTask = await parseJson<TaskItemResponse>(
+      createAssignedEligibleTaskResponse
     );
 
     const createHumanTaskResponse = await app.request(
@@ -809,6 +833,22 @@ describe("Phase 3 API", () => {
     );
     expect(createHumanTaskResponse.status).toBe(201);
     const humanTask = await parseJson<TaskItemResponse>(createHumanTaskResponse);
+
+    const createAssignedHumanTaskResponse = await app.request(
+      "/api/v1/tasks",
+      jsonRequest({
+        body: {
+          assigneeUserId: assistantUserId,
+          title: "Assigned human-only follow-up"
+        },
+        headers: adminHeaders,
+        method: "POST"
+      })
+    );
+    expect(createAssignedHumanTaskResponse.status).toBe(201);
+    const assignedHumanTask = await parseJson<TaskItemResponse>(
+      createAssignedHumanTaskResponse
+    );
 
     const assistantToken = await issueAssistantBearerToken();
     const serviceHeaders = {
@@ -849,9 +889,24 @@ describe("Phase 3 API", () => {
     });
     expect(listTasksResponse.status).toBe(200);
     const taskList = await parseJson<TaskListResponse>(listTasksResponse);
-    expect(taskList.total).toBe(1);
-    expect(taskList.items).toHaveLength(1);
-    expect(taskList.items[0]!.id).toBe(eligibleTask.item.id);
+    expect(taskList.total).toBe(3);
+    expect(taskList.items).toHaveLength(3);
+    expect(taskList.items.map((task) => task.id).sort()).toEqual(
+      [assignedEligibleTask.item.id, assignedHumanTask.item.id, eligibleTask.item.id].sort()
+    );
+
+    const getEligibleTaskResponse = await app.request(
+      `/api/v1/tasks/${eligibleTask.item.id}`,
+      {
+        headers: serviceHeaders
+      }
+    );
+    expect(getEligibleTaskResponse.status).toBe(200);
+    const fetchedEligibleTask = await parseJson<TaskItemResponse>(
+      getEligibleTaskResponse
+    );
+    expect(fetchedEligibleTask.item.assignee).toBeNull();
+    expect(fetchedEligibleTask.item.checklistItems).toHaveLength(1);
 
     const transitionResponse = await app.request(
       `/api/v1/tasks/${eligibleTask.item.id}/status`,
@@ -895,6 +950,64 @@ describe("Phase 3 API", () => {
     );
     expect(linkResponse.status).toBe(201);
 
+    const addChecklistItemResponse = await app.request(
+      `/api/v1/tasks/${eligibleTask.item.id}/checklist-items`,
+      jsonRequest({
+        body: {
+          body: "Share draft back with Josh",
+          expectedRevision: transitionedTask.item.revision
+        },
+        headers: serviceHeaders,
+        method: "POST"
+      })
+    );
+    expect(addChecklistItemResponse.status).toBe(201);
+    const taskWithNewChecklistItem = await parseJson<TaskItemResponse>(
+      addChecklistItemResponse
+    );
+    expect(taskWithNewChecklistItem.item.revision).toBe(2);
+    expect(taskWithNewChecklistItem.item.checklistItems).toHaveLength(2);
+
+    const newChecklistItemId =
+      taskWithNewChecklistItem.item.checklistItems[
+        taskWithNewChecklistItem.item.checklistItems.length - 1
+      ]!.id;
+
+    const completeChecklistItemResponse = await app.request(
+      `/api/v1/tasks/${eligibleTask.item.id}/checklist-items/${newChecklistItemId}/completion`,
+      jsonRequest({
+        body: {
+          expectedRevision: taskWithNewChecklistItem.item.revision,
+          isCompleted: true
+        },
+        headers: serviceHeaders,
+        method: "POST"
+      })
+    );
+    expect(completeChecklistItemResponse.status).toBe(200);
+    const taskWithCompletedChecklistItem = await parseJson<TaskItemResponse>(
+      completeChecklistItemResponse
+    );
+    expect(taskWithCompletedChecklistItem.item.checklistProgress.completed).toBe(1);
+
+    const deleteChecklistItemResponse = await app.request(
+      `/api/v1/tasks/${eligibleTask.item.id}/checklist-items/${newChecklistItemId}`,
+      jsonRequest({
+        body: {
+          expectedRevision: taskWithCompletedChecklistItem.item.revision
+        },
+        headers: serviceHeaders,
+        method: "DELETE"
+      })
+    );
+    expect(deleteChecklistItemResponse.status).toBe(200);
+    const taskAfterChecklistDelete = await parseJson<TaskItemResponse>(
+      deleteChecklistItemResponse
+    );
+    expect(
+      taskAfterChecklistDelete.item.checklistItems.find((item) => item.id === newChecklistItemId)
+    ).toBeUndefined();
+
     const uploadForm = new FormData();
     uploadForm.set(
       "file",
@@ -917,5 +1030,13 @@ describe("Phase 3 API", () => {
       }
     );
     expect(forbiddenTaskResponse.status).toBe(403);
+
+    const assignedHumanTaskResponse = await app.request(
+      `/api/v1/tasks/${assignedHumanTask.item.id}`,
+      {
+        headers: serviceHeaders
+      }
+    );
+    expect(assignedHumanTaskResponse.status).toBe(200);
   });
 });
