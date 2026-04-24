@@ -4459,11 +4459,6 @@ function SettingsView(props: {
                       ) : null}
                     </div>
                     {userActionMessage ? <EmptyStateCard message={userActionMessage} /> : null}
-                    {props.selectedUser ? (
-                      <EmptyStateCard
-                        message="Removing an actor is permanent. They stay attached to past comments and history, but disappear from the household cast, cannot be assigned to anything new, and assistants lose any active tokens."
-                      />
-                    ) : null}
 
                     {props.selectedUser?.role === "service" ? (
                       <section className="sheet-section">
