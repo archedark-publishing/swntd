@@ -3759,7 +3759,21 @@ function TaskForm(props: {
                           }}
                         />
                         {editingChecklistItemId === item.clientId ? (
-                          <div className="checklist-edit-shell">
+                          <div
+                            className="checklist-edit-shell"
+                            onBlur={(event) => {
+                              const nextFocusTarget = event.relatedTarget;
+
+                              if (
+                                nextFocusTarget instanceof Node &&
+                                event.currentTarget.contains(nextFocusTarget)
+                              ) {
+                                return;
+                              }
+
+                              cancelChecklistEdit();
+                            }}
+                          >
                             <FormInput
                               disabled={!props.canEdit}
                               onChange={(event) => setEditingChecklistValue(event.target.value)}
