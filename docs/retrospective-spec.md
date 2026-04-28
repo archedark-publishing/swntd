@@ -617,52 +617,56 @@ It should include archived tasks. No task-retrospective link is created in V1.
 
 ### Phase 1: Domain And Schema
 
-- Add Drizzle schema entities and migration.
-- Add retrospective settings columns.
-- Add shared domain constants and type unions for round kinds, statuses, tracking kinds, ratings, entry phases, and visibility states.
-- Add authorization helpers and tests.
-- Seed the generic starter template during bootstrap if none exists for the household.
-- Seed an initial active commitment period during bootstrap if none exists for the household.
+- [x] Add Drizzle schema entities and migration.
+- [x] Add retrospective settings columns.
+- [x] Add shared domain constants and type unions for round kinds, statuses, tracking kinds, ratings, entry phases, and visibility states.
+- [x] Add authorization helpers and tests.
+- [x] Seed the generic starter template during bootstrap if none exists for the household.
+- [x] Seed an initial active commitment period during bootstrap if none exists for the household.
 
 ### Phase 2: API Services
 
-- Add service functions for templates, commitment periods, retrospectives, rounds, notes, commitments, checkins, and reviews.
-- Add private-note query filtering at the service layer.
-- Add reveal mutation as an atomic server-side operation.
-- Add completed-task lookback query.
-- Add finalization logic that creates the next commitment period.
-- Add integration tests for:
-  - starter template and initial period bootstrap
-  - creating a retrospective from a template after closure
-  - refusing retrospective creation before closure
-  - one-active-retro enforcement
-  - private notes hidden from other admins
-  - private notes revealed on configured notes round
-  - private-forever notes never revealed
-  - commitment creation, edits, checkins, and manual review
+- [x] Add service functions for templates, commitment periods, retrospectives, rounds, notes, commitments, and checkins.
+- [ ] Add service functions for commitment reviews.
+- [x] Add private-note query filtering at the service layer.
+- [x] Add reveal mutation as an atomic server-side operation.
+- [x] Add completed-task lookback query.
+- [x] Add finalization logic that creates the next commitment period.
+- [x] Add integration tests for starter template and initial period bootstrap.
+- [x] Add integration tests for creating a retrospective from a template after closure.
+- [ ] Add integration test for refusing retrospective creation before closure.
+- [x] Add integration test for one-active-retro enforcement.
+- [x] Add integration test for private notes hidden from other admins.
+- [x] Add integration test for private notes revealed on configured notes round.
+- [ ] Add integration test for private-forever notes never revealed.
+- [ ] Add integration tests for commitment reviews.
+- [x] Add integration tests for commitment creation and edits.
+- [ ] Add integration tests for commitment checkins.
 
 ### Phase 3: API Routes And Client
 
-- Add Hono route schemas.
-- Add frontend API client types and methods.
-- Prefer view-specific loading for retrospective data so the main board refresh does not grow too large.
+- [x] Add Hono route schemas.
+- [x] Add backend routes for retrospective home, template listing, retrospective lifecycle, notes, commitments, and checkins.
+- [ ] Add backend routes for commitment reviews.
+- [ ] Add frontend API client types and methods.
+- [ ] Prefer view-specific loading for retrospective data so the main board refresh does not grow too large.
 
 ### Phase 4: Web UI
 
-- Add Retrospective nav item and hash route.
-- Build Retrospective Home.
-- Build active facilitated session shell.
-- Build round components.
-- Build commitment tracker components.
-- Build completed retrospective detail.
-- Add Retrospective settings tab and template editor.
+- [ ] Add Retrospective nav item and hash route.
+- [ ] Build Retrospective Home.
+- [ ] Build active facilitated session shell.
+- [ ] Build round components.
+- [ ] Build commitment tracker components.
+- [ ] Build completed retrospective detail.
+- [ ] Add Retrospective settings tab and template editor.
 
 ### Phase 5: Polish And Documentation
 
-- Update README feature list.
-- Update product spec or link this feature spec.
-- Add contributor notes for privacy-sensitive retrospective data.
-- Run lint, typecheck, tests, and build.
+- [ ] Update README feature list.
+- [ ] Update product spec or link this feature spec.
+- [ ] Add contributor notes for privacy-sensitive retrospective data.
+- [ ] Run lint, typecheck, tests, and build.
 
 ## Recommended V1 Decisions
 
