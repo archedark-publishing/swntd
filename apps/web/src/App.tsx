@@ -1829,6 +1829,14 @@ export function App() {
                       "Retrospective finalized."
                     )
                   }
+                  onOpenRetrospective={async (retrospectiveId) => {
+                    const detail = await api.getRetrospective(retrospectiveId);
+
+                    setRetrospectiveState((current) => ({
+                      ...current,
+                      detail: detail.item
+                    }));
+                  }}
                   onRefresh={refreshRetrospective}
                   onReviewCommitment={(commitmentId, retrospectiveId, roundId, rating) =>
                     runRetrospectiveMutation(
@@ -5100,6 +5108,7 @@ function RetrospectiveView(props: {
   onCreateRetrospective: (templateId?: string) => Promise<unknown>;
   onEnterRound: (retrospectiveId: string, roundId: string) => Promise<unknown>;
   onFinalize: (retrospectiveId: string) => Promise<unknown>;
+  onOpenRetrospective: (retrospectiveId: string) => Promise<void>;
   onRefresh: () => Promise<void>;
   onReviewCommitment: (
     commitmentId: string,
@@ -5258,6 +5267,32 @@ function RetrospectiveView(props: {
         commitments={detail?.commitments ?? home.commitments}
         onAddCheckin={props.onAddCheckin}
       />
+
+      <SurfaceCard className="retrospective-card">
+        <SectionHeading compact eyebrow="History" title="Past retrospectives" />
+        {home.recentRetrospectives.length === 0 ? (
+          <EmptyStateCard message="No finalized retrospectives yet." />
+        ) : (
+          <div className="retrospective-list">
+            {home.recentRetrospectives.map((retrospective) => (
+              <div className="retrospective-row" key={retrospective.id}>
+                <span>
+                  <strong>{retrospective.title}</strong>
+                  <span>{retrospective.finalizedAt ? "Finalized" : retrospective.status}</span>
+                </span>
+                <Button
+                  onClick={() => void props.onOpenRetrospective(retrospective.id)}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  Open
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </SurfaceCard>
     </section>
   );
 }
@@ -5309,6 +5344,7 @@ function ActiveRetrospectivePanel(props: {
             ) : null}
             {lastRound && currentRound?.id === lastRound.id ? (
               <Button
+                disabled={props.detail.status === "finalized"}
                 onClick={() => void props.onFinalize(props.detail.id)}
                 size="sm"
                 type="button"
@@ -5355,7 +5391,7 @@ function ActiveRetrospectivePanel(props: {
         />
       ) : null}
 
-      {currentRound ? (
+      {currentRound && props.detail.status !== "finalized" ? (
         <div className="header-action-row">
           <Button
             onClick={() => void props.onCompleteRound(props.detail.id, currentRound.id)}
@@ -5665,6 +5701,7 @@ function CommitmentTracker(props: {
                 <span>{getCommitmentProgressLabel(commitment)}</span>
               </span>
               <Button
+                disabled={commitment.status !== "active"}
                 onClick={() => void props.onAddCheckin(commitment.id)}
                 size="sm"
                 type="button"

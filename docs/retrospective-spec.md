@@ -659,7 +659,7 @@ It should include archived tasks. No task-retrospective link is created in V1.
 - [x] Build commitment review rating controls.
 - [ ] Build richer completed-task lookback and completed-round summaries.
 - [x] Build commitment tracker components.
-- [ ] Build completed retrospective detail.
+- [x] Build completed retrospective detail.
 - [x] Add Retrospective settings tab.
 - [ ] Add retrospective template editor.
 
