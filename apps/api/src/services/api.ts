@@ -782,6 +782,41 @@ function computeNextClosureOn(args: {
   }
 }
 
+function computePreviousPeriodStartOn(args: {
+  cadence: RetrospectiveCadence;
+  closureOn: string;
+  interval: number;
+}) {
+  const base = new Date(`${args.closureOn}T00:00:00.000Z`);
+
+  switch (args.cadence) {
+    case "weekly":
+      return toIsoDate(addDays(base, args.interval * -7));
+    case "quarterly":
+      return toIsoDate(addMonths(base, args.interval * -3));
+    case "custom":
+    case "monthly":
+      return toIsoDate(addMonths(base, -args.interval));
+    default:
+      return toIsoDate(addMonths(base, -args.interval));
+  }
+}
+
+function computeInitialCommitmentPeriodDates(settings?: {
+  retrospectiveCadence: RetrospectiveCadence;
+  retrospectiveCadenceInterval: number;
+}) {
+  const closureOn = todayIsoDate();
+  const interval = Math.max(1, settings?.retrospectiveCadenceInterval ?? 1);
+  const periodStartOn = computePreviousPeriodStartOn({
+    cadence: settings?.retrospectiveCadence ?? "monthly",
+    closureOn,
+    interval
+  });
+
+  return { closureOn, periodStartOn };
+}
+
 async function getRetrospectiveOrThrow(
   db: DatabaseClient,
   actor: AuthenticatedActor,
@@ -1325,7 +1360,7 @@ export async function getRetrospectiveHome(
     .select()
     .from(householdSettings)
     .where(eq(householdSettings.householdId, actor.householdId));
-  const [activePeriod] = await db
+  let [activePeriod] = await db
     .select()
     .from(commitmentPeriods)
     .where(
@@ -1346,6 +1381,20 @@ export async function getRetrospectiveHome(
       )
     )
     .limit(1);
+
+  if (!activePeriod && !openRetrospective) {
+    const initialPeriod = computeInitialCommitmentPeriodDates(settings);
+    const [createdPeriod] = await db
+      .insert(commitmentPeriods)
+      .values({
+        householdId: actor.householdId,
+        ...initialPeriod
+      })
+      .returning();
+
+    activePeriod = createdPeriod;
+  }
+
   const recentRetrospectives = await db
     .select()
     .from(retrospectives)
@@ -1552,7 +1601,7 @@ export async function createRetrospective(
       );
     }
 
-    const [period] = await tx
+    let [period] = await tx
       .select()
       .from(commitmentPeriods)
       .where(
@@ -1565,10 +1614,19 @@ export async function createRetrospective(
       .limit(1);
 
     if (!period) {
-      throw new ApiError(
-        409,
-        "commitment_period_missing",
-        "No active commitment period exists."
+      const initialPeriod = computeInitialCommitmentPeriodDates(settings);
+      const [createdPeriod] = await tx
+        .insert(commitmentPeriods)
+        .values({
+          householdId: actor.householdId,
+          ...initialPeriod
+        })
+        .returning();
+
+      period = getRequiredRow(
+        createdPeriod,
+        "commitment_period_create_failed",
+        "Commitment period creation failed."
       );
     }
 

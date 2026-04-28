@@ -251,6 +251,16 @@ async function forceActiveCommitmentPeriodClosed(closureOn: string) {
   }
 }
 
+async function deleteCommitmentPeriods() {
+  const { client, db } = await createDatabase();
+
+  try {
+    await db.delete(commitmentPeriods);
+  } finally {
+    client.close();
+  }
+}
+
 async function setTemplateRoundPrivacy(title: string, privacy: "private") {
   const { client, db } = await createDatabase();
 
@@ -874,6 +884,32 @@ describe("Phase 3 API", () => {
     expect(revokeTokenResponse.status).toBe(200);
   });
 
+  it("creates an initial retrospective period when none exists", async () => {
+    const adminHeaders = trustedHeader("admin1@example.com");
+
+    await deleteCommitmentPeriods();
+
+    const homeResponse = await app.request("/api/v1/retrospective-home", {
+      headers: adminHeaders
+    });
+    expect(homeResponse.status).toBe(200);
+    const home = await parseJson<RetrospectiveHomeResponse>(homeResponse);
+    expect(home.activePeriod.id).toEqual(expect.any(String));
+    expect(home.daysUntilClosure).toBe(0);
+
+    const retrospectiveCreateResponse = await app.request(
+      "/api/v1/retrospectives",
+      jsonRequest({
+        body: {
+          title: "First retro"
+        },
+        headers: adminHeaders,
+        method: "POST"
+      })
+    );
+    expect(retrospectiveCreateResponse.status).toBe(201);
+  });
+
   it("supports retrospective notes, reveal, commitments, and finalization", async () => {
     const adminHeaders = trustedHeader("admin1@example.com");
     const otherAdminHeaders = trustedHeader("admin2@example.com");
@@ -926,6 +962,8 @@ describe("Phase 3 API", () => {
       hiddenNotesResponse
     );
     expect(hiddenNotes.items).toHaveLength(0);
+
+    await forceActiveCommitmentPeriodClosed("2999-01-31");
 
     const earlyRetrospectiveResponse = await app.request(
       "/api/v1/retrospectives",

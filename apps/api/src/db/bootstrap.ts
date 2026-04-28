@@ -41,21 +41,21 @@ function toIsoDate(date: Date) {
   return date.toISOString().slice(0, 10);
 }
 
-function computeInitialClosureOn(args: {
+function computePreviousPeriodStartOn(args: {
   cadence: "weekly" | "monthly" | "quarterly" | "custom";
+  closureOn: string;
   interval: number;
-  periodStartOn: string;
 }) {
-  const base = new Date(`${args.periodStartOn}T00:00:00.000Z`);
+  const base = new Date(`${args.closureOn}T00:00:00.000Z`);
 
   switch (args.cadence) {
     case "weekly":
-      return toIsoDate(addDays(base, args.interval * 7));
+      return toIsoDate(addDays(base, args.interval * -7));
     case "quarterly":
-      return toIsoDate(addMonths(base, args.interval * 3));
+      return toIsoDate(addMonths(base, args.interval * -3));
     case "custom":
     case "monthly":
-      return toIsoDate(addMonths(base, args.interval));
+      return toIsoDate(addMonths(base, -args.interval));
   }
 }
 
@@ -269,18 +269,18 @@ export async function bootstrapDatabase() {
           .from(householdSettings)
           .where(eq(householdSettings.householdId, DEFAULT_HOUSEHOLD_ID))
           .limit(1);
-        const periodStartOn = todayIsoDate();
+        const closureOn = todayIsoDate();
         const cadence = settings?.cadence ?? "monthly";
         const interval = settings?.interval ?? 1;
 
         await tx.insert(commitmentPeriods).values({
           householdId: DEFAULT_HOUSEHOLD_ID,
-          periodStartOn,
-          closureOn: computeInitialClosureOn({
+          periodStartOn: computePreviousPeriodStartOn({
             cadence,
-            interval,
-            periodStartOn
-          })
+            closureOn,
+            interval
+          }),
+          closureOn
         });
       }
     });

@@ -38,6 +38,9 @@ describe("bootstrapDatabase", () => {
     expect(second.seededTemplates).toHaveLength(1);
     expect(second.seededPeriods).toHaveLength(1);
     expect(second.seededPeriods[0]?.status).toBe("active");
+    expect(second.seededPeriods[0]?.closureOn).toBe(
+      new Date().toISOString().slice(0, 10)
+    );
     expect(
       second.seededUsers.filter((user) => user.role === "admin").map((user) => user.email)
     ).toEqual(["admin1@example.com", "admin2@example.com"]);
