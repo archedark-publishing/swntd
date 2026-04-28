@@ -88,12 +88,16 @@ import {
   type Commitment,
   type CommitmentTrackingKind,
   type RetrospectiveDetail,
+  type RetrospectiveEntryPhase,
   type RetrospectiveHome,
   type RetrospectiveNote,
   type RetrospectiveNoteWritePhase,
+  type RetrospectivePrivacy,
   type RetrospectiveRound,
+  type RetrospectiveRoundKind,
   type RetrospectiveTemplate,
   type RetrospectiveTemplateRound,
+  type RetrospectiveTemplateInput,
   type RecurringTemplate,
   type ServiceToken,
   type Settings,
@@ -175,6 +179,22 @@ type TemplateDraft = {
   recurrenceCadence: "daily" | "weekly" | "monthly";
   recurrenceInterval: number;
   title: string;
+};
+
+type RetrospectiveTemplateRoundDraft = {
+  clientId: string;
+  configJson: string;
+  entryPhase: RetrospectiveEntryPhase;
+  kind: RetrospectiveRoundKind;
+  privacy: RetrospectivePrivacy;
+  prompt: string;
+  title: string;
+};
+
+type RetrospectiveTemplateDraft = {
+  description: string;
+  name: string;
+  rounds: RetrospectiveTemplateRoundDraft[];
 };
 
 type HouseholdUserDraft = {
@@ -417,6 +437,77 @@ function createTemplateDraft(template?: RecurringTemplate | null): TemplateDraft
     recurrenceCadence: template.recurrenceCadence,
     recurrenceInterval: template.recurrenceInterval,
     title: template.title
+  };
+}
+
+function createRetrospectiveTemplateDraft(
+  template?: RetrospectiveTemplate | null
+): RetrospectiveTemplateDraft {
+  if (!template) {
+    return {
+      description: "",
+      name: "",
+      rounds: [
+        createRetrospectiveTemplateRoundDraft("commitment_review", "Commitments"),
+        createRetrospectiveTemplateRoundDraft("task_lookback", "Lookback"),
+        createRetrospectiveTemplateRoundDraft("notes", "Topics", {
+          entryPhase: "both",
+          privacy: "shared"
+        }),
+        createRetrospectiveTemplateRoundDraft(
+          "commitment_capture",
+          "Next commitments"
+        )
+      ]
+    };
+  }
+
+  return {
+    description: template.description,
+    name: template.name,
+    rounds: template.rounds.map((round) =>
+      createRetrospectiveTemplateRoundDraft(round.kind, round.title, {
+        configJson: round.configJson,
+        entryPhase: round.entryPhase ?? "retrospective",
+        privacy: round.privacy ?? "shared",
+        prompt: round.prompt
+      })
+    )
+  };
+}
+
+function createRetrospectiveTemplateRoundDraft(
+  kind: RetrospectiveRoundKind = "notes",
+  title = "",
+  overrides: Partial<Omit<RetrospectiveTemplateRoundDraft, "clientId" | "kind" | "title">> = {}
+): RetrospectiveTemplateRoundDraft {
+  return {
+    clientId: crypto.randomUUID(),
+    configJson: overrides.configJson ?? "{}",
+    entryPhase: overrides.entryPhase ?? "retrospective",
+    kind,
+    privacy: overrides.privacy ?? "shared",
+    prompt: overrides.prompt ?? "",
+    title
+  };
+}
+
+function toRetrospectiveTemplateInput(
+  draft: RetrospectiveTemplateDraft
+): RetrospectiveTemplateInput {
+  return {
+    description: draft.description.trim(),
+    name: draft.name.trim(),
+    rounds: draft.rounds
+      .filter((round) => round.title.trim())
+      .map((round) => ({
+        configJson: round.configJson.trim() || "{}",
+        entryPhase: round.kind === "notes" ? round.entryPhase : null,
+        kind: round.kind,
+        privacy: round.kind === "notes" ? round.privacy : null,
+        prompt: round.prompt.trim(),
+        title: round.title.trim()
+      }))
   };
 }
 
@@ -769,6 +860,8 @@ export function App() {
   const [isTaskSheetOpen, setIsTaskSheetOpen] = useState(false);
   const [isCreatingTask, setIsCreatingTask] = useState(false);
   const [editingTemplateKey, setEditingTemplateKey] = useState<string | "new" | null>(null);
+  const [editingRetrospectiveTemplateKey, setEditingRetrospectiveTemplateKey] =
+    useState<string | "new" | null>(null);
   const [editingLabelKey, setEditingLabelKey] = useState<string | "new" | null>(null);
   const [editingUserKey, setEditingUserKey] = useState<string | "new-admin" | "new-service" | null>(null);
   const [archiveSearch, setArchiveSearch] = useState("");
@@ -799,7 +892,12 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (!isNavOpen && !isTaskSheetOpen && editingTemplateKey === null) {
+    if (
+      !isNavOpen &&
+      !isTaskSheetOpen &&
+      editingTemplateKey === null &&
+      editingRetrospectiveTemplateKey === null
+    ) {
       return;
     }
 
@@ -809,7 +907,7 @@ export function App() {
     return () => {
       document.body.style.overflow = previousOverflow;
     };
-  }, [editingTemplateKey, isNavOpen, isTaskSheetOpen]);
+  }, [editingRetrospectiveTemplateKey, editingTemplateKey, isNavOpen, isTaskSheetOpen]);
 
   const loadTaskDetail = useEffectEvent(async (taskId: string | null) => {
     if (!taskId) {
@@ -853,11 +951,12 @@ export function App() {
           setAccessState(null);
 
           if (me.actor.role === "admin") {
-            const [users, labels, settings, recurringTemplates] = await Promise.all([
+            const [users, labels, settings, recurringTemplates, retrospectiveTemplates] = await Promise.all([
               api.listUsers(),
               api.listLabels(),
               api.getSettings(),
-              api.listRecurringTemplates()
+              api.listRecurringTemplates(),
+              api.listRetrospectiveTemplates()
             ]);
             const serviceTokensEntries = await Promise.all(
               users.items
@@ -878,6 +977,10 @@ export function App() {
               serviceTokensByUserId: Object.fromEntries(serviceTokensEntries),
               users: users.items
             });
+            setRetrospectiveState((current) => ({
+              ...current,
+              templates: retrospectiveTemplates.items
+            }));
           } else {
             setSnapshot({
               activeTasks: activeTasks.items,
@@ -1074,6 +1177,10 @@ export function App() {
       setEditingTemplateKey(null);
     }
 
+    if (nextView !== "settings") {
+      setEditingRetrospectiveTemplateKey(null);
+    }
+
     const nextHash = buildHashForRoute(nextView, settingsPage);
 
     if (window.location.hash !== `#${nextHash}`) {
@@ -1086,6 +1193,7 @@ export function App() {
   function handleSettingsPageChange(nextPage: SettingsPage) {
     setView("settings");
     setSettingsPage(nextPage);
+    setEditingRetrospectiveTemplateKey(null);
     const nextHash = buildHashForRoute("settings", nextPage);
 
     if (window.location.hash !== `#${nextHash}`) {
@@ -1514,6 +1622,41 @@ export function App() {
     }
   }
 
+  async function handleRetrospectiveTemplateSave(draft: RetrospectiveTemplateDraft) {
+    const payload = toRetrospectiveTemplateInput(draft);
+
+    if (!payload.name || payload.rounds.length === 0) {
+      return;
+    }
+
+    if (editingRetrospectiveTemplateKey && editingRetrospectiveTemplateKey !== "new") {
+      const updated = await runMutation(
+        () =>
+          api.updateRetrospectiveTemplate(
+            editingRetrospectiveTemplateKey,
+            payload
+          ),
+        "Retrospective template updated.",
+        { skipRefresh: true }
+      );
+
+      if (updated) {
+        await refreshRetrospective();
+      }
+    } else {
+      const created = await runMutation(
+        () => api.createRetrospectiveTemplate(payload),
+        "Retrospective template added.",
+        { skipRefresh: true }
+      );
+
+      if (created) {
+        setEditingRetrospectiveTemplateKey(created.item.id);
+        await refreshRetrospective();
+      }
+    }
+  }
+
   async function handleHouseholdUserSave(
     userId: string | null,
     draft: HouseholdUserDraft
@@ -1652,6 +1795,12 @@ export function App() {
   const selectedLabel =
     editingLabelKey && editingLabelKey !== "new"
       ? snapshot.labels.find((label) => label.id === editingLabelKey) ?? null
+      : null;
+  const selectedRetrospectiveTemplate =
+    editingRetrospectiveTemplateKey && editingRetrospectiveTemplateKey !== "new"
+      ? retrospectiveState.templates.find(
+          (template) => template.id === editingRetrospectiveTemplateKey
+        ) ?? null
       : null;
 
   return (
@@ -1869,10 +2018,12 @@ export function App() {
                   onRemoveUser={handleHouseholdUserRemove}
                   onRevokeServiceToken={handleServiceTokenRevoke}
                   onSaveLabel={handleLabelSave}
+                  onSaveRetrospectiveTemplate={handleRetrospectiveTemplateSave}
                   onSaveSettings={handleSettingsSave}
                   onSaveUser={handleHouseholdUserSave}
                   onSelectLabel={setEditingLabelKey}
                   onSelectPage={handleSettingsPageChange}
+                  onSelectRetrospectiveTemplate={setEditingRetrospectiveTemplateKey}
                   onSelectUser={(userKey) => {
                     setEditingUserKey(userKey);
                     setSettingsPage("household");
@@ -1881,6 +2032,8 @@ export function App() {
                   selectedLabelKey={editingLabelKey}
                   isUserEditorOpen={editingUserKey !== null}
                   selectedUser={selectedHouseholdUser}
+                  selectedRetrospectiveTemplate={selectedRetrospectiveTemplate}
+                  selectedRetrospectiveTemplateKey={editingRetrospectiveTemplateKey}
                   retrospectiveTemplates={retrospectiveState.templates}
                   serviceTokensByUserId={snapshot.serviceTokensByUserId}
                   settings={snapshot.settings}
@@ -4220,14 +4373,20 @@ function SettingsView(props: {
   onRemoveUser: (userId: string) => Promise<boolean>;
   onRevokeServiceToken: (tokenId: string) => Promise<void>;
   onSaveLabel: (labelId: string | null, draft: LabelDraft) => Promise<Label | null>;
+  onSaveRetrospectiveTemplate: (
+    draft: RetrospectiveTemplateDraft
+  ) => Promise<void>;
   onSaveSettings: (settings: Settings) => Promise<boolean>;
   onSaveUser: (userId: string | null, draft: HouseholdUserDraft) => Promise<boolean>;
   onSelectLabel: (labelId: string | "new" | null) => void;
   onSelectPage: (page: SettingsPage) => void;
+  onSelectRetrospectiveTemplate: (templateId: string | "new" | null) => void;
   onSelectUser: (userKey: string | "new-admin" | "new-service" | null) => void;
   retrospectiveTemplates: RetrospectiveTemplate[];
   selectedLabel: Label | null;
   selectedLabelKey: string | "new" | null;
+  selectedRetrospectiveTemplate: RetrospectiveTemplate | null;
+  selectedRetrospectiveTemplateKey: string | "new" | null;
   selectedUser: UserRef | null;
   serviceTokensByUserId: Record<string, ServiceToken[]>;
   settings: Settings | null;
@@ -4235,6 +4394,10 @@ function SettingsView(props: {
   users: UserRef[];
 }) {
   const [labelDraft, setLabelDraft] = useState<LabelDraft>(createLabelDraft(props.selectedLabel));
+  const [retrospectiveTemplateDraft, setRetrospectiveTemplateDraft] =
+    useState<RetrospectiveTemplateDraft>(
+      createRetrospectiveTemplateDraft(props.selectedRetrospectiveTemplate)
+    );
   const [settingsDraft, setSettingsDraft] = useState<Settings | null>(props.settings);
   const [userDraft, setUserDraft] = useState<HouseholdUserDraft>(
     createHouseholdUserDraft(props.selectedUser, props.userEditorMode)
@@ -4251,6 +4414,8 @@ function SettingsView(props: {
   const [isUserRemovePending, setIsUserRemovePending] = useState(false);
   const [isUserSavePending, setIsUserSavePending] = useState(false);
   const [isSettingsSavePending, setIsSettingsSavePending] = useState(false);
+  const [isRetrospectiveTemplateSavePending, setIsRetrospectiveTemplateSavePending] =
+    useState(false);
   const lastSavedLabelDraftRef = useRef(serializeLabelDraft(createLabelDraft(props.selectedLabel)));
   const lastSavedSettingsDraftRef = useRef(
     props.settings ? serializeSettingsDraft(props.settings) : null
@@ -4307,6 +4472,21 @@ function SettingsView(props: {
     setIsUserRemovePending(false);
     setIsUserSavePending(false);
   }, [props.selectedUser, props.userEditorMode]);
+
+  useEffect(() => {
+    if (
+      props.selectedRetrospectiveTemplateKey &&
+      props.selectedRetrospectiveTemplateKey !== "new" &&
+      !props.selectedRetrospectiveTemplate
+    ) {
+      return;
+    }
+
+    setRetrospectiveTemplateDraft(
+      createRetrospectiveTemplateDraft(props.selectedRetrospectiveTemplate)
+    );
+    setIsRetrospectiveTemplateSavePending(false);
+  }, [props.selectedRetrospectiveTemplate, props.selectedRetrospectiveTemplateKey]);
 
   const submitSettingsAutosave = useEffectEvent(async (nextSettings: Settings) => {
     const normalized = normalizeSettingsDraft(nextSettings);
@@ -4539,74 +4719,131 @@ function SettingsView(props: {
         ) : null}
 
         {props.activePage === "retrospective" ? (
-          <SurfaceCard className="settings-card gap-0 py-0">
-            <SectionHeading
-              description="Set the default rhythm and template for household retrospectives."
-              eyebrow="Review Rhythm"
-              title="Retrospective Settings"
-            />
-            <div className="form-grid">
-              <FormSelect
-                label="Cadence"
-                onValueChange={(value) =>
-                  setSettingsDraft({
-                    ...settingsDraft,
-                    retrospectiveCadence: value as Settings["retrospectiveCadence"]
-                  })
-                }
-                options={[
-                  { label: "Weekly", value: "weekly" },
-                  { label: "Monthly", value: "monthly" },
-                  { label: "Quarterly", value: "quarterly" },
-                  { label: "Custom", value: "custom" }
-                ]}
-                value={settingsDraft.retrospectiveCadence}
+          <>
+            <SurfaceCard className="settings-card gap-0 py-0">
+              <SectionHeading
+                description="Set the default rhythm and template for household retrospectives."
+                eyebrow="Review Rhythm"
+                title="Retrospective Settings"
               />
-              <FormField label="Cadence interval">
-                <FormInput
-                  min={1}
-                  onChange={(event) =>
+              <div className="form-grid">
+                <FormSelect
+                  label="Cadence"
+                  onValueChange={(value) =>
                     setSettingsDraft({
                       ...settingsDraft,
-                      retrospectiveCadenceInterval: Number(event.target.value)
+                      retrospectiveCadence: value as Settings["retrospectiveCadence"]
                     })
                   }
-                  type="number"
-                  value={settingsDraft.retrospectiveCadenceInterval}
+                  options={[
+                    { label: "Weekly", value: "weekly" },
+                    { label: "Monthly", value: "monthly" },
+                    { label: "Quarterly", value: "quarterly" },
+                    { label: "Custom", value: "custom" }
+                  ]}
+                  value={settingsDraft.retrospectiveCadence}
                 />
-              </FormField>
-              <FormSelect
-                allowEmptyOption
-                label="Default template"
-                onValueChange={(value) =>
-                  setSettingsDraft({
-                    ...settingsDraft,
-                    defaultRetrospectiveTemplateId: value || null
-                  })
+                <FormField label="Cadence interval">
+                  <FormInput
+                    min={1}
+                    onChange={(event) =>
+                      setSettingsDraft({
+                        ...settingsDraft,
+                        retrospectiveCadenceInterval: Number(event.target.value)
+                      })
+                    }
+                    type="number"
+                    value={settingsDraft.retrospectiveCadenceInterval}
+                  />
+                </FormField>
+                <FormSelect
+                  allowEmptyOption
+                  label="Default template"
+                  onValueChange={(value) =>
+                    setSettingsDraft({
+                      ...settingsDraft,
+                      defaultRetrospectiveTemplateId: value || null
+                    })
+                  }
+                  options={props.retrospectiveTemplates.map((template) => ({
+                    label: template.name,
+                    value: template.id
+                  }))}
+                  placeholder="No template selected"
+                  value={settingsDraft.defaultRetrospectiveTemplateId ?? ""}
+                />
+                <FormSelect
+                  label="Finalized retros"
+                  onValueChange={(value) =>
+                    setSettingsDraft({
+                      ...settingsDraft,
+                      finalizedRetrospectiveEditPolicy:
+                        value as Settings["finalizedRetrospectiveEditPolicy"]
+                    })
+                  }
+                  options={[
+                    { label: "Locked", value: "locked" },
+                    { label: "Editable", value: "editable" }
+                  ]}
+                  value={settingsDraft.finalizedRetrospectiveEditPolicy}
+                />
+              </div>
+            </SurfaceCard>
+
+            <SurfaceCard className="settings-card gap-0 py-0">
+              <SectionHeading
+                actions={
+                  <Button
+                    onClick={() => props.onSelectRetrospectiveTemplate("new")}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    <Plus className="size-4" />
+                    New Template
+                  </Button>
                 }
-                options={props.retrospectiveTemplates.map((template) => ({
-                  label: template.name,
-                  value: template.id
-                }))}
-                placeholder="No template selected"
-                value={settingsDraft.defaultRetrospectiveTemplateId ?? ""}
+                description="Compose the rounds that make up a retro. Notes rounds can accept period notes, live retro notes, or both."
+                eyebrow="Templates"
+                title="Retrospective Templates"
               />
-              <FormSelect
-                label="Finalized retros"
-                onValueChange={(value) =>
-                  setSettingsDraft({
-                    ...settingsDraft,
-                    finalizedRetrospectiveEditPolicy: value as Settings["finalizedRetrospectiveEditPolicy"]
-                  })
-                }
-                options={[
-                  { label: "Locked", value: "locked" },
-                  { label: "Editable", value: "editable" }
-                ]}
-                value={settingsDraft.finalizedRetrospectiveEditPolicy}
-              />
-            </div>
-          </SurfaceCard>
+              <div className="template-grid">
+                <div className="template-list">
+                  {props.retrospectiveTemplates.length === 0 ? (
+                    <EmptyStateCard message="No retrospective templates yet." />
+                  ) : null}
+                  {props.retrospectiveTemplates.map((template) => (
+                    <SelectionListButton
+                      active={props.selectedRetrospectiveTemplate?.id === template.id}
+                      key={template.id}
+                      label={template.name}
+                      meta={`${template.rounds.length} rounds`}
+                      onClick={() => props.onSelectRetrospectiveTemplate(template.id)}
+                    />
+                  ))}
+                </div>
+                <div className="template-editor">
+                  {props.selectedRetrospectiveTemplateKey ? (
+                    <RetrospectiveTemplateForm
+                      draft={retrospectiveTemplateDraft}
+                      isSaving={isRetrospectiveTemplateSavePending}
+                      onChange={setRetrospectiveTemplateDraft}
+                      onSubmit={async () => {
+                        setIsRetrospectiveTemplateSavePending(true);
+                        await props.onSaveRetrospectiveTemplate(
+                          retrospectiveTemplateDraft
+                        );
+                        setIsRetrospectiveTemplateSavePending(false);
+                      }}
+                      selectedTemplate={props.selectedRetrospectiveTemplate}
+                    />
+                  ) : (
+                    <EmptyStateCard message="Choose a template or create a new one." />
+                  )}
+                </div>
+              </div>
+            </SurfaceCard>
+          </>
         ) : null}
 
         {props.activePage === "household" ? (
@@ -5086,6 +5323,191 @@ function SettingsView(props: {
 
       </div>
     </section>
+  );
+}
+
+function RetrospectiveTemplateForm(props: {
+  draft: RetrospectiveTemplateDraft;
+  isSaving: boolean;
+  onChange: (draft: RetrospectiveTemplateDraft) => void;
+  onSubmit: () => void;
+  selectedTemplate: RetrospectiveTemplate | null;
+}) {
+  const validRounds = props.draft.rounds.filter((round) => round.title.trim());
+  const canSave = props.draft.name.trim() && validRounds.length > 0;
+  const updateRound = (
+    clientId: string,
+    patch: Partial<RetrospectiveTemplateRoundDraft>
+  ) => {
+    props.onChange({
+      ...props.draft,
+      rounds: props.draft.rounds.map((round) =>
+        round.clientId === clientId ? { ...round, ...patch } : round
+      )
+    });
+  };
+
+  return (
+    <div className="form-grid retrospective-template-editor">
+      <FormField className="wide" label="Name">
+        <FormInput
+          onChange={(event) =>
+            props.onChange({
+              ...props.draft,
+              name: event.target.value
+            })
+          }
+          placeholder="Monthly retrospective"
+          value={props.draft.name}
+        />
+      </FormField>
+      <FormField className="wide" label="Description">
+        <FormTextarea
+          onChange={(event) =>
+            props.onChange({
+              ...props.draft,
+              description: event.target.value
+            })
+          }
+          rows={3}
+          value={props.draft.description}
+        />
+      </FormField>
+
+      <div className="sheet-section wide retrospective-template-rounds">
+        <SectionHeading
+          actions={
+            <Button
+              onClick={() =>
+                props.onChange({
+                  ...props.draft,
+                  rounds: [
+                    ...props.draft.rounds,
+                    createRetrospectiveTemplateRoundDraft("notes", "New round")
+                  ]
+                })
+              }
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              <Plus className="size-4" />
+              Add Round
+            </Button>
+          }
+          compact
+          eyebrow="Flow"
+          title="Rounds"
+          titleAs="h3"
+        />
+        <div className="retrospective-template-round-list">
+          {props.draft.rounds.map((round, index) => (
+            <div className="retrospective-template-round" key={round.clientId}>
+              <div className="retrospective-template-round-header">
+                <strong>Round {index + 1}</strong>
+                <Button
+                  disabled={props.draft.rounds.length === 1}
+                  onClick={() =>
+                    props.onChange({
+                      ...props.draft,
+                      rounds: props.draft.rounds.filter(
+                        (item) => item.clientId !== round.clientId
+                      )
+                    })
+                  }
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  <Trash2 className="size-4" />
+                  Remove
+                </Button>
+              </div>
+              <div className="retrospective-form-grid">
+                <FormField label="Title">
+                  <FormInput
+                    onChange={(event) =>
+                      updateRound(round.clientId, { title: event.target.value })
+                    }
+                    value={round.title}
+                  />
+                </FormField>
+                <FormSelect
+                  label="Kind"
+                  onValueChange={(value) =>
+                    updateRound(round.clientId, {
+                      kind: value as RetrospectiveRoundKind
+                    })
+                  }
+                  options={[
+                    { label: "Commitment review", value: "commitment_review" },
+                    { label: "Task lookback", value: "task_lookback" },
+                    { label: "Notes", value: "notes" },
+                    { label: "Commitment capture", value: "commitment_capture" }
+                  ]}
+                  value={round.kind}
+                />
+                {round.kind === "notes" ? (
+                  <>
+                    <FormSelect
+                      label="Entry"
+                      onValueChange={(value) =>
+                        updateRound(round.clientId, {
+                          entryPhase: value as RetrospectiveEntryPhase
+                        })
+                      }
+                      options={[
+                        { label: "During period", value: "commitment_period" },
+                        { label: "During retro", value: "retrospective" },
+                        { label: "Both", value: "both" }
+                      ]}
+                      value={round.entryPhase}
+                    />
+                    <FormSelect
+                      label="Privacy"
+                      onValueChange={(value) =>
+                        updateRound(round.clientId, {
+                          privacy: value as RetrospectivePrivacy
+                        })
+                      }
+                      options={[
+                        { label: "Shared", value: "shared" },
+                        { label: "Private until round", value: "private_until_round" },
+                        { label: "Private", value: "private" }
+                      ]}
+                      value={round.privacy}
+                    />
+                  </>
+                ) : null}
+                <FormField className="wide" label="Prompt">
+                  <FormTextarea
+                    onChange={(event) =>
+                      updateRound(round.clientId, { prompt: event.target.value })
+                    }
+                    rows={2}
+                    value={round.prompt}
+                  />
+                </FormField>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="sheet-actions wide">
+        <Button
+          disabled={!canSave || props.isSaving}
+          onClick={props.onSubmit}
+          type="button"
+        >
+          {props.isSaving
+            ? "Saving..."
+            : props.selectedTemplate
+              ? "Save Template"
+              : "Create Template"}
+        </Button>
+      </div>
+    </div>
   );
 }
 

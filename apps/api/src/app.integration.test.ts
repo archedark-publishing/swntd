@@ -137,7 +137,10 @@ type TemplateListResponse = {
 type RetrospectiveTemplatesResponse = {
   items: Array<{
     id: string;
+    name: string;
     rounds: Array<{
+      entryPhase?: string | null;
+      kind?: string;
       id: string;
       privacy: string | null;
       title: string;
@@ -908,6 +911,92 @@ describe("Phase 3 API", () => {
       })
     );
     expect(retrospectiveCreateResponse.status).toBe(201);
+  });
+
+  it("creates and updates retrospective templates", async () => {
+    const adminHeaders = trustedHeader("admin1@example.com");
+
+    const createTemplateResponse = await app.request(
+      "/api/v1/retrospective-templates",
+      jsonRequest({
+        body: {
+          description: "A short check-in flow.",
+          name: "Lightweight retro",
+          rounds: [
+            {
+              kind: "notes",
+              entryPhase: "both",
+              privacy: "shared",
+              prompt: "What should we talk through?",
+              title: "Topics"
+            },
+            {
+              kind: "commitment_capture",
+              prompt: "What should happen next?",
+              title: "Next steps"
+            }
+          ]
+        },
+        headers: adminHeaders,
+        method: "POST"
+      })
+    );
+    expect(createTemplateResponse.status).toBe(201);
+    const createdTemplate = await parseJson<{
+      item: RetrospectiveTemplatesResponse["items"][number];
+    }>(createTemplateResponse);
+    expect(createdTemplate.item.rounds).toHaveLength(2);
+    expect(createdTemplate.item.rounds[0]).toEqual(
+      expect.objectContaining({
+        entryPhase: "both",
+        privacy: "shared",
+        title: "Topics"
+      })
+    );
+
+    const updateTemplateResponse = await app.request(
+      `/api/v1/retrospective-templates/${createdTemplate.item.id}`,
+      jsonRequest({
+        body: {
+          description: "A slightly longer flow.",
+          name: "Lightweight retro v2",
+          rounds: [
+            {
+              kind: "task_lookback",
+              prompt: "What got done?",
+              title: "Lookback"
+            },
+            {
+              kind: "notes",
+              entryPhase: "retrospective",
+              privacy: "private",
+              prompt: "What should stay with the author?",
+              title: "Private notes"
+            }
+          ]
+        },
+        headers: adminHeaders,
+        method: "PATCH"
+      })
+    );
+    expect(updateTemplateResponse.status).toBe(200);
+    const updatedTemplate = await parseJson<{
+      item: RetrospectiveTemplatesResponse["items"][number];
+    }>(updateTemplateResponse);
+    expect(updatedTemplate.item.name).toBe("Lightweight retro v2");
+    expect(updatedTemplate.item.rounds).toEqual([
+      expect.objectContaining({
+        kind: "task_lookback",
+        privacy: null,
+        title: "Lookback"
+      }),
+      expect.objectContaining({
+        entryPhase: "retrospective",
+        kind: "notes",
+        privacy: "private",
+        title: "Private notes"
+      })
+    ]);
   });
 
   it("supports retrospective notes, reveal, commitments, and finalization", async () => {

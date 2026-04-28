@@ -329,6 +329,23 @@ export type CreateRetrospectiveInput = {
   title?: string | undefined;
 };
 
+export type RetrospectiveTemplateRoundInput = {
+  configJson?: string | undefined;
+  entryPhase?: "commitment_period" | "retrospective" | "both" | null | undefined;
+  kind: "commitment_review" | "task_lookback" | "notes" | "commitment_capture";
+  privacy?: "shared" | "private_until_round" | "private" | null | undefined;
+  prompt?: string | undefined;
+  title: string;
+};
+
+export type CreateRetrospectiveTemplateInput = {
+  description?: string | undefined;
+  name: string;
+  rounds: RetrospectiveTemplateRoundInput[];
+};
+
+export type UpdateRetrospectiveTemplateInput = CreateRetrospectiveTemplateInput;
+
 export type ListRetrospectivesFilters = {
   limit: number;
   offset: number;
@@ -979,6 +996,135 @@ function toRetrospectiveTemplateDto(
   };
 }
 
+const starterRetrospectiveRounds: RetrospectiveTemplateRoundInput[] = [
+  {
+    kind: "commitment_review",
+    prompt: "Review how the previous period's commitments went.",
+    title: "Commitments"
+  },
+  {
+    kind: "task_lookback",
+    prompt: "Look over what got done during the period.",
+    title: "Lookback"
+  },
+  {
+    entryPhase: "both",
+    kind: "notes",
+    privacy: "shared",
+    prompt: "Talk through shared topics gathered before or during the retro.",
+    title: "Topics"
+  },
+  {
+    kind: "commitment_capture",
+    prompt: "Choose commitments for the next period.",
+    title: "Next commitments"
+  },
+  {
+    entryPhase: "retrospective",
+    kind: "notes",
+    privacy: "shared",
+    prompt: "Capture plans, scheduling notes, and next steps.",
+    title: "Planning"
+  },
+  {
+    entryPhase: "commitment_period",
+    kind: "notes",
+    privacy: "private_until_round",
+    prompt: "Share moments worth remembering from the period.",
+    title: "Highlights"
+  }
+];
+
+function normalizeRetrospectiveTemplateRoundInput(
+  round: RetrospectiveTemplateRoundInput,
+  sortOrder: number
+) {
+  const configJson = round.configJson?.trim() || "{}";
+
+  try {
+    JSON.parse(configJson);
+  } catch {
+    throw new ApiError(
+      400,
+      "invalid_retrospective_round_config",
+      "Round config must be valid JSON."
+    );
+  }
+
+  return {
+    configJson,
+    entryPhase: round.kind === "notes" ? (round.entryPhase ?? "retrospective") : null,
+    kind: round.kind,
+    privacy: round.kind === "notes" ? (round.privacy ?? "shared") : null,
+    prompt: round.prompt?.trim() ?? "",
+    sortOrder,
+    title: round.title.trim()
+  };
+}
+
+async function ensureDefaultRetrospectiveTemplate(
+  db: DatabaseClient,
+  actor: AuthenticatedActor
+) {
+  const [settings] = await db
+    .select()
+    .from(householdSettings)
+    .where(eq(householdSettings.householdId, actor.householdId));
+  const templates = await db
+    .select()
+    .from(retrospectiveTemplates)
+    .where(eq(retrospectiveTemplates.householdId, actor.householdId))
+    .orderBy(retrospectiveTemplates.createdAt)
+    .limit(1);
+
+  if (templates[0]) {
+    if (!settings?.defaultRetrospectiveTemplateId) {
+      await db
+        .update(householdSettings)
+        .set({
+          defaultRetrospectiveTemplateId: templates[0].id,
+          updatedAt: new Date()
+        })
+        .where(eq(householdSettings.householdId, actor.householdId));
+    }
+
+    return templates[0];
+  }
+
+  const [created] = await db
+    .insert(retrospectiveTemplates)
+    .values({
+      createdByUserId: actor.id,
+      description: "A general-purpose review and planning flow.",
+      householdId: actor.householdId,
+      isSystem: true,
+      name: "Starter retrospective",
+      updatedByUserId: actor.id
+    })
+    .returning();
+  const template = getRequiredRow(
+    created,
+    "retrospective_template_create_failed",
+    "Retrospective template creation failed."
+  );
+
+  await db.insert(retrospectiveTemplateRounds).values(
+    starterRetrospectiveRounds.map((round, index) => ({
+      ...normalizeRetrospectiveTemplateRoundInput(round, index),
+      templateId: template.id
+    }))
+  );
+  await db
+    .update(householdSettings)
+    .set({
+      defaultRetrospectiveTemplateId: template.id,
+      updatedAt: new Date()
+    })
+    .where(eq(householdSettings.householdId, actor.householdId));
+
+  return template;
+}
+
 async function getRetrospectiveRounds(
   db: DatabaseClient,
   retrospectiveIds: string[]
@@ -1323,6 +1469,7 @@ export async function listRetrospectiveTemplates(
   actor: AuthenticatedActor
 ) {
   assertRetrospectiveAdmin(actor);
+  await ensureDefaultRetrospectiveTemplate(db, actor);
 
   const [templateRows, roundRows] = await Promise.all([
     db
@@ -1346,6 +1493,132 @@ export async function listRetrospectiveTemplates(
         template,
         roundRows.map((row) => row.retrospective_template_rounds)
       )
+    )
+  };
+}
+
+export async function createRetrospectiveTemplate(
+  db: DatabaseClient,
+  actor: AuthenticatedActor,
+  input: CreateRetrospectiveTemplateInput
+) {
+  assertRetrospectiveAdmin(actor);
+
+  const createdId = await db.transaction(async (tx) => {
+    const [created] = await tx
+      .insert(retrospectiveTemplates)
+      .values({
+        createdByUserId: actor.id,
+        description: input.description?.trim() ?? "",
+        householdId: actor.householdId,
+        isSystem: false,
+        name: input.name.trim(),
+        updatedByUserId: actor.id
+      })
+      .returning();
+    const template = getRequiredRow(
+      created,
+      "retrospective_template_create_failed",
+      "Retrospective template creation failed."
+    );
+
+    await tx.insert(retrospectiveTemplateRounds).values(
+      input.rounds.map((round, index) => ({
+        ...normalizeRetrospectiveTemplateRoundInput(round, index),
+        templateId: template.id
+      }))
+    );
+
+    const [settings] = await tx
+      .select({
+        defaultRetrospectiveTemplateId:
+          householdSettings.defaultRetrospectiveTemplateId
+      })
+      .from(householdSettings)
+      .where(eq(householdSettings.householdId, actor.householdId));
+
+    if (!settings?.defaultRetrospectiveTemplateId) {
+      await tx
+        .update(householdSettings)
+        .set({
+          defaultRetrospectiveTemplateId: template.id,
+          updatedAt: new Date()
+        })
+        .where(eq(householdSettings.householdId, actor.householdId));
+    }
+
+    return template.id;
+  });
+
+  const templates = await listRetrospectiveTemplates(db, actor);
+  const template = templates.items.find((item) => item.id === createdId);
+
+  return {
+    item: getRequiredRow(
+      template,
+      "retrospective_template_not_found",
+      "Retrospective template not found."
+    )
+  };
+}
+
+export async function updateRetrospectiveTemplate(
+  db: DatabaseClient,
+  actor: AuthenticatedActor,
+  templateId: string,
+  input: UpdateRetrospectiveTemplateInput
+) {
+  assertRetrospectiveAdmin(actor);
+
+  const [current] = await db
+    .select({
+      id: retrospectiveTemplates.id
+    })
+    .from(retrospectiveTemplates)
+    .where(
+      and(
+        eq(retrospectiveTemplates.id, templateId),
+        eq(retrospectiveTemplates.householdId, actor.householdId)
+      )
+    );
+
+  if (!current) {
+    throw new ApiError(
+      404,
+      "retrospective_template_not_found",
+      "Retrospective template not found."
+    );
+  }
+
+  await db.transaction(async (tx) => {
+    await tx
+      .update(retrospectiveTemplates)
+      .set({
+        description: input.description?.trim() ?? "",
+        name: input.name.trim(),
+        updatedAt: new Date(),
+        updatedByUserId: actor.id
+      })
+      .where(eq(retrospectiveTemplates.id, templateId));
+    await tx
+      .delete(retrospectiveTemplateRounds)
+      .where(eq(retrospectiveTemplateRounds.templateId, templateId));
+    await tx.insert(retrospectiveTemplateRounds).values(
+      input.rounds.map((round, index) => ({
+        ...normalizeRetrospectiveTemplateRoundInput(round, index),
+        templateId
+      }))
+    );
+  });
+
+  const templates = await listRetrospectiveTemplates(db, actor);
+  const template = templates.items.find((item) => item.id === templateId);
+
+  return {
+    item: getRequiredRow(
+      template,
+      "retrospective_template_not_found",
+      "Retrospective template not found."
     )
   };
 }
@@ -1545,6 +1818,7 @@ export async function createRetrospective(
   input: CreateRetrospectiveInput
 ) {
   assertRetrospectiveAdmin(actor);
+  await ensureDefaultRetrospectiveTemplate(db, actor);
 
   const retrospectiveId = await db.transaction(async (tx) => {
     const [existingOpenRetrospective] = await tx

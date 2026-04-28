@@ -740,6 +740,31 @@ a {
   gap: 0.75rem;
 }
 
+.retrospective-template-editor {
+  align-content: start;
+}
+
+.retrospective-template-rounds,
+.retrospective-template-round-list,
+.retrospective-template-round {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.retrospective-template-round {
+  padding: 0.85rem;
+  border: 1px solid rgb(86 58 30 / 0.12);
+  border-radius: 1rem;
+  background: rgb(255 255 255 / 0.48);
+}
+
+.retrospective-template-round-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
 .retrospective-row {
   display: flex;
   align-items: center;

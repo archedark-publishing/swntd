@@ -8,8 +8,10 @@ import {
   commitmentTrackingIntervals,
   commitmentTrackingKinds,
   finalizedRetrospectiveEditPolicies,
+  retrospectiveNoteEntryPhases,
   retrospectiveNoteWriteEntryPhases,
   retrospectiveCadences,
+  retrospectiveRoundKinds,
   retrospectiveStatuses
 } from "@swntd/shared/server/domain/retrospectives";
 import type { AuthenticatedActor } from "@swntd/shared/server/domain/authorization";
@@ -40,6 +42,7 @@ import {
   createRecurringTemplate,
   createRetrospective,
   createRetrospectiveNote,
+  createRetrospectiveTemplate,
   createTask,
   claimBootstrapOwnership,
   deleteArchivedTask,
@@ -76,6 +79,7 @@ import {
   updateCommitmentReview,
   updateLabel,
   updateRetrospectiveNote,
+  updateRetrospectiveTemplate,
   updateHouseholdUser,
   updateRecurringTemplate,
   updateSettings,
@@ -231,6 +235,13 @@ const commitmentStatusSchema = z.enum(commitmentStatuses);
 const commitmentTrackingKindSchema = z.enum(commitmentTrackingKinds);
 const commitmentTrackingIntervalSchema = z.enum(commitmentTrackingIntervals);
 const commitmentReviewRatingSchema = z.enum(commitmentReviewRatings);
+const retrospectiveTemplateRoundKindSchema = z.enum(retrospectiveRoundKinds);
+const retrospectiveNoteEntryPhaseSchema = z.enum(retrospectiveNoteEntryPhases);
+const retrospectivePrivacySchema = z.enum([
+  "shared",
+  "private_until_round",
+  "private"
+]);
 const retrospectiveNoteWriteEntryPhaseSchema = z.enum(
   retrospectiveNoteWriteEntryPhases
 );
@@ -244,6 +255,21 @@ const retrospectiveListQuerySchema = z.object({
 const createRetrospectiveSchema = z.object({
   templateId: z.string().trim().min(1).optional(),
   title: z.string().trim().min(1).optional()
+});
+
+const retrospectiveTemplateRoundSchema = z.object({
+  configJson: z.string().optional(),
+  entryPhase: retrospectiveNoteEntryPhaseSchema.nullable().optional(),
+  kind: retrospectiveTemplateRoundKindSchema,
+  privacy: retrospectivePrivacySchema.nullable().optional(),
+  prompt: z.string().optional(),
+  title: z.string().trim().min(1)
+});
+
+const retrospectiveTemplateSchema = z.object({
+  description: z.string().optional(),
+  name: z.string().trim().min(1),
+  rounds: z.array(retrospectiveTemplateRoundSchema).min(1)
 });
 
 const retrospectiveNoteListQuerySchema = z.object({
@@ -624,6 +650,30 @@ export function createApp() {
   app.get("/api/v1/retrospective-templates", async (c) =>
     jsonOk(c, await listRetrospectiveTemplates(c.var.db, c.var.actor))
   );
+
+  app.post("/api/v1/retrospective-templates", async (c) => {
+    const input = await parseJsonBody(c, retrospectiveTemplateSchema);
+
+    return jsonOk(
+      c,
+      await createRetrospectiveTemplate(c.var.db, c.var.actor, input),
+      201
+    );
+  });
+
+  app.patch("/api/v1/retrospective-templates/:templateId", async (c) => {
+    const input = await parseJsonBody(c, retrospectiveTemplateSchema);
+
+    return jsonOk(
+      c,
+      await updateRetrospectiveTemplate(
+        c.var.db,
+        c.var.actor,
+        c.req.param("templateId"),
+        input
+      )
+    );
+  });
 
   app.get("/api/v1/retrospectives", async (c) => {
     const query = parseQuery(c, retrospectiveListQuerySchema);
@@ -1021,7 +1071,8 @@ export function createApp() {
         "/api/v1/retrospective-home": ["get"],
         "/api/v1/retrospective-notes": ["get", "post"],
         "/api/v1/retrospective-notes/{noteId}": ["patch"],
-        "/api/v1/retrospective-templates": ["get"],
+        "/api/v1/retrospective-templates": ["get", "post"],
+        "/api/v1/retrospective-templates/{templateId}": ["patch"],
         "/api/v1/retrospectives": ["get", "post"],
         "/api/v1/retrospectives/{retrospectiveId}": ["get"],
         "/api/v1/retrospectives/{retrospectiveId}/finalize": ["post"],

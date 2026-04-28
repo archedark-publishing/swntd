@@ -197,6 +197,21 @@ export type RetrospectiveTemplate = {
   updatedAt: string;
 };
 
+export type RetrospectiveTemplateRoundInput = {
+  configJson?: string;
+  entryPhase?: RetrospectiveEntryPhase | null;
+  kind: RetrospectiveRoundKind;
+  privacy?: RetrospectivePrivacy | null;
+  prompt?: string;
+  title: string;
+};
+
+export type RetrospectiveTemplateInput = {
+  description?: string;
+  name: string;
+  rounds: RetrospectiveTemplateRoundInput[];
+};
+
 export type CommitmentPeriod = {
   closureOn: string;
   createdAt: string;
@@ -596,6 +611,15 @@ export const api = {
       method: "POST"
     });
   },
+  createRetrospectiveTemplate(input: RetrospectiveTemplateInput) {
+    return request<{ item: RetrospectiveTemplate }>("/api/v1/retrospective-templates", {
+      body: JSON.stringify(input),
+      headers: {
+        "content-type": "application/json"
+      },
+      method: "POST"
+    });
+  },
   createRetrospectiveNote(input: {
     body: string;
     commitmentPeriodId: string;
@@ -848,6 +872,21 @@ export const api = {
   ) {
     return request<{ item: RecurringTemplate }>(
       `/api/v1/recurring-templates/${templateId}`,
+      {
+        body: JSON.stringify(input),
+        headers: {
+          "content-type": "application/json"
+        },
+        method: "PATCH"
+      }
+    );
+  },
+  updateRetrospectiveTemplate(
+    templateId: string,
+    input: RetrospectiveTemplateInput
+  ) {
+    return request<{ item: RetrospectiveTemplate }>(
+      `/api/v1/retrospective-templates/${templateId}`,
       {
         body: JSON.stringify(input),
         headers: {
