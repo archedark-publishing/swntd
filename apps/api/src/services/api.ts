@@ -35,6 +35,7 @@ import {
   commitmentCheckins,
   commitmentChecklistItems,
   commitmentPeriods,
+  commitmentReviews,
   commitments,
   comments,
   householdSettings,
@@ -52,6 +53,7 @@ import {
   taskLabels,
   tasks,
   type Commitment,
+  type CommitmentReview,
   type CommitmentPeriod,
   type Retrospective,
   type RetrospectiveNote,
@@ -66,6 +68,7 @@ import {
   shouldRevealNotesOnRoundEntry,
   type CommitmentTrackingInterval,
   type CommitmentTrackingKind,
+  type CommitmentReviewRating,
   type RetrospectiveCadence,
   type RetrospectiveNoteWriteEntryPhase
 } from "@swntd/shared/server/domain/retrospectives";
@@ -239,6 +242,10 @@ export type CommitmentDto = Commitment & {
   checklistItems: CommitmentChecklistItemDto[];
 };
 
+export type CommitmentReviewDto = CommitmentReview & {
+  createdBy: UserRef | null;
+};
+
 export type TaskListFilters = {
   archived: "exclude" | "include" | "only";
   assigneeUserId?: string | undefined;
@@ -370,6 +377,18 @@ export type CreateCommitmentCheckinInput = {
   amount?: number | undefined;
   checkinOn: string;
   note?: string | undefined;
+};
+
+export type CreateCommitmentReviewInput = {
+  note?: string | undefined;
+  rating: CommitmentReviewRating;
+  retrospectiveId: string;
+  roundId: string;
+};
+
+export type UpdateCommitmentReviewInput = {
+  note?: string | undefined;
+  rating: CommitmentReviewRating;
 };
 
 export type AddCommentInput = {
@@ -2202,6 +2221,129 @@ export async function createCommitmentCheckin(
       "commitment_checkin_create_failed",
       "Commitment check-in creation failed."
     )
+  };
+}
+
+export async function createCommitmentReview(
+  db: DatabaseClient,
+  actor: AuthenticatedActor,
+  commitmentId: string,
+  input: CreateCommitmentReviewInput
+) {
+  const commitment = await getCommitmentOrThrow(db, actor, commitmentId);
+  const retrospective = await getRetrospectiveOrThrow(
+    db,
+    actor,
+    input.retrospectiveId
+  );
+  const round = await getRetrospectiveRoundOrThrow(
+    db,
+    actor,
+    retrospective.id,
+    input.roundId
+  );
+
+  if (!canMutateCommitment(actor, commitment)) {
+    throw new ApiError(403, "forbidden", "You cannot review this commitment.");
+  }
+
+  if (round.kind !== "commitment_review") {
+    throw new ApiError(
+      400,
+      "invalid_commitment_review_round",
+      "Commitment reviews must be captured in a commitment review round."
+    );
+  }
+
+  const [created] = await db
+    .insert(commitmentReviews)
+    .values({
+      commitmentId: commitment.id,
+      createdByUserId: actor.id,
+      note: input.note ?? "",
+      rating: input.rating,
+      retrospectiveId: retrospective.id,
+      roundId: round.id,
+      updatedByUserId: actor.id
+    })
+    .returning();
+  const review = getRequiredRow(
+    created,
+    "commitment_review_create_failed",
+    "Commitment review creation failed."
+  );
+
+  await db
+    .update(commitments)
+    .set({
+      status: "reviewed",
+      updatedAt: new Date(),
+      updatedByUserId: actor.id
+    })
+    .where(eq(commitments.id, commitment.id));
+
+  return {
+    item: {
+      ...review,
+      createdBy: mapUserRef({
+        deactivatedAt: null,
+        displayName: actor.displayName,
+        email: actor.email,
+        id: actor.id,
+        role: actor.role,
+        serviceKind: actor.serviceKind
+      })
+    }
+  };
+}
+
+export async function updateCommitmentReview(
+  db: DatabaseClient,
+  actor: AuthenticatedActor,
+  reviewId: string,
+  input: UpdateCommitmentReviewInput
+) {
+  assertRetrospectiveAdmin(actor);
+
+  const [review] = await db
+    .select()
+    .from(commitmentReviews)
+    .innerJoin(commitments, eq(commitmentReviews.commitmentId, commitments.id))
+    .where(
+      and(
+        eq(commitmentReviews.id, reviewId),
+        eq(commitments.householdId, actor.householdId)
+      )
+    );
+
+  if (!review) {
+    throw new ApiError(
+      404,
+      "commitment_review_not_found",
+      "Commitment review not found."
+    );
+  }
+
+  const [updated] = await db
+    .update(commitmentReviews)
+    .set({
+      note: input.note ?? "",
+      rating: input.rating,
+      updatedAt: new Date(),
+      updatedByUserId: actor.id
+    })
+    .where(eq(commitmentReviews.id, review.commitment_reviews.id))
+    .returning();
+
+  return {
+    item: {
+      ...getRequiredRow(
+        updated,
+        "commitment_review_update_failed",
+        "Commitment review update failed."
+      ),
+      createdBy: null
+    }
   };
 }
 

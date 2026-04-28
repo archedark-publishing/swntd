@@ -627,27 +627,27 @@ It should include archived tasks. No task-retrospective link is created in V1.
 ### Phase 2: API Services
 
 - [x] Add service functions for templates, commitment periods, retrospectives, rounds, notes, commitments, and checkins.
-- [ ] Add service functions for commitment reviews.
+- [x] Add service functions for commitment reviews.
 - [x] Add private-note query filtering at the service layer.
 - [x] Add reveal mutation as an atomic server-side operation.
 - [x] Add completed-task lookback query.
 - [x] Add finalization logic that creates the next commitment period.
 - [x] Add integration tests for starter template and initial period bootstrap.
 - [x] Add integration tests for creating a retrospective from a template after closure.
-- [ ] Add integration test for refusing retrospective creation before closure.
+- [x] Add integration test for refusing retrospective creation before closure.
 - [x] Add integration test for one-active-retro enforcement.
 - [x] Add integration test for private notes hidden from other admins.
 - [x] Add integration test for private notes revealed on configured notes round.
-- [ ] Add integration test for private-forever notes never revealed.
-- [ ] Add integration tests for commitment reviews.
+- [x] Add integration test for private-forever notes never revealed.
+- [x] Add integration tests for commitment reviews.
 - [x] Add integration tests for commitment creation and edits.
-- [ ] Add integration tests for commitment checkins.
+- [x] Add integration tests for commitment checkins.
 
 ### Phase 3: API Routes And Client
 
 - [x] Add Hono route schemas.
 - [x] Add backend routes for retrospective home, template listing, retrospective lifecycle, notes, commitments, and checkins.
-- [ ] Add backend routes for commitment reviews.
+- [x] Add backend routes for commitment reviews.
 - [ ] Add frontend API client types and methods.
 - [ ] Prefer view-specific loading for retrospective data so the main board refresh does not grow too large.
 

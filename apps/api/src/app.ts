@@ -4,6 +4,7 @@ import { z } from "zod";
 import { taskStatuses } from "@swntd/shared/server/domain/tasks";
 import {
   commitmentStatuses,
+  commitmentReviewRatings,
   commitmentTrackingIntervals,
   commitmentTrackingKinds,
   retrospectiveNoteWriteEntryPhases,
@@ -31,6 +32,7 @@ import {
   completeRetrospectiveRound,
   createCommitment,
   createCommitmentCheckin,
+  createCommitmentReview,
   createHouseholdUser,
   createLabel,
   createRecurringTemplate,
@@ -69,6 +71,7 @@ import {
   transitionTask,
   unarchiveTask,
   updateCommitment,
+  updateCommitmentReview,
   updateLabel,
   updateRetrospectiveNote,
   updateHouseholdUser,
@@ -219,6 +222,7 @@ const retrospectiveStatusSchema = z.enum(retrospectiveStatuses);
 const commitmentStatusSchema = z.enum(commitmentStatuses);
 const commitmentTrackingKindSchema = z.enum(commitmentTrackingKinds);
 const commitmentTrackingIntervalSchema = z.enum(commitmentTrackingIntervals);
+const commitmentReviewRatingSchema = z.enum(commitmentReviewRatings);
 const retrospectiveNoteWriteEntryPhaseSchema = z.enum(
   retrospectiveNoteWriteEntryPhases
 );
@@ -284,6 +288,18 @@ const commitmentCheckinSchema = z.object({
   amount: z.number().int().positive().optional(),
   checkinOn: isoDateSchema,
   note: z.string().optional()
+});
+
+const commitmentReviewSchema = z.object({
+  note: z.string().optional(),
+  rating: commitmentReviewRatingSchema,
+  retrospectiveId: z.string().trim().min(1),
+  roundId: z.string().trim().min(1)
+});
+
+const updateCommitmentReviewSchema = z.object({
+  note: z.string().optional(),
+  rating: commitmentReviewRatingSchema
 });
 
 const archiveSchema = z.object({
@@ -745,6 +761,35 @@ export function createApp() {
     );
   });
 
+  app.post("/api/v1/commitments/:commitmentId/reviews", async (c) => {
+    const input = await parseJsonBody(c, commitmentReviewSchema);
+
+    return jsonOk(
+      c,
+      await createCommitmentReview(
+        c.var.db,
+        c.var.actor,
+        c.req.param("commitmentId"),
+        input
+      ),
+      201
+    );
+  });
+
+  app.patch("/api/v1/commitment-reviews/:reviewId", async (c) => {
+    const input = await parseJsonBody(c, updateCommitmentReviewSchema);
+
+    return jsonOk(
+      c,
+      await updateCommitmentReview(
+        c.var.db,
+        c.var.actor,
+        c.req.param("reviewId"),
+        input
+      )
+    );
+  });
+
   app.get("/api/v1/tasks", async (c) => {
     const query = parseQuery(c, taskListQuerySchema);
 
@@ -958,6 +1003,8 @@ export function createApp() {
         "/api/v1/commitments": ["get", "post"],
         "/api/v1/commitments/{commitmentId}": ["patch"],
         "/api/v1/commitments/{commitmentId}/checkins": ["post"],
+        "/api/v1/commitments/{commitmentId}/reviews": ["post"],
+        "/api/v1/commitment-reviews/{reviewId}": ["patch"],
         "/api/v1/labels": ["get", "post"],
         "/api/v1/labels/:labelId": ["patch", "delete"],
         "/api/v1/me": ["get"],
