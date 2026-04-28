@@ -656,7 +656,8 @@ It should include archived tasks. No task-retrospective link is created in V1.
 - [x] Add Retrospective nav item and hash route.
 - [x] Build Retrospective Home.
 - [x] Build active facilitated session shell.
-- [ ] Build full round components, including commitment review rating controls and richer completed-task lookback.
+- [x] Build commitment review rating controls.
+- [ ] Build richer completed-task lookback and completed-round summaries.
 - [x] Build commitment tracker components.
 - [ ] Build completed retrospective detail.
 - [x] Add Retrospective settings tab.

@@ -758,6 +758,13 @@ a {
   color: rgb(47 33 22 / 0.72);
 }
 
+.retrospective-rating-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.4rem;
+}
+
 .retrospective-row strong,
 .retrospective-row span {
   overflow-wrap: anywhere;

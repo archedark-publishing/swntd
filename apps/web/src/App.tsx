@@ -1830,6 +1830,17 @@ export function App() {
                     )
                   }
                   onRefresh={refreshRetrospective}
+                  onReviewCommitment={(commitmentId, retrospectiveId, roundId, rating) =>
+                    runRetrospectiveMutation(
+                      () =>
+                        api.createCommitmentReview(commitmentId, {
+                          rating,
+                          retrospectiveId,
+                          roundId
+                        }),
+                      "Commitment reviewed."
+                    )
+                  }
                   onStart={(retrospectiveId) =>
                     runRetrospectiveMutation(
                       () => api.startRetrospective(retrospectiveId),
@@ -5090,6 +5101,12 @@ function RetrospectiveView(props: {
   onEnterRound: (retrospectiveId: string, roundId: string) => Promise<unknown>;
   onFinalize: (retrospectiveId: string) => Promise<unknown>;
   onRefresh: () => Promise<void>;
+  onReviewCommitment: (
+    commitmentId: string,
+    retrospectiveId: string,
+    roundId: string,
+    rating: "met" | "mostly_met" | "partly_met" | "missed" | "skipped"
+  ) => Promise<unknown>;
   onStart: (retrospectiveId: string) => Promise<unknown>;
   state: RetrospectiveState;
 }) {
@@ -5177,6 +5194,7 @@ function RetrospectiveView(props: {
           onCreateNote={props.onCreateNote}
           onEnterRound={props.onEnterRound}
           onFinalize={props.onFinalize}
+          onReviewCommitment={props.onReviewCommitment}
           onStart={props.onStart}
         />
       ) : (
@@ -5261,6 +5279,12 @@ function ActiveRetrospectivePanel(props: {
   }) => Promise<unknown>;
   onEnterRound: (retrospectiveId: string, roundId: string) => Promise<unknown>;
   onFinalize: (retrospectiveId: string) => Promise<unknown>;
+  onReviewCommitment: (
+    commitmentId: string,
+    retrospectiveId: string,
+    roundId: string,
+    rating: "met" | "mostly_met" | "partly_met" | "missed" | "skipped"
+  ) => Promise<unknown>;
   onStart: (retrospectiveId: string) => Promise<unknown>;
 }) {
   const currentRound =
@@ -5326,6 +5350,7 @@ function ActiveRetrospectivePanel(props: {
           notes={props.detail.notes.filter((note) => note.roundId === currentRound.id)}
           onCreateCommitment={props.onCreateCommitment}
           onCreateNote={props.onCreateNote}
+          onReviewCommitment={props.onReviewCommitment}
           round={currentRound}
         />
       ) : null}
@@ -5360,6 +5385,12 @@ function RetrospectiveRoundBody(props: {
     roundId?: string | null;
     templateRoundId?: string | null;
   }) => Promise<unknown>;
+  onReviewCommitment: (
+    commitmentId: string,
+    retrospectiveId: string,
+    roundId: string,
+    rating: "met" | "mostly_met" | "partly_met" | "missed" | "skipped"
+  ) => Promise<unknown>;
   round: RetrospectiveRound;
 }) {
   if (props.round.kind === "commitment_capture") {
@@ -5411,8 +5442,37 @@ function RetrospectiveRoundBody(props: {
       ) : null}
       {props.commitments.map((commitment) => (
         <div className="retrospective-row" key={commitment.id}>
-          <strong>{commitment.title}</strong>
-          <span>{getCommitmentProgressLabel(commitment)}</span>
+          <span>
+            <strong>{commitment.title}</strong>
+            <span>{getCommitmentProgressLabel(commitment)}</span>
+          </span>
+          <div className="retrospective-rating-row">
+            {[
+              ["met", "Met"],
+              ["mostly_met", "Mostly"],
+              ["partly_met", "Partly"],
+              ["missed", "Missed"],
+              ["skipped", "Skip"]
+            ].map(([rating, label]) => (
+              <Button
+                disabled={commitment.status === "reviewed"}
+                key={rating}
+                onClick={() =>
+                  void props.onReviewCommitment(
+                    commitment.id,
+                    props.detail.id,
+                    props.round.id,
+                    rating as "met" | "mostly_met" | "partly_met" | "missed" | "skipped"
+                  )
+                }
+                size="sm"
+                type="button"
+                variant={commitment.status === "reviewed" ? "outline" : "ghost"}
+              >
+                {label}
+              </Button>
+            ))}
+          </div>
         </div>
       ))}
     </div>
