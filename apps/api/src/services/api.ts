@@ -1,11 +1,14 @@
 import {
   and,
+  asc,
   count,
   desc,
   eq,
+  gte,
   inArray,
   isNotNull,
   isNull,
+  lte,
   like,
   or,
   type SQL
@@ -17,26 +20,55 @@ import {
   canCreateTask,
   canDownloadAttachment,
   canManageSettings,
+  canManageRetrospectives,
+  canMutateCommitment,
+  canMutateRetrospectiveNote,
   canReadTask,
+  canReadRetrospectiveNote,
+  canRevealRetrospectiveNotes,
   canTransitionTask,
   canUploadBinaryAttachment
 } from "@swntd/shared/server/domain/authorization";
 import {
   attachments,
   checklistItems,
+  commitmentCheckins,
+  commitmentChecklistItems,
+  commitmentPeriods,
+  commitments,
   comments,
   householdSettings,
   labels,
   recurringTaskTemplateChecklistItems,
   recurringTaskTemplateLabels,
   recurringTaskTemplates,
+  retrospectiveNotes,
+  retrospectiveRounds,
+  retrospectiveTemplateRounds,
+  retrospectiveTemplates,
+  retrospectives,
   serviceTokens,
   taskEvents,
   taskLabels,
   tasks,
+  type Commitment,
+  type CommitmentPeriod,
+  type Retrospective,
+  type RetrospectiveNote,
+  type RetrospectiveRound,
+  type RetrospectiveTemplate,
+  type RetrospectiveTemplateRound,
   type Task,
   users
 } from "@swntd/shared/server/db/schema";
+import {
+  canNoteEntryPhaseAcceptWrite,
+  shouldRevealNotesOnRoundEntry,
+  type CommitmentTrackingInterval,
+  type CommitmentTrackingKind,
+  type RetrospectiveCadence,
+  type RetrospectiveNoteWriteEntryPhase
+} from "@swntd/shared/server/domain/retrospectives";
 import {
   assertExpectedRevision,
   getTopInsertSortKey,
@@ -147,6 +179,66 @@ export type RecurringTemplateDto = {
   updatedAt: Date;
 };
 
+export type RetrospectiveTemplateRoundDto = {
+  configJson: string;
+  createdAt: Date;
+  entryPhase: "commitment_period" | "retrospective" | "both" | null;
+  id: string;
+  kind: "commitment_review" | "task_lookback" | "notes" | "commitment_capture";
+  privacy: "shared" | "private_until_round" | "private" | null;
+  prompt: string;
+  sortOrder: number;
+  title: string;
+  updatedAt: Date;
+};
+
+export type RetrospectiveTemplateDto = {
+  createdAt: Date;
+  description: string;
+  id: string;
+  isSystem: boolean;
+  name: string;
+  rounds: RetrospectiveTemplateRoundDto[];
+  updatedAt: Date;
+};
+
+export type CommitmentPeriodDto = CommitmentPeriod;
+
+export type RetrospectiveRoundDto = RetrospectiveRound;
+
+export type RetrospectiveDto = Retrospective & {
+  rounds: RetrospectiveRoundDto[];
+};
+
+export type RetrospectiveNoteDto = RetrospectiveNote & {
+  author: UserRef | null;
+};
+
+export type CommitmentChecklistItemDto = {
+  body: string;
+  createdAt: Date;
+  id: string;
+  isCompleted: boolean;
+  sortOrder: number;
+  updatedAt: Date;
+};
+
+export type CommitmentCheckinDto = {
+  actor: UserRef | null;
+  amount: number;
+  checkinOn: string;
+  createdAt: Date;
+  id: string;
+  note: string;
+  updatedAt: Date;
+};
+
+export type CommitmentDto = Commitment & {
+  assignee: UserRef | null;
+  checkins: CommitmentCheckinDto[];
+  checklistItems: CommitmentChecklistItemDto[];
+};
+
 export type TaskListFilters = {
   archived: "exclude" | "include" | "only";
   assigneeUserId?: string | undefined;
@@ -220,6 +312,65 @@ export type CreateRecurringTemplateInput = {
 };
 
 export type UpdateRecurringTemplateInput = CreateRecurringTemplateInput;
+
+export type CreateRetrospectiveInput = {
+  templateId?: string | undefined;
+  title?: string | undefined;
+};
+
+export type ListRetrospectivesFilters = {
+  limit: number;
+  offset: number;
+  status?: "draft" | "active" | "finalized" | undefined;
+};
+
+export type ListRetrospectiveNotesFilters = {
+  commitmentPeriodId?: string | undefined;
+  retrospectiveId?: string | undefined;
+  roundId?: string | undefined;
+  templateRoundId?: string | undefined;
+};
+
+export type CreateRetrospectiveNoteInput = {
+  body: string;
+  commitmentPeriodId: string;
+  entryPhase: RetrospectiveNoteWriteEntryPhase;
+  retrospectiveId?: string | null | undefined;
+  roundId?: string | null | undefined;
+  templateRoundId?: string | null | undefined;
+};
+
+export type UpdateRetrospectiveNoteInput = {
+  body: string;
+};
+
+export type ListCommitmentFilters = {
+  assigneeUserId?: string | undefined;
+  commitmentPeriodId?: string | undefined;
+  status?: "active" | "reviewed" | "archived" | undefined;
+};
+
+export type CreateCommitmentInput = {
+  assigneeUserId?: string | null | undefined;
+  checklistItems?: Array<{ body: string; isCompleted?: boolean | undefined }> | undefined;
+  commitmentPeriodId?: string | null | undefined;
+  createdInRetrospectiveId?: string | null | undefined;
+  description?: string | undefined;
+  targetCount?: number | null | undefined;
+  title: string;
+  trackingInterval?: CommitmentTrackingInterval | undefined;
+  trackingKind: CommitmentTrackingKind;
+};
+
+export type UpdateCommitmentInput = CreateCommitmentInput & {
+  status?: "active" | "reviewed" | "archived" | undefined;
+};
+
+export type CreateCommitmentCheckinInput = {
+  amount?: number | undefined;
+  checkinOn: string;
+  note?: string | undefined;
+};
 
 export type AddCommentInput = {
   body: string;
@@ -558,6 +709,306 @@ async function getRecurringTemplateOrThrow(
   return template;
 }
 
+function assertRetrospectiveAdmin(actor: AuthenticatedActor) {
+  if (!canManageRetrospectives(actor)) {
+    throw new ApiError(
+      403,
+      "forbidden",
+      "This action requires a human household admin."
+    );
+  }
+}
+
+function toIsoDate(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function todayIsoDate() {
+  return toIsoDate(new Date());
+}
+
+function addDays(date: Date, amount: number) {
+  const next = new Date(date);
+  next.setUTCDate(next.getUTCDate() + amount);
+  return next;
+}
+
+function addMonths(date: Date, amount: number) {
+  const next = new Date(date);
+  next.setUTCMonth(next.getUTCMonth() + amount);
+  return next;
+}
+
+function computeNextClosureOn(args: {
+  cadence: RetrospectiveCadence;
+  interval: number;
+  periodStartOn: string;
+}) {
+  const base = new Date(`${args.periodStartOn}T00:00:00.000Z`);
+
+  switch (args.cadence) {
+    case "weekly":
+      return toIsoDate(addDays(base, args.interval * 7));
+    case "quarterly":
+      return toIsoDate(addMonths(base, args.interval * 3));
+    case "custom":
+    case "monthly":
+      return toIsoDate(addMonths(base, args.interval));
+    default:
+      return toIsoDate(addMonths(base, args.interval));
+  }
+}
+
+async function getRetrospectiveOrThrow(
+  db: DatabaseClient,
+  actor: AuthenticatedActor,
+  retrospectiveId: string
+) {
+  assertRetrospectiveAdmin(actor);
+
+  const [retrospective] = await db
+    .select()
+    .from(retrospectives)
+    .where(
+      and(
+        eq(retrospectives.id, retrospectiveId),
+        eq(retrospectives.householdId, actor.householdId)
+      )
+    );
+
+  if (!retrospective) {
+    throw new ApiError(404, "retrospective_not_found", "Retrospective not found.");
+  }
+
+  return retrospective;
+}
+
+async function getRetrospectiveRoundOrThrow(
+  db: DatabaseClient,
+  actor: AuthenticatedActor,
+  retrospectiveId: string,
+  roundId: string
+) {
+  await getRetrospectiveOrThrow(db, actor, retrospectiveId);
+
+  const [round] = await db
+    .select()
+    .from(retrospectiveRounds)
+    .where(
+      and(
+        eq(retrospectiveRounds.id, roundId),
+        eq(retrospectiveRounds.retrospectiveId, retrospectiveId)
+      )
+    );
+
+  if (!round) {
+    throw new ApiError(
+      404,
+      "retrospective_round_not_found",
+      "Retrospective round not found."
+    );
+  }
+
+  return round;
+}
+
+async function getCommitmentPeriodOrThrow(
+  db: DatabaseClient,
+  actor: AuthenticatedActor,
+  commitmentPeriodId: string
+) {
+  assertRetrospectiveAdmin(actor);
+
+  const [period] = await db
+    .select()
+    .from(commitmentPeriods)
+    .where(
+      and(
+        eq(commitmentPeriods.id, commitmentPeriodId),
+        eq(commitmentPeriods.householdId, actor.householdId)
+      )
+    );
+
+  if (!period) {
+    throw new ApiError(
+      404,
+      "commitment_period_not_found",
+      "Commitment period not found."
+    );
+  }
+
+  return period;
+}
+
+async function getCommitmentOrThrow(
+  db: DatabaseClient,
+  actor: AuthenticatedActor,
+  commitmentId: string
+) {
+  assertRetrospectiveAdmin(actor);
+
+  const [commitment] = await db
+    .select()
+    .from(commitments)
+    .where(
+      and(
+        eq(commitments.id, commitmentId),
+        eq(commitments.householdId, actor.householdId)
+      )
+    );
+
+  if (!commitment) {
+    throw new ApiError(404, "commitment_not_found", "Commitment not found.");
+  }
+
+  return commitment;
+}
+
+function toRetrospectiveTemplateDto(
+  template: RetrospectiveTemplate,
+  rounds: RetrospectiveTemplateRound[]
+): RetrospectiveTemplateDto {
+  return {
+    createdAt: template.createdAt,
+    description: template.description,
+    id: template.id,
+    isSystem: template.isSystem,
+    name: template.name,
+    rounds: rounds
+      .filter((round) => round.templateId === template.id)
+      .sort((left, right) => left.sortOrder - right.sortOrder)
+      .map((round) => ({
+        configJson: round.configJson,
+        createdAt: round.createdAt,
+        entryPhase: round.entryPhase,
+        id: round.id,
+        kind: round.kind,
+        privacy: round.privacy,
+        prompt: round.prompt,
+        sortOrder: round.sortOrder,
+        title: round.title,
+        updatedAt: round.updatedAt
+      })),
+    updatedAt: template.updatedAt
+  };
+}
+
+async function getRetrospectiveRounds(
+  db: DatabaseClient,
+  retrospectiveIds: string[]
+) {
+  if (retrospectiveIds.length === 0) {
+    return [];
+  }
+
+  return db
+    .select()
+    .from(retrospectiveRounds)
+    .where(inArray(retrospectiveRounds.retrospectiveId, retrospectiveIds))
+    .orderBy(retrospectiveRounds.sortOrder);
+}
+
+async function getVisibleRetrospectiveNotes(
+  db: DatabaseClient,
+  actor: AuthenticatedActor,
+  filters: ListRetrospectiveNotesFilters
+) {
+  const conditions: SQL[] = [eq(retrospectiveNotes.householdId, actor.householdId)];
+
+  if (filters.commitmentPeriodId) {
+    conditions.push(eq(retrospectiveNotes.commitmentPeriodId, filters.commitmentPeriodId));
+  }
+
+  if (filters.retrospectiveId) {
+    conditions.push(eq(retrospectiveNotes.retrospectiveId, filters.retrospectiveId));
+  }
+
+  if (filters.roundId) {
+    conditions.push(eq(retrospectiveNotes.roundId, filters.roundId));
+  }
+
+  if (filters.templateRoundId) {
+    conditions.push(eq(retrospectiveNotes.templateRoundId, filters.templateRoundId));
+  }
+
+  const rows = await db
+    .select()
+    .from(retrospectiveNotes)
+    .where(and(...conditions))
+    .orderBy(retrospectiveNotes.sortOrder, retrospectiveNotes.createdAt);
+  const visibleRows = rows.filter((row) => canReadRetrospectiveNote(actor, row));
+  const userMap = await getUserRefsById(
+    db,
+    visibleRows.map((row) => row.authorUserId)
+  );
+
+  return visibleRows.map((row) => ({
+    ...row,
+    author: userMap.get(row.authorUserId) ?? null
+  }));
+}
+
+async function getCommitmentDtos(
+  db: DatabaseClient,
+  commitmentRows: Commitment[]
+) {
+  const commitmentIds = commitmentRows.map((commitment) => commitment.id);
+  const checklistRows = commitmentIds.length
+    ? await db
+        .select()
+        .from(commitmentChecklistItems)
+        .where(inArray(commitmentChecklistItems.commitmentId, commitmentIds))
+    : [];
+  const checkinRows = commitmentIds.length
+    ? await db
+        .select()
+        .from(commitmentCheckins)
+        .where(inArray(commitmentCheckins.commitmentId, commitmentIds))
+    : [];
+  const userIds = [
+    ...commitmentRows
+      .map((commitment) => commitment.assigneeUserId)
+      .filter((value) => value !== null),
+    ...checkinRows.map((checkin) => checkin.actorUserId)
+  ];
+  const userMap = await getUserRefsById(db, userIds);
+
+  return commitmentRows.map((commitment): CommitmentDto => {
+    const checklistItemsForCommitment = checklistRows
+      .filter((item) => item.commitmentId === commitment.id)
+      .sort((left, right) => left.sortOrder - right.sortOrder)
+      .map((item) => ({
+        body: item.body,
+        createdAt: item.createdAt,
+        id: item.id,
+        isCompleted: item.isCompleted,
+        sortOrder: item.sortOrder,
+        updatedAt: item.updatedAt
+      }));
+    const checkinsForCommitment = checkinRows
+      .filter((checkin) => checkin.commitmentId === commitment.id)
+      .sort((left, right) => left.checkinOn.localeCompare(right.checkinOn))
+      .map((checkin) => ({
+        actor: userMap.get(checkin.actorUserId) ?? null,
+        amount: checkin.amount,
+        checkinOn: checkin.checkinOn,
+        createdAt: checkin.createdAt,
+        id: checkin.id,
+        note: checkin.note,
+        updatedAt: checkin.updatedAt
+      }));
+
+    return {
+      ...commitment,
+      assignee: commitment.assigneeUserId
+        ? userMap.get(commitment.assigneeUserId) ?? null
+        : null,
+      checkins: checkinsForCommitment,
+      checklistItems: checklistItemsForCommitment
+    };
+  });
+}
+
 function buildTaskLabelsMap(taskIds: string[]) {
   return new Map(taskIds.map((taskId) => [taskId, [] as LabelDto[]]));
 }
@@ -778,6 +1229,979 @@ async function getTopSortKeyForStatus(
 export async function getCurrentActor(actor: AuthenticatedActor) {
   return {
     actor
+  };
+}
+
+export async function listRetrospectiveTemplates(
+  db: DatabaseClient,
+  actor: AuthenticatedActor
+) {
+  assertRetrospectiveAdmin(actor);
+
+  const [templateRows, roundRows] = await Promise.all([
+    db
+      .select()
+      .from(retrospectiveTemplates)
+      .where(eq(retrospectiveTemplates.householdId, actor.householdId))
+      .orderBy(retrospectiveTemplates.createdAt),
+    db
+      .select()
+      .from(retrospectiveTemplateRounds)
+      .innerJoin(
+        retrospectiveTemplates,
+        eq(retrospectiveTemplateRounds.templateId, retrospectiveTemplates.id)
+      )
+      .where(eq(retrospectiveTemplates.householdId, actor.householdId))
+  ]);
+
+  return {
+    items: templateRows.map((template) =>
+      toRetrospectiveTemplateDto(
+        template,
+        roundRows.map((row) => row.retrospective_template_rounds)
+      )
+    )
+  };
+}
+
+export async function getRetrospectiveHome(
+  db: DatabaseClient,
+  actor: AuthenticatedActor
+) {
+  assertRetrospectiveAdmin(actor);
+
+  const [settings] = await db
+    .select()
+    .from(householdSettings)
+    .where(eq(householdSettings.householdId, actor.householdId));
+  const [activePeriod] = await db
+    .select()
+    .from(commitmentPeriods)
+    .where(
+      and(
+        eq(commitmentPeriods.householdId, actor.householdId),
+        eq(commitmentPeriods.status, "active")
+      )
+    )
+    .orderBy(desc(commitmentPeriods.closureOn))
+    .limit(1);
+  const [openRetrospective] = await db
+    .select()
+    .from(retrospectives)
+    .where(
+      and(
+        eq(retrospectives.householdId, actor.householdId),
+        or(eq(retrospectives.status, "draft"), eq(retrospectives.status, "active"))!
+      )
+    )
+    .limit(1);
+  const recentRetrospectives = await db
+    .select()
+    .from(retrospectives)
+    .where(
+      and(
+        eq(retrospectives.householdId, actor.householdId),
+        eq(retrospectives.status, "finalized")
+      )
+    )
+    .orderBy(desc(retrospectives.finalizedAt))
+    .limit(10);
+  const activeCommitmentRows = activePeriod
+    ? await db
+        .select()
+        .from(commitments)
+        .where(
+          and(
+            eq(commitments.householdId, actor.householdId),
+            eq(commitments.commitmentPeriodId, activePeriod.id),
+            eq(commitments.status, "active")
+          )
+        )
+    : [];
+  const periodNotes = activePeriod
+    ? await getVisibleRetrospectiveNotes(db, actor, {
+        commitmentPeriodId: activePeriod.id
+      })
+    : [];
+  const commitmentDtos = await getCommitmentDtos(db, activeCommitmentRows);
+  const today = todayIsoDate();
+  const daysUntilClosure = activePeriod
+    ? Math.max(
+        0,
+        Math.ceil(
+          (new Date(`${activePeriod.closureOn}T00:00:00.000Z`).getTime() -
+            new Date(`${today}T00:00:00.000Z`).getTime()) /
+            86_400_000
+        )
+      )
+    : null;
+
+  return {
+    activePeriod,
+    commitments: commitmentDtos,
+    daysUntilClosure,
+    notes: periodNotes,
+    openRetrospective,
+    recentRetrospectives,
+    settings
+  };
+}
+
+export async function listRetrospectives(
+  db: DatabaseClient,
+  actor: AuthenticatedActor,
+  filters: ListRetrospectivesFilters
+) {
+  assertRetrospectiveAdmin(actor);
+
+  const conditions: SQL[] = [eq(retrospectives.householdId, actor.householdId)];
+
+  if (filters.status) {
+    conditions.push(eq(retrospectives.status, filters.status));
+  }
+
+  const rows = await db
+    .select()
+    .from(retrospectives)
+    .where(and(...conditions))
+    .orderBy(desc(retrospectives.createdAt))
+    .limit(filters.limit)
+    .offset(filters.offset);
+  const roundRows = await getRetrospectiveRounds(
+    db,
+    rows.map((row) => row.id)
+  );
+
+  return {
+    items: rows.map((row) => ({
+      ...row,
+      rounds: roundRows.filter((round) => round.retrospectiveId === row.id)
+    }))
+  };
+}
+
+export async function getRetrospectiveDetail(
+  db: DatabaseClient,
+  actor: AuthenticatedActor,
+  retrospectiveId: string
+) {
+  const retrospective = await getRetrospectiveOrThrow(db, actor, retrospectiveId);
+  const [period] = await db
+    .select()
+    .from(commitmentPeriods)
+    .where(eq(commitmentPeriods.id, retrospective.commitmentPeriodId));
+  const rounds = await getRetrospectiveRounds(db, [retrospective.id]);
+  const notes = await getVisibleRetrospectiveNotes(db, actor, {
+    retrospectiveId: retrospective.id
+  });
+  const commitmentRows = await db
+    .select()
+    .from(commitments)
+    .where(
+      and(
+        eq(commitments.householdId, actor.householdId),
+        or(
+          eq(commitments.commitmentPeriodId, retrospective.commitmentPeriodId),
+          eq(commitments.createdInRetrospectiveId, retrospective.id)
+        )!
+      )
+    );
+  const commitmentDtos = await getCommitmentDtos(db, commitmentRows);
+  const taskLookback =
+    period === undefined
+      ? []
+      : await db
+          .select()
+          .from(tasks)
+          .where(
+            and(
+              eq(tasks.householdId, actor.householdId),
+              eq(tasks.status, "Done"),
+              isNotNull(tasks.completedAt),
+              gte(
+                tasks.completedAt,
+                new Date(`${period.periodStartOn}T00:00:00.000Z`)
+              ),
+              lte(tasks.completedAt, new Date(`${period.closureOn}T23:59:59.999Z`))
+            )
+          )
+          .orderBy(desc(tasks.completedAt));
+
+  return {
+    item: {
+      ...retrospective,
+      commitments: commitmentDtos,
+      notes,
+      period: period ?? null,
+      rounds,
+      taskLookback
+    }
+  };
+}
+
+export async function createRetrospective(
+  db: DatabaseClient,
+  actor: AuthenticatedActor,
+  input: CreateRetrospectiveInput
+) {
+  assertRetrospectiveAdmin(actor);
+
+  const retrospectiveId = await db.transaction(async (tx) => {
+    const [existingOpenRetrospective] = await tx
+      .select({
+        id: retrospectives.id
+      })
+      .from(retrospectives)
+      .where(
+        and(
+          eq(retrospectives.householdId, actor.householdId),
+          or(eq(retrospectives.status, "draft"), eq(retrospectives.status, "active"))!
+        )
+      )
+      .limit(1);
+
+    if (existingOpenRetrospective) {
+      throw new ApiError(
+        409,
+        "retrospective_already_open",
+        "A draft or active retrospective already exists."
+      );
+    }
+
+    const [settings] = await tx
+      .select()
+      .from(householdSettings)
+      .where(eq(householdSettings.householdId, actor.householdId));
+    const templateId =
+      input.templateId ?? settings?.defaultRetrospectiveTemplateId ?? undefined;
+
+    if (!templateId) {
+      throw new ApiError(
+        400,
+        "missing_retrospective_template",
+        "A retrospective template is required."
+      );
+    }
+
+    const [template] = await tx
+      .select()
+      .from(retrospectiveTemplates)
+      .where(
+        and(
+          eq(retrospectiveTemplates.id, templateId),
+          eq(retrospectiveTemplates.householdId, actor.householdId)
+        )
+      );
+
+    if (!template) {
+      throw new ApiError(
+        404,
+        "retrospective_template_not_found",
+        "Retrospective template not found."
+      );
+    }
+
+    const [period] = await tx
+      .select()
+      .from(commitmentPeriods)
+      .where(
+        and(
+          eq(commitmentPeriods.householdId, actor.householdId),
+          eq(commitmentPeriods.status, "active")
+        )
+      )
+      .orderBy(asc(commitmentPeriods.closureOn))
+      .limit(1);
+
+    if (!period) {
+      throw new ApiError(
+        409,
+        "commitment_period_missing",
+        "No active commitment period exists."
+      );
+    }
+
+    if (period.closureOn > todayIsoDate()) {
+      throw new ApiError(
+        409,
+        "commitment_period_not_ready",
+        "The active commitment period has not reached closure yet."
+      );
+    }
+
+    const [created] = await tx
+      .insert(retrospectives)
+      .values({
+        commitmentPeriodId: period.id,
+        createdByUserId: actor.id,
+        householdId: actor.householdId,
+        templateId: template.id,
+        title:
+          input.title?.trim() ||
+          `Retrospective for ${period.periodStartOn} to ${period.closureOn}`,
+        updatedByUserId: actor.id
+      })
+      .returning();
+    const retrospective = getRequiredRow(
+      created,
+      "retrospective_create_failed",
+      "Retrospective creation failed."
+    );
+    const templateRounds = await tx
+      .select()
+      .from(retrospectiveTemplateRounds)
+      .where(eq(retrospectiveTemplateRounds.templateId, template.id))
+      .orderBy(retrospectiveTemplateRounds.sortOrder);
+    const createdRounds = templateRounds.length
+      ? await tx
+          .insert(retrospectiveRounds)
+          .values(
+            templateRounds.map((round) => ({
+              configJson: round.configJson,
+              entryPhase: round.entryPhase,
+              kind: round.kind,
+              privacy: round.privacy,
+              prompt: round.prompt,
+              retrospectiveId: retrospective.id,
+              sortOrder: round.sortOrder,
+              sourceTemplateRoundId: round.id,
+              title: round.title
+            }))
+          )
+          .returning()
+      : [];
+    const firstRound = createdRounds.sort(
+      (left, right) => left.sortOrder - right.sortOrder
+    )[0];
+
+    await tx
+      .update(retrospectives)
+      .set({
+        currentRoundId: firstRound?.id ?? null,
+        updatedAt: new Date()
+      })
+      .where(eq(retrospectives.id, retrospective.id));
+    await tx
+      .update(commitmentPeriods)
+      .set({
+        status: "closed",
+        updatedAt: new Date()
+      })
+      .where(eq(commitmentPeriods.id, period.id));
+
+    for (const round of createdRounds) {
+      if (!round.sourceTemplateRoundId) {
+        continue;
+      }
+
+      await tx
+        .update(retrospectiveNotes)
+        .set({
+          retrospectiveId: retrospective.id,
+          roundId: round.id,
+          updatedAt: new Date()
+        })
+        .where(
+          and(
+            eq(retrospectiveNotes.commitmentPeriodId, period.id),
+            eq(retrospectiveNotes.templateRoundId, round.sourceTemplateRoundId)
+          )
+        );
+    }
+
+    return retrospective.id;
+  });
+
+  return getRetrospectiveDetail(db, actor, retrospectiveId);
+}
+
+export async function startRetrospective(
+  db: DatabaseClient,
+  actor: AuthenticatedActor,
+  retrospectiveId: string
+) {
+  const retrospective = await getRetrospectiveOrThrow(db, actor, retrospectiveId);
+
+  if (retrospective.status !== "draft") {
+    throw new ApiError(
+      409,
+      "retrospective_not_draft",
+      "Only draft retrospectives can be started."
+    );
+  }
+
+  await db
+    .update(retrospectives)
+    .set({
+      startedAt: new Date(),
+      status: "active",
+      updatedAt: new Date(),
+      updatedByUserId: actor.id
+    })
+    .where(eq(retrospectives.id, retrospective.id));
+
+  return getRetrospectiveDetail(db, actor, retrospective.id);
+}
+
+export async function enterRetrospectiveRound(
+  db: DatabaseClient,
+  actor: AuthenticatedActor,
+  retrospectiveId: string,
+  roundId: string
+) {
+  const retrospective = await getRetrospectiveOrThrow(db, actor, retrospectiveId);
+  const round = await getRetrospectiveRoundOrThrow(
+    db,
+    actor,
+    retrospectiveId,
+    roundId
+  );
+
+  if (retrospective.status === "finalized") {
+    throw new ApiError(
+      409,
+      "retrospective_finalized",
+      "Finalized retrospectives cannot change rounds."
+    );
+  }
+
+  await db.transaction(async (tx) => {
+    await tx
+      .update(retrospectives)
+      .set({
+        currentRoundId: round.id,
+        updatedAt: new Date(),
+        updatedByUserId: actor.id
+      })
+      .where(eq(retrospectives.id, retrospective.id));
+    await tx
+      .update(retrospectiveRounds)
+      .set({
+        startedAt: round.startedAt ?? new Date(),
+        updatedAt: new Date()
+      })
+      .where(eq(retrospectiveRounds.id, round.id));
+
+    if (
+      shouldRevealNotesOnRoundEntry({
+        kind: round.kind,
+        visibilityState: round.privacy
+      })
+    ) {
+      if (!canRevealRetrospectiveNotes(actor)) {
+        throw new ApiError(403, "forbidden", "You cannot reveal retrospective notes.");
+      }
+
+      await tx
+        .update(retrospectiveNotes)
+        .set({
+          revealedAt: new Date(),
+          revealedInRetrospectiveId: retrospective.id,
+          revealedInRoundId: round.id,
+          updatedAt: new Date(),
+          visibilityState: "revealed"
+        })
+        .where(
+          and(
+            eq(retrospectiveNotes.commitmentPeriodId, retrospective.commitmentPeriodId),
+            eq(retrospectiveNotes.roundId, round.id),
+            eq(retrospectiveNotes.visibilityState, "private_until_round")
+          )
+        );
+    }
+  });
+
+  return getRetrospectiveDetail(db, actor, retrospective.id);
+}
+
+export async function completeRetrospectiveRound(
+  db: DatabaseClient,
+  actor: AuthenticatedActor,
+  retrospectiveId: string,
+  roundId: string
+) {
+  const round = await getRetrospectiveRoundOrThrow(
+    db,
+    actor,
+    retrospectiveId,
+    roundId
+  );
+  const rounds = await getRetrospectiveRounds(db, [retrospectiveId]);
+  const nextRound = rounds.find((candidate) => candidate.sortOrder > round.sortOrder);
+
+  await db
+    .update(retrospectiveRounds)
+    .set({
+      completedAt: new Date(),
+      updatedAt: new Date()
+    })
+    .where(eq(retrospectiveRounds.id, round.id));
+
+  if (nextRound) {
+    return enterRetrospectiveRound(db, actor, retrospectiveId, nextRound.id);
+  }
+
+  return getRetrospectiveDetail(db, actor, retrospectiveId);
+}
+
+export async function finalizeRetrospective(
+  db: DatabaseClient,
+  actor: AuthenticatedActor,
+  retrospectiveId: string
+) {
+  const retrospective = await getRetrospectiveOrThrow(db, actor, retrospectiveId);
+
+  if (retrospective.status === "finalized") {
+    throw new ApiError(
+      409,
+      "retrospective_already_finalized",
+      "Retrospective is already finalized."
+    );
+  }
+
+  await db.transaction(async (tx) => {
+    const [settings] = await tx
+      .select()
+      .from(householdSettings)
+      .where(eq(householdSettings.householdId, actor.householdId));
+    const [period] = await tx
+      .select()
+      .from(commitmentPeriods)
+      .where(eq(commitmentPeriods.id, retrospective.commitmentPeriodId));
+    const periodStartOn = period?.closureOn ?? todayIsoDate();
+    const closureOn = computeNextClosureOn({
+      cadence: settings?.retrospectiveCadence ?? "monthly",
+      interval: settings?.retrospectiveCadenceInterval ?? 1,
+      periodStartOn
+    });
+    const [nextPeriod] = await tx
+      .insert(commitmentPeriods)
+      .values({
+        householdId: actor.householdId,
+        openedByRetrospectiveId: retrospective.id,
+        periodStartOn,
+        closureOn
+      })
+      .returning();
+    const createdPeriod = getRequiredRow(
+      nextPeriod,
+      "commitment_period_create_failed",
+      "Next commitment period creation failed."
+    );
+
+    await tx
+      .update(commitments)
+      .set({
+        commitmentPeriodId: createdPeriod.id,
+        updatedAt: new Date()
+      })
+      .where(
+        and(
+          eq(commitments.householdId, actor.householdId),
+          eq(commitments.createdInRetrospectiveId, retrospective.id),
+          isNull(commitments.commitmentPeriodId)
+        )
+      );
+    await tx
+      .update(commitmentPeriods)
+      .set({
+        reviewedByRetrospectiveId: retrospective.id,
+        status: "reviewed",
+        updatedAt: new Date()
+      })
+      .where(eq(commitmentPeriods.id, retrospective.commitmentPeriodId));
+    await tx
+      .update(retrospectives)
+      .set({
+        finalizedAt: new Date(),
+        status: "finalized",
+        updatedAt: new Date(),
+        updatedByUserId: actor.id
+      })
+      .where(eq(retrospectives.id, retrospective.id));
+  });
+
+  return getRetrospectiveDetail(db, actor, retrospective.id);
+}
+
+export async function listRetrospectiveNotes(
+  db: DatabaseClient,
+  actor: AuthenticatedActor,
+  filters: ListRetrospectiveNotesFilters
+) {
+  assertRetrospectiveAdmin(actor);
+
+  return {
+    items: await getVisibleRetrospectiveNotes(db, actor, filters)
+  };
+}
+
+export async function createRetrospectiveNote(
+  db: DatabaseClient,
+  actor: AuthenticatedActor,
+  input: CreateRetrospectiveNoteInput
+) {
+  assertRetrospectiveAdmin(actor);
+
+  const period = await getCommitmentPeriodOrThrow(
+    db,
+    actor,
+    input.commitmentPeriodId
+  );
+  let configuredEntryPhase: "commitment_period" | "retrospective" | "both";
+  let privacy: "shared" | "private_until_round" | "private";
+  const roundId = input.roundId ?? null;
+  let retrospectiveId = input.retrospectiveId ?? null;
+  let templateRoundId = input.templateRoundId ?? null;
+  let shouldRevealImmediately = false;
+
+  if (roundId) {
+    const [round] = await db
+      .select()
+      .from(retrospectiveRounds)
+      .innerJoin(retrospectives, eq(retrospectiveRounds.retrospectiveId, retrospectives.id))
+      .where(
+        and(
+          eq(retrospectiveRounds.id, roundId),
+          eq(retrospectives.householdId, actor.householdId)
+        )
+      );
+
+    if (!round) {
+      throw new ApiError(
+        404,
+        "retrospective_round_not_found",
+        "Retrospective round not found."
+      );
+    }
+
+    configuredEntryPhase = round.retrospective_rounds.entryPhase ?? "retrospective";
+    privacy = round.retrospective_rounds.privacy ?? "shared";
+    retrospectiveId = round.retrospectives.id;
+    templateRoundId = round.retrospective_rounds.sourceTemplateRoundId;
+    shouldRevealImmediately =
+      privacy === "private_until_round" &&
+      round.retrospectives.currentRoundId === round.retrospective_rounds.id;
+  } else if (templateRoundId) {
+    const [templateRound] = await db
+      .select()
+      .from(retrospectiveTemplateRounds)
+      .innerJoin(
+        retrospectiveTemplates,
+        eq(retrospectiveTemplateRounds.templateId, retrospectiveTemplates.id)
+      )
+      .where(
+        and(
+          eq(retrospectiveTemplateRounds.id, templateRoundId),
+          eq(retrospectiveTemplates.householdId, actor.householdId)
+        )
+      );
+
+    if (!templateRound) {
+      throw new ApiError(
+        404,
+        "retrospective_template_round_not_found",
+        "Retrospective template round not found."
+      );
+    }
+
+    configuredEntryPhase =
+      templateRound.retrospective_template_rounds.entryPhase ?? "commitment_period";
+    privacy = templateRound.retrospective_template_rounds.privacy ?? "shared";
+  } else {
+    throw new ApiError(
+      400,
+      "missing_retrospective_note_round",
+      "A template round or retrospective round is required."
+    );
+  }
+
+  if (
+    !canNoteEntryPhaseAcceptWrite({
+      configuredEntryPhase,
+      writeEntryPhase: input.entryPhase
+    })
+  ) {
+    throw new ApiError(
+      400,
+      "invalid_note_entry_phase",
+      "This round does not accept notes during that phase."
+    );
+  }
+
+  const visibilityState =
+    privacy === "private_until_round" && shouldRevealImmediately
+      ? "revealed"
+      : privacy;
+  const [created] = await db
+    .insert(retrospectiveNotes)
+    .values({
+      authorUserId: actor.id,
+      body: input.body.trim(),
+      commitmentPeriodId: period.id,
+      entryPhase: input.entryPhase,
+      householdId: actor.householdId,
+      retrospectiveId,
+      roundId,
+      templateRoundId,
+      visibilityState
+    })
+    .returning();
+  const note = getRequiredRow(
+    created,
+    "retrospective_note_create_failed",
+    "Retrospective note creation failed."
+  );
+
+  return {
+    item: {
+      ...note,
+      author: mapUserRef({
+        deactivatedAt: null,
+        displayName: actor.displayName,
+        email: actor.email,
+        id: actor.id,
+        role: actor.role,
+        serviceKind: actor.serviceKind
+      })
+    }
+  };
+}
+
+export async function updateRetrospectiveNote(
+  db: DatabaseClient,
+  actor: AuthenticatedActor,
+  noteId: string,
+  input: UpdateRetrospectiveNoteInput
+) {
+  assertRetrospectiveAdmin(actor);
+
+  const [note] = await db
+    .select()
+    .from(retrospectiveNotes)
+    .where(
+      and(
+        eq(retrospectiveNotes.id, noteId),
+        eq(retrospectiveNotes.householdId, actor.householdId)
+      )
+    );
+
+  if (!note) {
+    throw new ApiError(404, "retrospective_note_not_found", "Note not found.");
+  }
+
+  if (!canMutateRetrospectiveNote(actor, note)) {
+    throw new ApiError(403, "forbidden", "You cannot edit this note.");
+  }
+
+  const [updated] = await db
+    .update(retrospectiveNotes)
+    .set({
+      body: input.body.trim(),
+      updatedAt: new Date()
+    })
+    .where(eq(retrospectiveNotes.id, note.id))
+    .returning();
+
+  return {
+    item: {
+      ...getRequiredRow(updated, "retrospective_note_update_failed", "Note update failed."),
+      author: mapUserRef({
+        deactivatedAt: null,
+        displayName: actor.displayName,
+        email: actor.email,
+        id: actor.id,
+        role: actor.role,
+        serviceKind: actor.serviceKind
+      })
+    }
+  };
+}
+
+export async function listCommitments(
+  db: DatabaseClient,
+  actor: AuthenticatedActor,
+  filters: ListCommitmentFilters
+) {
+  assertRetrospectiveAdmin(actor);
+
+  const conditions: SQL[] = [eq(commitments.householdId, actor.householdId)];
+
+  if (filters.assigneeUserId) {
+    conditions.push(eq(commitments.assigneeUserId, filters.assigneeUserId));
+  }
+
+  if (filters.commitmentPeriodId) {
+    conditions.push(eq(commitments.commitmentPeriodId, filters.commitmentPeriodId));
+  }
+
+  if (filters.status) {
+    conditions.push(eq(commitments.status, filters.status));
+  }
+
+  const rows = await db.select().from(commitments).where(and(...conditions));
+
+  return {
+    items: await getCommitmentDtos(db, rows)
+  };
+}
+
+export async function createCommitment(
+  db: DatabaseClient,
+  actor: AuthenticatedActor,
+  input: CreateCommitmentInput
+) {
+  assertRetrospectiveAdmin(actor);
+
+  if (input.commitmentPeriodId) {
+    await getCommitmentPeriodOrThrow(db, actor, input.commitmentPeriodId);
+  }
+
+  if (input.createdInRetrospectiveId) {
+    await getRetrospectiveOrThrow(db, actor, input.createdInRetrospectiveId);
+  }
+
+  const assigneeUserId = await assertAssigneeInHousehold(
+    db,
+    actor.householdId,
+    input.assigneeUserId
+  );
+  const createdId = await db.transaction(async (tx) => {
+    const [created] = await tx
+      .insert(commitments)
+      .values({
+        assigneeUserId,
+        commitmentPeriodId: input.commitmentPeriodId ?? null,
+        createdByUserId: actor.id,
+        createdInRetrospectiveId: input.createdInRetrospectiveId ?? null,
+        description: input.description ?? "",
+        householdId: actor.householdId,
+        targetCount: input.targetCount ?? null,
+        title: input.title.trim(),
+        trackingInterval: input.trackingInterval ?? "none",
+        trackingKind: input.trackingKind,
+        updatedByUserId: actor.id
+      })
+      .returning({
+        id: commitments.id
+      });
+    const createdCommitment = getRequiredRow(
+      created,
+      "commitment_create_failed",
+      "Commitment creation failed."
+    );
+
+    if (input.checklistItems?.length) {
+      await tx.insert(commitmentChecklistItems).values(
+        input.checklistItems.map((item, index) => ({
+          body: item.body.trim(),
+          commitmentId: createdCommitment.id,
+          isCompleted: item.isCompleted ?? false,
+          sortOrder: index
+        }))
+      );
+    }
+
+    return createdCommitment.id;
+  });
+
+  const created = await getCommitmentOrThrow(db, actor, createdId);
+  const [item] = await getCommitmentDtos(db, [created]);
+
+  return {
+    item
+  };
+}
+
+export async function updateCommitment(
+  db: DatabaseClient,
+  actor: AuthenticatedActor,
+  commitmentId: string,
+  input: UpdateCommitmentInput
+) {
+  const existing = await getCommitmentOrThrow(db, actor, commitmentId);
+
+  if (!canMutateCommitment(actor, existing)) {
+    throw new ApiError(403, "forbidden", "You cannot edit this commitment.");
+  }
+
+  const assigneeUserId = await assertAssigneeInHousehold(
+    db,
+    actor.householdId,
+    input.assigneeUserId
+  );
+
+  await db.transaction(async (tx) => {
+    await tx
+      .update(commitments)
+      .set({
+        assigneeUserId,
+        commitmentPeriodId: input.commitmentPeriodId ?? existing.commitmentPeriodId,
+        createdInRetrospectiveId:
+          input.createdInRetrospectiveId ?? existing.createdInRetrospectiveId,
+        description: input.description ?? "",
+        status: input.status ?? existing.status,
+        targetCount: input.targetCount ?? null,
+        title: input.title.trim(),
+        trackingInterval: input.trackingInterval ?? "none",
+        trackingKind: input.trackingKind,
+        updatedAt: new Date(),
+        updatedByUserId: actor.id
+      })
+      .where(eq(commitments.id, existing.id));
+    await tx
+      .delete(commitmentChecklistItems)
+      .where(eq(commitmentChecklistItems.commitmentId, existing.id));
+
+    if (input.checklistItems?.length) {
+      await tx.insert(commitmentChecklistItems).values(
+        input.checklistItems.map((item, index) => ({
+          body: item.body.trim(),
+          commitmentId: existing.id,
+          isCompleted: item.isCompleted ?? false,
+          sortOrder: index
+        }))
+      );
+    }
+  });
+
+  const updated = await getCommitmentOrThrow(db, actor, existing.id);
+  const [item] = await getCommitmentDtos(db, [updated]);
+
+  return {
+    item
+  };
+}
+
+export async function createCommitmentCheckin(
+  db: DatabaseClient,
+  actor: AuthenticatedActor,
+  commitmentId: string,
+  input: CreateCommitmentCheckinInput
+) {
+  const commitment = await getCommitmentOrThrow(db, actor, commitmentId);
+
+  if (!canMutateCommitment(actor, commitment)) {
+    throw new ApiError(403, "forbidden", "You cannot update this commitment.");
+  }
+
+  const [created] = await db
+    .insert(commitmentCheckins)
+    .values({
+      actorUserId: actor.id,
+      amount: input.amount ?? 1,
+      checkinOn: input.checkinOn,
+      commitmentId: commitment.id,
+      note: input.note ?? ""
+    })
+    .returning();
+
+  return {
+    item: getRequiredRow(
+      created,
+      "commitment_checkin_create_failed",
+      "Commitment check-in creation failed."
+    )
   };
 }
 
