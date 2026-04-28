@@ -1756,7 +1756,6 @@ a {
 }
 
 .settings-page-stack > * {
-  height: 100%;
   width: 100%;
 }
 
@@ -1932,9 +1931,9 @@ a {
 }
 
 .settings-card {
-  min-height: 100%;
+  min-height: 0;
   width: 100%;
-  overflow: auto;
+  overflow: visible;
   overscroll-behavior: contain;
 }
 

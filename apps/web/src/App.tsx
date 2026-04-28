@@ -892,12 +892,7 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (
-      !isNavOpen &&
-      !isTaskSheetOpen &&
-      editingTemplateKey === null &&
-      editingRetrospectiveTemplateKey === null
-    ) {
+    if (!isNavOpen && !isTaskSheetOpen && editingTemplateKey === null) {
       return;
     }
 
@@ -907,7 +902,7 @@ export function App() {
     return () => {
       document.body.style.overflow = previousOverflow;
     };
-  }, [editingRetrospectiveTemplateKey, editingTemplateKey, isNavOpen, isTaskSheetOpen]);
+  }, [editingTemplateKey, isNavOpen, isTaskSheetOpen]);
 
   const loadTaskDetail = useEffectEvent(async (taskId: string | null) => {
     if (!taskId) {
