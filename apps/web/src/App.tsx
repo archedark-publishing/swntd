@@ -113,7 +113,7 @@ import { toast } from "sonner";
 import "./styles.css";
 
 type ViewName = "archive" | "board" | "recurring" | "retrospective" | "settings";
-type SettingsPage = "general" | "household" | "labels";
+type SettingsPage = "general" | "household" | "labels" | "retrospective";
 type TaskDetailControlId = "assignee" | "due" | "labels" | "status";
 const maxLabelNameLength = 16;
 const dragMouseDistancePx = 8;
@@ -238,12 +238,18 @@ const navItems: Array<{ id: ViewName; label: string }> = [
 ];
 const settingsNavItems: Array<{ id: SettingsPage; label: string }> = [
   { id: "general", label: "General" },
+  { id: "retrospective", label: "Retrospective" },
   { id: "household", label: "Household" },
   { id: "labels", label: "Labels" }
 ];
 
 function isSettingsPage(value: string | undefined): value is SettingsPage {
-  return value === "general" || value === "household" || value === "labels";
+  return (
+    value === "general" ||
+    value === "household" ||
+    value === "labels" ||
+    value === "retrospective"
+  );
 }
 
 function readRouteFromHash(): {
@@ -463,9 +469,13 @@ function serializeLabelDraft(draft: LabelDraft) {
 function normalizeSettingsDraft(settings: Settings) {
   return {
     defaultCalendarExportKind: settings.defaultCalendarExportKind,
+    defaultRetrospectiveTemplateId: settings.defaultRetrospectiveTemplateId,
     defaultTimezone: settings.defaultTimezone.trim(),
     doneArchiveAfterDays: settings.doneArchiveAfterDays,
-    nearDueThresholdDays: settings.nearDueThresholdDays
+    finalizedRetrospectiveEditPolicy: settings.finalizedRetrospectiveEditPolicy,
+    nearDueThresholdDays: settings.nearDueThresholdDays,
+    retrospectiveCadence: settings.retrospectiveCadence,
+    retrospectiveCadenceInterval: settings.retrospectiveCadenceInterval
   };
 }
 
@@ -978,6 +988,14 @@ export function App() {
     void refreshRetrospective();
   }, [snapshot.actor, view]);
 
+  useEffect(() => {
+    if (view !== "settings" || settingsPage !== "retrospective" || !snapshot.actor) {
+      return;
+    }
+
+    void refreshRetrospective();
+  }, [settingsPage, snapshot.actor, view]);
+
   const activeTasks = snapshot.activeTasks.slice().sort((left, right) => {
     if (left.status !== right.status) {
       return taskStatuses.indexOf(left.status) - taskStatuses.indexOf(right.status);
@@ -1406,9 +1424,14 @@ export function App() {
       () =>
         api.updateSettings({
           defaultCalendarExportKind: nextSettings.defaultCalendarExportKind,
+          defaultRetrospectiveTemplateId: nextSettings.defaultRetrospectiveTemplateId,
           defaultTimezone: nextSettings.defaultTimezone,
           doneArchiveAfterDays: nextSettings.doneArchiveAfterDays,
-          nearDueThresholdDays: nextSettings.nearDueThresholdDays
+          finalizedRetrospectiveEditPolicy:
+            nextSettings.finalizedRetrospectiveEditPolicy,
+          nearDueThresholdDays: nextSettings.nearDueThresholdDays,
+          retrospectiveCadence: nextSettings.retrospectiveCadence,
+          retrospectiveCadenceInterval: nextSettings.retrospectiveCadenceInterval
         }),
       "Household settings saved.",
       { silentSuccess: true }
@@ -1839,6 +1862,7 @@ export function App() {
                   selectedLabelKey={editingLabelKey}
                   isUserEditorOpen={editingUserKey !== null}
                   selectedUser={selectedHouseholdUser}
+                  retrospectiveTemplates={retrospectiveState.templates}
                   serviceTokensByUserId={snapshot.serviceTokensByUserId}
                   settings={snapshot.settings}
                   userEditorMode={householdUserEditorMode}
@@ -4182,6 +4206,7 @@ function SettingsView(props: {
   onSelectLabel: (labelId: string | "new" | null) => void;
   onSelectPage: (page: SettingsPage) => void;
   onSelectUser: (userKey: string | "new-admin" | "new-service" | null) => void;
+  retrospectiveTemplates: RetrospectiveTemplate[];
   selectedLabel: Label | null;
   selectedLabelKey: string | "new" | null;
   selectedUser: UserRef | null;
@@ -4270,12 +4295,17 @@ function SettingsView(props: {
     if (
       !normalized.defaultTimezone ||
       !Number.isFinite(normalized.doneArchiveAfterDays) ||
-      !Number.isFinite(normalized.nearDueThresholdDays)
+      !Number.isFinite(normalized.nearDueThresholdDays) ||
+      !Number.isFinite(normalized.retrospectiveCadenceInterval)
     ) {
       return;
     }
 
-    if (normalized.doneArchiveAfterDays < 1 || normalized.nearDueThresholdDays < 1) {
+    if (
+      normalized.doneArchiveAfterDays < 1 ||
+      normalized.nearDueThresholdDays < 1 ||
+      normalized.retrospectiveCadenceInterval < 1
+    ) {
       return;
     }
 
@@ -4326,12 +4356,17 @@ function SettingsView(props: {
     if (
       !normalized.defaultTimezone ||
       !Number.isFinite(normalized.doneArchiveAfterDays) ||
-      !Number.isFinite(normalized.nearDueThresholdDays)
+      !Number.isFinite(normalized.nearDueThresholdDays) ||
+      !Number.isFinite(normalized.retrospectiveCadenceInterval)
     ) {
       return;
     }
 
-    if (normalized.doneArchiveAfterDays < 1 || normalized.nearDueThresholdDays < 1) {
+    if (
+      normalized.doneArchiveAfterDays < 1 ||
+      normalized.nearDueThresholdDays < 1 ||
+      normalized.retrospectiveCadenceInterval < 1
+    ) {
       return;
     }
 
@@ -4479,6 +4514,77 @@ function SettingsView(props: {
                   { label: "ICS download", value: "ics" }
                 ]}
                 value={settingsDraft.defaultCalendarExportKind}
+              />
+            </div>
+          </SurfaceCard>
+        ) : null}
+
+        {props.activePage === "retrospective" ? (
+          <SurfaceCard className="settings-card gap-0 py-0">
+            <SectionHeading
+              description="Set the default rhythm and template for household retrospectives."
+              eyebrow="Review Rhythm"
+              title="Retrospective Settings"
+            />
+            <div className="form-grid">
+              <FormSelect
+                label="Cadence"
+                onValueChange={(value) =>
+                  setSettingsDraft({
+                    ...settingsDraft,
+                    retrospectiveCadence: value as Settings["retrospectiveCadence"]
+                  })
+                }
+                options={[
+                  { label: "Weekly", value: "weekly" },
+                  { label: "Monthly", value: "monthly" },
+                  { label: "Quarterly", value: "quarterly" },
+                  { label: "Custom", value: "custom" }
+                ]}
+                value={settingsDraft.retrospectiveCadence}
+              />
+              <FormField label="Cadence interval">
+                <FormInput
+                  min={1}
+                  onChange={(event) =>
+                    setSettingsDraft({
+                      ...settingsDraft,
+                      retrospectiveCadenceInterval: Number(event.target.value)
+                    })
+                  }
+                  type="number"
+                  value={settingsDraft.retrospectiveCadenceInterval}
+                />
+              </FormField>
+              <FormSelect
+                allowEmptyOption
+                label="Default template"
+                onValueChange={(value) =>
+                  setSettingsDraft({
+                    ...settingsDraft,
+                    defaultRetrospectiveTemplateId: value || null
+                  })
+                }
+                options={props.retrospectiveTemplates.map((template) => ({
+                  label: template.name,
+                  value: template.id
+                }))}
+                placeholder="No template selected"
+                value={settingsDraft.defaultRetrospectiveTemplateId ?? ""}
+              />
+              <FormSelect
+                label="Finalized retros"
+                onValueChange={(value) =>
+                  setSettingsDraft({
+                    ...settingsDraft,
+                    finalizedRetrospectiveEditPolicy: value as Settings["finalizedRetrospectiveEditPolicy"]
+                  })
+                }
+                options={[
+                  { label: "Locked", value: "locked" },
+                  { label: "Editable", value: "editable" }
+                ]}
+                value={settingsDraft.finalizedRetrospectiveEditPolicy}
               />
             </div>
           </SurfaceCard>

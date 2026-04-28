@@ -659,7 +659,8 @@ It should include archived tasks. No task-retrospective link is created in V1.
 - [ ] Build full round components, including commitment review rating controls and richer completed-task lookback.
 - [x] Build commitment tracker components.
 - [ ] Build completed retrospective detail.
-- [ ] Add Retrospective settings tab and template editor.
+- [x] Add Retrospective settings tab.
+- [ ] Add retrospective template editor.
 
 ### Phase 5: Polish And Documentation
 

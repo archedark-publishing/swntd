@@ -297,9 +297,13 @@ export type UpdateLabelInput = {
 
 export type UpdateSettingsInput = {
   defaultCalendarExportKind?: "google" | "ics" | undefined;
+  defaultRetrospectiveTemplateId?: string | null | undefined;
   defaultTimezone?: string | undefined;
   doneArchiveAfterDays?: number | undefined;
+  finalizedRetrospectiveEditPolicy?: "locked" | "editable" | undefined;
   nearDueThresholdDays?: number | undefined;
+  retrospectiveCadence?: RetrospectiveCadence | undefined;
+  retrospectiveCadenceInterval?: number | undefined;
 };
 
 export type CreateRecurringTemplateInput = {
@@ -800,6 +804,34 @@ async function getRetrospectiveOrThrow(
   }
 
   return retrospective;
+}
+
+async function getRetrospectiveTemplateOrThrowForSettings(
+  db: DatabaseClient,
+  actor: AuthenticatedActor,
+  templateId: string
+) {
+  const [template] = await db
+    .select({
+      id: retrospectiveTemplates.id
+    })
+    .from(retrospectiveTemplates)
+    .where(
+      and(
+        eq(retrospectiveTemplates.id, templateId),
+        eq(retrospectiveTemplates.householdId, actor.householdId)
+      )
+    );
+
+  if (!template) {
+    throw new ApiError(
+      400,
+      "invalid_retrospective_template",
+      "Default retrospective template must belong to the household."
+    );
+  }
+
+  return template;
 }
 
 async function getRetrospectiveRoundOrThrow(
@@ -3047,14 +3079,34 @@ export async function updateSettings(
     throw new ApiError(404, "settings_not_found", "Household settings not found.");
   }
 
+  if (input.defaultRetrospectiveTemplateId) {
+    await getRetrospectiveTemplateOrThrowForSettings(
+      db,
+      actor,
+      input.defaultRetrospectiveTemplateId
+    );
+  }
+
   const [updated] = await db
     .update(householdSettings)
     .set({
       defaultCalendarExportKind:
         input.defaultCalendarExportKind ?? current.defaultCalendarExportKind,
+      defaultRetrospectiveTemplateId:
+        input.defaultRetrospectiveTemplateId === undefined
+          ? current.defaultRetrospectiveTemplateId
+          : input.defaultRetrospectiveTemplateId,
       defaultTimezone: input.defaultTimezone ?? current.defaultTimezone,
       doneArchiveAfterDays: input.doneArchiveAfterDays ?? current.doneArchiveAfterDays,
+      finalizedRetrospectiveEditPolicy:
+        input.finalizedRetrospectiveEditPolicy ??
+        current.finalizedRetrospectiveEditPolicy,
       nearDueThresholdDays: input.nearDueThresholdDays ?? current.nearDueThresholdDays,
+      retrospectiveCadence:
+        input.retrospectiveCadence ?? current.retrospectiveCadence,
+      retrospectiveCadenceInterval:
+        input.retrospectiveCadenceInterval ??
+        current.retrospectiveCadenceInterval,
       updatedAt: new Date()
     })
     .where(eq(householdSettings.householdId, actor.householdId))

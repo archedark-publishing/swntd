@@ -7,7 +7,9 @@ import {
   commitmentReviewRatings,
   commitmentTrackingIntervals,
   commitmentTrackingKinds,
+  finalizedRetrospectiveEditPolicies,
   retrospectiveNoteWriteEntryPhases,
+  retrospectiveCadences,
   retrospectiveStatuses
 } from "@swntd/shared/server/domain/retrospectives";
 import type { AuthenticatedActor } from "@swntd/shared/server/domain/authorization";
@@ -190,9 +192,15 @@ const issueServiceTokenSchema = z.object({
 const settingsSchema = z
   .object({
     defaultCalendarExportKind: z.enum(["google", "ics"]).optional(),
+    defaultRetrospectiveTemplateId: z.string().trim().min(1).nullable().optional(),
     defaultTimezone: z.string().trim().min(1).optional(),
     doneArchiveAfterDays: z.number().int().positive().optional(),
-    nearDueThresholdDays: z.number().int().positive().optional()
+    finalizedRetrospectiveEditPolicy: z
+      .enum(finalizedRetrospectiveEditPolicies)
+      .optional(),
+    nearDueThresholdDays: z.number().int().positive().optional(),
+    retrospectiveCadence: z.enum(retrospectiveCadences).optional(),
+    retrospectiveCadenceInterval: z.number().int().positive().optional()
   })
   .refine((value) => Object.keys(value).length > 0, {
     message: "At least one setting must be updated."
