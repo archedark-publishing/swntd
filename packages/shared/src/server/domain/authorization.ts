@@ -1,4 +1,8 @@
-import type { Task } from "../db/schema";
+import type {
+  Commitment,
+  RetrospectiveNote,
+  Task
+} from "../db/schema";
 import { canServiceActorMutateTask } from "./tasks";
 
 export type AuthenticatedActor = {
@@ -15,6 +19,13 @@ type TaskAccessRecord = Pick<
   Task,
   "assigneeUserId" | "aiAssistanceEnabled" | "archivedAt"
 >;
+
+type RetrospectiveNoteAccessRecord = Pick<
+  RetrospectiveNote,
+  "authorUserId" | "householdId" | "visibilityState"
+>;
+
+type CommitmentAccessRecord = Pick<Commitment, "householdId">;
 
 export function isAdminActor(actor: AuthenticatedActor) {
   return actor.role === "admin";
@@ -70,4 +81,56 @@ export function canDownloadAttachment(
   task: TaskAccessRecord
 ) {
   return canReadTask(actor, task);
+}
+
+export function canManageRetrospectives(actor: AuthenticatedActor) {
+  return isAdminActor(actor);
+}
+
+export function canRevealRetrospectiveNotes(actor: AuthenticatedActor) {
+  return canManageRetrospectives(actor);
+}
+
+export function canReadRetrospectiveNote(
+  actor: AuthenticatedActor,
+  note: RetrospectiveNoteAccessRecord
+) {
+  if (!isAdminActor(actor) || note.householdId !== actor.householdId) {
+    return false;
+  }
+
+  if (note.visibilityState === "shared" || note.visibilityState === "revealed") {
+    return true;
+  }
+
+  return note.authorUserId === actor.id;
+}
+
+export function canMutateRetrospectiveNote(
+  actor: AuthenticatedActor,
+  note: RetrospectiveNoteAccessRecord
+) {
+  if (!isAdminActor(actor) || note.householdId !== actor.householdId) {
+    return false;
+  }
+
+  if (note.visibilityState === "shared" || note.visibilityState === "revealed") {
+    return true;
+  }
+
+  return note.authorUserId === actor.id;
+}
+
+export function canReadCommitment(
+  actor: AuthenticatedActor,
+  commitment: CommitmentAccessRecord
+) {
+  return isAdminActor(actor) && commitment.householdId === actor.householdId;
+}
+
+export function canMutateCommitment(
+  actor: AuthenticatedActor,
+  commitment: CommitmentAccessRecord
+) {
+  return canReadCommitment(actor, commitment);
 }
