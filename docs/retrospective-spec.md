@@ -648,16 +648,16 @@ It should include archived tasks. No task-retrospective link is created in V1.
 - [x] Add Hono route schemas.
 - [x] Add backend routes for retrospective home, template listing, retrospective lifecycle, notes, commitments, and checkins.
 - [x] Add backend routes for commitment reviews.
-- [ ] Add frontend API client types and methods.
-- [ ] Prefer view-specific loading for retrospective data so the main board refresh does not grow too large.
+- [x] Add frontend API client types and methods.
+- [x] Prefer view-specific loading for retrospective data so the main board refresh does not grow too large.
 
 ### Phase 4: Web UI
 
-- [ ] Add Retrospective nav item and hash route.
-- [ ] Build Retrospective Home.
-- [ ] Build active facilitated session shell.
-- [ ] Build round components.
-- [ ] Build commitment tracker components.
+- [x] Add Retrospective nav item and hash route.
+- [x] Build Retrospective Home.
+- [x] Build active facilitated session shell.
+- [ ] Build full round components, including commitment review rating controls and richer completed-task lookback.
+- [x] Build commitment tracker components.
 - [ ] Build completed retrospective detail.
 - [ ] Add Retrospective settings tab and template editor.
 

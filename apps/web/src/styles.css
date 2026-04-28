@@ -709,6 +709,60 @@ a {
   margin: 0 auto;
 }
 
+.retrospective-shell {
+  align-content: start;
+}
+
+.retrospective-card {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+}
+
+.retrospective-round-tabs,
+.retrospective-form-grid,
+.retrospective-note-grid {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.retrospective-round-tabs {
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+}
+
+.retrospective-form-grid {
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+}
+
+.retrospective-list,
+.retrospective-composer {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.retrospective-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid rgb(86 58 30 / 0.12);
+  border-radius: 1rem;
+  background: rgb(255 255 255 / 0.58);
+}
+
+.retrospective-row > span {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+  color: rgb(47 33 22 / 0.72);
+}
+
+.retrospective-row strong,
+.retrospective-row span {
+  overflow-wrap: anywhere;
+}
+
 .task-sortable-shell {
   touch-action: manipulation;
 }
