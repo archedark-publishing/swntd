@@ -552,6 +552,7 @@ a {
 .section-heading-copy {
   display: grid;
   gap: 0.45rem;
+  min-width: 0;
 }
 
 .sheet-header-copy {
@@ -1236,18 +1237,25 @@ a {
 }
 
 @media (max-width: 40rem) {
+  .section-heading-actions,
   .header-action-row,
   .sheet-actions,
   .cast-row {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
+    width: 100%;
   }
 
+  .section-heading-actions > *,
   .header-action-row > *,
   .sheet-actions > *,
   .cast-row > * {
     width: 100%;
     min-width: 0;
+  }
+
+  .retrospective-header-template {
+    width: 100%;
   }
 
   .sheet-actions button,

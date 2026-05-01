@@ -76,7 +76,12 @@ export function FormSelect(props: {
         <SelectTrigger className="w-full rounded-2xl border-border/50 bg-white/80">
           <SelectValue placeholder={props.placeholder ?? "Select an option"} />
         </SelectTrigger>
-        <SelectContent avoidCollisions={false} position="popper" side="bottom" sideOffset={6}>
+        <SelectContent
+          collisionPadding={16}
+          position="popper"
+          side="bottom"
+          sideOffset={6}
+        >
           {props.allowEmptyOption ? (
             <SelectItem value={EMPTY_SELECT_VALUE}>
               {props.placeholder ?? "Select an option"}

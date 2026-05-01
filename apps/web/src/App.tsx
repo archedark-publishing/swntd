@@ -6113,34 +6113,37 @@ function RetrospectiveView(props: {
       ...(defaultTemplateId ? { templateId: defaultTemplateId } : {})
     });
   };
+  const showCreateControls = !detail;
 
   return (
     <section className="retrospective-shell panel-stack">
       <SectionHeading
         actions={
-          <div className="header-action-row">
-            {props.state.templates.length > 1 ? (
-              <div className="retrospective-header-template">
-                <FormSelect
-                  label="Template"
-                  onValueChange={setSelectedTemplateId}
-                  options={props.state.templates.map((template) => ({
-                    label: template.name,
-                    value: template.id
-                  }))}
-                  value={defaultTemplateId}
-                />
-              </div>
-            ) : null}
-            <Button
-              disabled={!home.activePeriod || !defaultTemplateId}
-              onClick={handleCreateRetrospective}
-              type="button"
-            >
-              <Plus className="size-4" />
-              Create Retro
-            </Button>
-          </div>
+          showCreateControls ? (
+            <div className="header-action-row">
+              {props.state.templates.length > 1 ? (
+                <div className="retrospective-header-template">
+                  <FormSelect
+                    label="Template"
+                    onValueChange={setSelectedTemplateId}
+                    options={props.state.templates.map((template) => ({
+                      label: template.name,
+                      value: template.id
+                    }))}
+                    value={defaultTemplateId}
+                  />
+                </div>
+              ) : null}
+              <Button
+                disabled={!home.activePeriod || !defaultTemplateId}
+                onClick={handleCreateRetrospective}
+                type="button"
+              >
+                <Plus className="size-4" />
+                Create Retro
+              </Button>
+            </div>
+          ) : null
         }
         description={
           activePeriod
