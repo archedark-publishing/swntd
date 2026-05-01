@@ -262,7 +262,8 @@ const createRetrospectiveSchema = z.object({
 });
 
 const updateRetrospectiveSchema = z.object({
-  closureOn: isoDateSchema.optional()
+  closureOn: isoDateSchema.optional(),
+  templateId: z.string().trim().min(1).optional()
 });
 
 const retrospectiveTemplateRoundSchema = z.object({

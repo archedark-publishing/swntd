@@ -724,6 +724,17 @@ a {
   width: min(18rem, 100%);
 }
 
+.retrospective-active-controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  align-items: end;
+  gap: 0.75rem;
+}
+
+.retrospective-active-controls button {
+  justify-self: start;
+}
+
 .retrospective-round-tabs,
 .retrospective-form-grid,
 .retrospective-note-grid {

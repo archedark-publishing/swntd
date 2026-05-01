@@ -201,6 +201,7 @@ type RetrospectiveResponse = {
       title: string;
     }>;
     status: string;
+    templateId: string;
   };
 };
 
@@ -1259,6 +1260,64 @@ describe("Phase 3 API", () => {
     );
     expect(planNextPeriodResponse.status).toBe(200);
 
+    const alternateTemplateResponse = await app.request(
+      "/api/v1/retrospective-templates",
+      jsonRequest({
+        body: {
+          description: "A shorter template for template switching.",
+          name: "Quick reset",
+          rounds: [
+            {
+              kind: "notes",
+              entryPhase: "retrospective",
+              privacy: "shared",
+              title: "Reset round"
+            }
+          ]
+        },
+        headers: adminHeaders,
+        method: "POST"
+      })
+    );
+    expect(alternateTemplateResponse.status).toBe(201);
+    const alternateTemplate = await parseJson<{
+      item: RetrospectiveTemplatesResponse["items"][number];
+    }>(alternateTemplateResponse);
+
+    const switchTemplateResponse = await app.request(
+      `/api/v1/retrospectives/${createdRetrospective.item.id}`,
+      jsonRequest({
+        body: {
+          templateId: alternateTemplate.item.id
+        },
+        headers: adminHeaders,
+        method: "PATCH"
+      })
+    );
+    expect(switchTemplateResponse.status).toBe(200);
+    const switchedRetrospective = await parseJson<RetrospectiveResponse>(
+      switchTemplateResponse
+    );
+    expect(switchedRetrospective.item.templateId).toBe(alternateTemplate.item.id);
+    expect(switchedRetrospective.item.rounds).toEqual([
+      expect.objectContaining({ title: "Reset round" })
+    ]);
+
+    const switchBackResponse = await app.request(
+      `/api/v1/retrospectives/${createdRetrospective.item.id}`,
+      jsonRequest({
+        body: {
+          templateId: templates.items[0]!.id
+        },
+        headers: adminHeaders,
+        method: "PATCH"
+      })
+    );
+    expect(switchBackResponse.status).toBe(200);
+    const restoredRetrospective = await parseJson<RetrospectiveResponse>(
+      switchBackResponse
+    );
+
     const duplicateRetrospectiveResponse = await app.request(
       "/api/v1/retrospectives",
       jsonRequest({
@@ -1271,13 +1330,13 @@ describe("Phase 3 API", () => {
     );
     expect(duplicateRetrospectiveResponse.status).toBe(409);
 
-    const commitmentsRound = createdRetrospective.item.rounds.find(
+    const commitmentsRound = restoredRetrospective.item.rounds.find(
       (round) => round.title === "Commitments"
     );
-    const retroHighlightsRound = createdRetrospective.item.rounds.find(
+    const retroHighlightsRound = restoredRetrospective.item.rounds.find(
       (round) => round.title === "Highlights"
     );
-    const planningRound = createdRetrospective.item.rounds.find(
+    const planningRound = restoredRetrospective.item.rounds.find(
       (round) => round.title === "Planning"
     );
     expect(commitmentsRound).toBeDefined();

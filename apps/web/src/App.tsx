@@ -2146,6 +2146,12 @@ export function App() {
                       "Retrospective end date updated."
                     )
                   }
+                  onUpdateRetrospectiveTemplate={(retrospectiveId, templateId) =>
+                    runRetrospectiveMutation(
+                      () => api.updateRetrospective(retrospectiveId, { templateId }),
+                      "Retrospective template updated."
+                    )
+                  }
                   onRefresh={refreshRetrospective}
                   onReviewCommitment={(commitmentId, retrospectiveId, roundId, rating) =>
                     runRetrospectiveMutation(
@@ -6027,6 +6033,10 @@ function RetrospectiveView(props: {
     retrospectiveId: string,
     closureOn: string
   ) => Promise<unknown>;
+  onUpdateRetrospectiveTemplate: (
+    retrospectiveId: string,
+    templateId: string
+  ) => Promise<unknown>;
   onRefresh: () => Promise<void>;
   onReviewCommitment: (
     commitmentId: string,
@@ -6169,7 +6179,9 @@ function RetrospectiveView(props: {
           onEnterRound={props.onEnterRound}
           onFinalize={props.onFinalize}
           onReviewCommitment={props.onReviewCommitment}
+          onUpdateTemplate={props.onUpdateRetrospectiveTemplate}
           onUpdateClosureOn={props.onUpdateRetrospectiveClosure}
+          templates={props.state.templates}
         />
       ) : null}
 
@@ -6234,6 +6246,8 @@ function ActiveRetrospectivePanel(props: {
     rating: "met" | "mostly_met" | "partly_met" | "missed" | "skipped"
   ) => Promise<unknown>;
   onUpdateClosureOn: (retrospectiveId: string, closureOn: string) => Promise<unknown>;
+  onUpdateTemplate: (retrospectiveId: string, templateId: string) => Promise<unknown>;
+  templates: RetrospectiveTemplate[];
 }) {
   const [closureOnDraft, setClosureOnDraft] = useState(
     props.detail.nextCommitmentPeriodClosureOn ?? ""
@@ -6268,37 +6282,29 @@ function ActiveRetrospectivePanel(props: {
     void props.onUpdateClosureOn(props.detail.id, value);
   };
 
+  const handleTemplateChange = (templateId: string) => {
+    if (
+      props.detail.status === "finalized" ||
+      !templateId ||
+      templateId === props.detail.templateId
+    ) {
+      return;
+    }
+
+    if (
+      !window.confirm(
+        "Changing templates will replace this retro's rounds. Notes from the old rounds may no longer appear in the step-by-step flow."
+      )
+    ) {
+      return;
+    }
+
+    void props.onUpdateTemplate(props.detail.id, templateId);
+  };
+
   return (
     <SurfaceCard className="retrospective-card">
       <SectionHeading
-        actions={
-          <div className="header-action-row">
-            {nextCommitmentPeriodStartOn ? (
-              <div className="retrospective-header-template">
-                <FormField label="Ends on">
-                  <FormInput
-                    disabled={!canEditClosureOn}
-                    min={nextCommitmentPeriodStartOn}
-                    onChange={(event) => handleClosureOnChange(event.target.value)}
-                    type="date"
-                    value={closureOnDraft}
-                  />
-                </FormField>
-              </div>
-            ) : null}
-            {lastRound && currentRound?.id === lastRound.id ? (
-              <Button
-                className="bg-black text-white hover:bg-black/80"
-                disabled={props.detail.status === "finalized"}
-                onClick={() => void props.onFinalize(props.detail.id)}
-                size="sm"
-                type="button"
-              >
-                Finalize
-              </Button>
-            ) : null}
-          </div>
-        }
         compact
         description={
           props.detail.period
@@ -6308,6 +6314,43 @@ function ActiveRetrospectivePanel(props: {
         eyebrow={props.detail.status}
         title={currentRound?.title ?? "Retrospective"}
       />
+
+      <div className="retrospective-active-controls">
+        {props.templates.length > 1 ? (
+          <FormSelect
+            disabled={props.detail.status === "finalized"}
+            label="Template"
+            onValueChange={handleTemplateChange}
+            options={props.templates.map((template) => ({
+              label: template.name,
+              value: template.id
+            }))}
+            value={props.detail.templateId}
+          />
+        ) : null}
+        {nextCommitmentPeriodStartOn ? (
+          <FormField label="Ends on">
+            <FormInput
+              disabled={!canEditClosureOn}
+              min={nextCommitmentPeriodStartOn}
+              onChange={(event) => handleClosureOnChange(event.target.value)}
+              type="date"
+              value={closureOnDraft}
+            />
+          </FormField>
+        ) : null}
+        {lastRound && currentRound?.id === lastRound.id ? (
+          <Button
+            className="bg-black text-white hover:bg-black/80"
+            disabled={props.detail.status === "finalized"}
+            onClick={() => void props.onFinalize(props.detail.id)}
+            size="sm"
+            type="button"
+          >
+            Finalize
+          </Button>
+        ) : null}
+      </div>
 
       <div className="retrospective-round-tabs">
         {props.detail.rounds.map((round) => (

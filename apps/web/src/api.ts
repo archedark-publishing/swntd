@@ -626,7 +626,10 @@ export const api = {
       method: "POST"
     });
   },
-  updateRetrospective(retrospectiveId: string, input: { closureOn?: string }) {
+  updateRetrospective(
+    retrospectiveId: string,
+    input: { closureOn?: string; templateId?: string }
+  ) {
     return request<{ item: RetrospectiveDetail }>(
       `/api/v1/retrospectives/${retrospectiveId}`,
       {

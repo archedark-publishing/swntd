@@ -333,6 +333,7 @@ export type CreateRetrospectiveInput = {
 
 export type UpdateRetrospectiveInput = {
   closureOn?: string | undefined;
+  templateId?: string | undefined;
 };
 
 export type RetrospectiveTemplateRoundInput = {
@@ -1863,15 +1864,95 @@ export async function updateRetrospective(
     }
   }
 
-  await db
-    .update(retrospectives)
-    .set({
-      nextCommitmentPeriodClosureOn:
-        input.closureOn ?? retrospective.nextCommitmentPeriodClosureOn,
-      updatedAt: new Date(),
-      updatedByUserId: actor.id
-    })
-    .where(eq(retrospectives.id, retrospective.id));
+  await db.transaction(async (tx) => {
+    let nextCurrentRoundId = retrospective.currentRoundId;
+
+    if (input.templateId && input.templateId !== retrospective.templateId) {
+      const [template] = await tx
+        .select()
+        .from(retrospectiveTemplates)
+        .where(
+          and(
+            eq(retrospectiveTemplates.id, input.templateId),
+            eq(retrospectiveTemplates.householdId, actor.householdId)
+          )
+        );
+
+      if (!template) {
+        throw new ApiError(
+          404,
+          "retrospective_template_not_found",
+          "Retrospective template not found."
+        );
+      }
+
+      const templateRounds = await tx
+        .select()
+        .from(retrospectiveTemplateRounds)
+        .where(eq(retrospectiveTemplateRounds.templateId, template.id))
+        .orderBy(retrospectiveTemplateRounds.sortOrder);
+
+      await tx
+        .delete(retrospectiveRounds)
+        .where(eq(retrospectiveRounds.retrospectiveId, retrospective.id));
+
+      const createdRounds = templateRounds.length
+        ? await tx
+            .insert(retrospectiveRounds)
+            .values(
+              templateRounds.map((round) => ({
+                configJson: round.configJson,
+                entryPhase: round.entryPhase,
+                kind: round.kind,
+                privacy: round.privacy,
+                prompt: round.prompt,
+                retrospectiveId: retrospective.id,
+                sortOrder: round.sortOrder,
+                sourceTemplateRoundId: round.id,
+                title: round.title
+              }))
+            )
+            .returning()
+        : [];
+      const firstRound = createdRounds.sort(
+        (left, right) => left.sortOrder - right.sortOrder
+      )[0];
+
+      nextCurrentRoundId = firstRound?.id ?? null;
+
+      for (const round of createdRounds) {
+        if (!round.sourceTemplateRoundId) {
+          continue;
+        }
+
+        await tx
+          .update(retrospectiveNotes)
+          .set({
+            retrospectiveId: retrospective.id,
+            roundId: round.id,
+            updatedAt: new Date()
+          })
+          .where(
+            and(
+              eq(retrospectiveNotes.commitmentPeriodId, retrospective.commitmentPeriodId),
+              eq(retrospectiveNotes.templateRoundId, round.sourceTemplateRoundId)
+            )
+          );
+      }
+    }
+
+    await tx
+      .update(retrospectives)
+      .set({
+        currentRoundId: nextCurrentRoundId,
+        nextCommitmentPeriodClosureOn:
+          input.closureOn ?? retrospective.nextCommitmentPeriodClosureOn,
+        templateId: input.templateId ?? retrospective.templateId,
+        updatedAt: new Date(),
+        updatedByUserId: actor.id
+      })
+      .where(eq(retrospectives.id, retrospective.id));
+  });
 
   return getRetrospectiveDetail(db, actor, retrospective.id);
 }
