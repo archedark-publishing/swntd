@@ -850,6 +850,44 @@ a {
   overflow-wrap: anywhere;
 }
 
+.commitment-tracker-row {
+  align-items: flex-start;
+}
+
+.commitment-grid-wrap {
+  display: grid;
+  grid-template-columns: minmax(0, auto) auto;
+  align-items: center;
+  gap: 0.6rem;
+  max-width: min(22rem, 100%);
+}
+
+.commitment-check-grid {
+  display: grid;
+  gap: 0.22rem;
+  width: fit-content;
+}
+
+.commitment-check-cell {
+  width: 0.88rem;
+  aspect-ratio: 1;
+  border: 1px solid rgb(41 77 67 / 0.28);
+  border-radius: 0.22rem;
+  background: rgb(255 255 255 / 0.82);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.72);
+}
+
+.commitment-check-cell-filled {
+  background: rgb(41 77 67 / 0.88);
+  border-color: rgb(41 77 67 / 0.88);
+}
+
+.commitment-stepper {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 0.35rem;
+}
+
 .task-sortable-shell {
   touch-action: manipulation;
 }

@@ -86,6 +86,7 @@ import {
   type Attachment,
   type Label,
   type Commitment,
+  type CommitmentPeriod,
   type CommitmentTrackingKind,
   type RetrospectiveDetail,
   type RetrospectiveEntryPhase,
@@ -859,6 +860,38 @@ function getCommitmentProgressLabel(commitment: Commitment) {
   }
 
   return commitment.status;
+}
+
+function getInclusiveDayCount(startOn: string, endOn: string) {
+  const start = new Date(`${startOn}T00:00:00.000Z`).getTime();
+  const end = new Date(`${endOn}T00:00:00.000Z`).getTime();
+
+  return Math.max(1, Math.floor((end - start) / 86_400_000) + 1);
+}
+
+function getCommitmentGridRows(
+  commitment: Commitment,
+  period: CommitmentPeriod | null
+) {
+  if (!period || commitment.trackingKind !== "count_per_period") {
+    return 1;
+  }
+
+  const dayCount = getInclusiveDayCount(period.periodStartOn, period.closureOn);
+
+  if (commitment.trackingInterval === "daily") {
+    return dayCount;
+  }
+
+  if (commitment.trackingInterval === "monthly") {
+    return Math.max(1, Math.ceil(dayCount / 30));
+  }
+
+  if (commitment.trackingInterval === "weekly") {
+    return Math.max(1, Math.ceil(dayCount / 7));
+  }
+
+  return 1;
 }
 
 function buildExeDevLoginUrl() {
@@ -1995,6 +2028,12 @@ export function App() {
                           checkinOn: new Date().toISOString().slice(0, 10)
                         }),
                       "Progress marked."
+                    )
+                  }
+                  onDeleteCheckin={(checkinId) =>
+                    runRetrospectiveMutation(
+                      () => api.deleteCommitmentCheckin(checkinId),
+                      "Progress removed."
                     )
                   }
                   onCompleteRound={(retrospectiveId, roundId) =>
@@ -5924,6 +5963,7 @@ function RetrospectiveView(props: {
     roundId?: string | null;
     templateRoundId?: string | null;
   }) => Promise<unknown>;
+  onDeleteCheckin: (checkinId: string) => Promise<unknown>;
   onDeleteNote: (noteId: string) => Promise<unknown>;
   onCreateRetrospective: (templateId?: string) => Promise<unknown>;
   onEnterRound: (retrospectiveId: string, roundId: string) => Promise<unknown>;
@@ -6052,6 +6092,8 @@ function RetrospectiveView(props: {
       <CommitmentTracker
         commitments={detail?.commitments ?? home.commitments}
         onAddCheckin={props.onAddCheckin}
+        onDeleteCheckin={props.onDeleteCheckin}
+        period={activePeriod}
       />
 
       {activePeriod && !detail ? (
@@ -6522,6 +6564,8 @@ function CommitmentCaptureForm(props: {
 function CommitmentTracker(props: {
   commitments: Commitment[];
   onAddCheckin: (commitmentId: string) => Promise<unknown>;
+  onDeleteCheckin: (checkinId: string) => Promise<unknown>;
+  period: CommitmentPeriod | null;
 }) {
   return (
     <SurfaceCard className="retrospective-card">
@@ -6531,26 +6575,106 @@ function CommitmentTracker(props: {
       ) : (
         <div className="retrospective-list">
           {props.commitments.map((commitment) => (
-            <div className="retrospective-row" key={commitment.id}>
-              <span>
-                <strong>{commitment.title}</strong>
-                <span>{getCommitmentProgressLabel(commitment)}</span>
-              </span>
-              <Button
-                disabled={commitment.status !== "active"}
-                onClick={() => void props.onAddCheckin(commitment.id)}
-                size="sm"
-                type="button"
-                variant="outline"
-              >
-                <Check className="size-4" />
-                Mark
-              </Button>
-            </div>
+            <CommitmentTrackerRow
+              commitment={commitment}
+              key={commitment.id}
+              onAddCheckin={props.onAddCheckin}
+              onDeleteCheckin={props.onDeleteCheckin}
+              period={props.period}
+            />
           ))}
         </div>
       )}
     </SurfaceCard>
+  );
+}
+
+function CommitmentTrackerRow(props: {
+  commitment: Commitment;
+  onAddCheckin: (commitmentId: string) => Promise<unknown>;
+  onDeleteCheckin: (checkinId: string) => Promise<unknown>;
+  period: CommitmentPeriod | null;
+}) {
+  const sortedCheckins = props.commitment.checkins
+    .slice()
+    .sort((left, right) =>
+      left.checkinOn === right.checkinOn
+        ? left.createdAt.localeCompare(right.createdAt)
+        : left.checkinOn.localeCompare(right.checkinOn)
+    );
+  const latestCheckin = sortedCheckins[sortedCheckins.length - 1] ?? null;
+  const isCountGrid = props.commitment.trackingKind === "count_per_period";
+  const targetCount = Math.max(1, props.commitment.targetCount ?? 1);
+  const rowCount = isCountGrid
+    ? getCommitmentGridRows(props.commitment, props.period)
+    : 0;
+  const slotCount = rowCount * targetCount;
+  const filledCount = Math.min(
+    slotCount,
+    sortedCheckins.reduce((sum, checkin) => sum + checkin.amount, 0)
+  );
+  const canMutate = props.commitment.status === "active";
+
+  return (
+    <div className="retrospective-row commitment-tracker-row">
+      <span>
+        <strong>{props.commitment.title}</strong>
+        <span>{getCommitmentProgressLabel(props.commitment)}</span>
+      </span>
+      {isCountGrid ? (
+        <div className="commitment-grid-wrap">
+          <div
+            className="commitment-check-grid"
+            style={{ gridTemplateColumns: `repeat(${targetCount}, minmax(0, 1fr))` }}
+          >
+            {Array.from({ length: slotCount }, (_, index) => (
+              <span
+                aria-label={index < filledCount ? "Completed slot" : "Open slot"}
+                className={cn(
+                  "commitment-check-cell",
+                  index < filledCount && "commitment-check-cell-filled"
+                )}
+                key={index}
+                role="img"
+              />
+            ))}
+          </div>
+          <div className="commitment-stepper">
+            <Button
+              disabled={!canMutate || filledCount >= slotCount}
+              onClick={() => void props.onAddCheckin(props.commitment.id)}
+              size="icon"
+              type="button"
+              variant="outline"
+            >
+              <Plus className="size-4" />
+              <span className="sr-only">Add progress</span>
+            </Button>
+            <Button
+              disabled={!canMutate || !latestCheckin}
+              onClick={() => latestCheckin && void props.onDeleteCheckin(latestCheckin.id)}
+              size="icon"
+              type="button"
+              variant="outline"
+            >
+              <span aria-hidden="true">-</span>
+              <span className="sr-only">Remove progress</span>
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <Button
+          disabled={!canMutate}
+          onClick={() => void props.onAddCheckin(props.commitment.id)}
+          size="sm"
+          type="button"
+          variant="outline"
+        >
+          <Check className="size-4" />
+          Mark
+        </Button>
+      )}
+    </div>
   );
 }
 

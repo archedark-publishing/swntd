@@ -1210,6 +1210,29 @@ describe("Phase 3 API", () => {
     const checkin = await parseJson<CommitmentCheckinResponse>(checkinResponse);
     expect(checkin.item.checkinOn).toBe("2026-02-01");
 
+    const deleteCheckinResponse = await app.request(
+      `/api/v1/commitment-checkins/${checkin.item.id}`,
+      {
+        headers: adminHeaders,
+        method: "DELETE"
+      }
+    );
+    expect(deleteCheckinResponse.status).toBe(200);
+
+    const secondCheckinResponse = await app.request(
+      `/api/v1/commitments/${commitment.item.id}/checkins`,
+      jsonRequest({
+        body: {
+          amount: 1,
+          checkinOn: "2026-02-02",
+          note: "Back on the board."
+        },
+        headers: adminHeaders,
+        method: "POST"
+      })
+    );
+    expect(secondCheckinResponse.status).toBe(201);
+
     const reviewResponse = await app.request(
       `/api/v1/commitments/${commitment.item.id}/reviews`,
       jsonRequest({

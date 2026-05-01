@@ -47,6 +47,7 @@ import {
   claimBootstrapOwnership,
   deleteArchivedTask,
   deleteChecklistItemFromTask,
+  deleteCommitmentCheckin,
   deleteLabel,
   deleteRetrospectiveNote,
   getBootstrapContext,
@@ -831,6 +832,17 @@ export function createApp() {
     );
   });
 
+  app.delete("/api/v1/commitment-checkins/:checkinId", async (c) =>
+    jsonOk(
+      c,
+      await deleteCommitmentCheckin(
+        c.var.db,
+        c.var.actor,
+        c.req.param("checkinId")
+      )
+    )
+  );
+
   app.post("/api/v1/commitments/:commitmentId/reviews", async (c) => {
     const input = await parseJsonBody(c, commitmentReviewSchema);
 
@@ -1074,6 +1086,7 @@ export function createApp() {
         "/api/v1/commitments/{commitmentId}": ["patch"],
         "/api/v1/commitments/{commitmentId}/checkins": ["post"],
         "/api/v1/commitments/{commitmentId}/reviews": ["post"],
+        "/api/v1/commitment-checkins/{checkinId}": ["delete"],
         "/api/v1/commitment-reviews/{reviewId}": ["patch"],
         "/api/v1/labels": ["get", "post"],
         "/api/v1/labels/:labelId": ["patch", "delete"],

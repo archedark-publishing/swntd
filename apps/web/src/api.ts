@@ -582,6 +582,14 @@ export const api = {
       }
     );
   },
+  deleteCommitmentCheckin(checkinId: string) {
+    return request<{ item: { id: string } }>(
+      `/api/v1/commitment-checkins/${checkinId}`,
+      {
+        method: "DELETE"
+      }
+    );
+  },
   createCommitmentReview(
     commitmentId: string,
     input: {

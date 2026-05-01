@@ -2629,6 +2629,52 @@ export async function createCommitmentCheckin(
   };
 }
 
+export async function deleteCommitmentCheckin(
+  db: DatabaseClient,
+  actor: AuthenticatedActor,
+  checkinId: string
+) {
+  assertRetrospectiveAdmin(actor);
+
+  const [row] = await db
+    .select()
+    .from(commitmentCheckins)
+    .innerJoin(commitments, eq(commitmentCheckins.commitmentId, commitments.id))
+    .where(
+      and(
+        eq(commitmentCheckins.id, checkinId),
+        eq(commitments.householdId, actor.householdId)
+      )
+    );
+
+  if (!row) {
+    throw new ApiError(
+      404,
+      "commitment_checkin_not_found",
+      "Commitment check-in not found."
+    );
+  }
+
+  if (!canMutateCommitment(actor, row.commitments)) {
+    throw new ApiError(403, "forbidden", "You cannot update this commitment.");
+  }
+
+  const [deleted] = await db
+    .delete(commitmentCheckins)
+    .where(eq(commitmentCheckins.id, row.commitment_checkins.id))
+    .returning({
+      id: commitmentCheckins.id
+    });
+
+  return {
+    item: getRequiredRow(
+      deleted,
+      "commitment_checkin_delete_failed",
+      "Commitment check-in deletion failed."
+    )
+  };
+}
+
 export async function createCommitmentReview(
   db: DatabaseClient,
   actor: AuthenticatedActor,
