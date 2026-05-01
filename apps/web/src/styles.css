@@ -776,6 +776,18 @@ a {
   gap: 1rem;
 }
 
+.retrospective-artifact-summary,
+.retrospective-artifact-rounds {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.retrospective-artifact-round {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+}
+
 .retrospective-row {
   display: flex;
   align-items: center;
@@ -1490,6 +1502,10 @@ a {
 
 .recurring-drawer-panel {
   width: min(100%, 52rem);
+}
+
+.retrospective-artifact-panel {
+  width: min(100%, 58rem);
 }
 
 .sheet-header {

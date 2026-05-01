@@ -908,6 +908,8 @@ export function App() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [selectedTask, setSelectedTask] = useState<TaskDetail | null>(null);
   const [isTaskSheetOpen, setIsTaskSheetOpen] = useState(false);
+  const [archiveRetrospectiveDetail, setArchiveRetrospectiveDetail] =
+    useState<RetrospectiveDetail | null>(null);
   const [isCreatingTask, setIsCreatingTask] = useState(false);
   const [editingTemplateKey, setEditingTemplateKey] = useState<string | "new" | null>(null);
   const [editingRetrospectiveTemplateKey, setEditingRetrospectiveTemplateKey] =
@@ -944,7 +946,12 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (!isNavOpen && !isTaskSheetOpen && editingTemplateKey === null) {
+    if (
+      !isNavOpen &&
+      !isTaskSheetOpen &&
+      !archiveRetrospectiveDetail &&
+      editingTemplateKey === null
+    ) {
       return;
     }
 
@@ -954,7 +961,7 @@ export function App() {
     return () => {
       document.body.style.overflow = previousOverflow;
     };
-  }, [editingTemplateKey, isNavOpen, isTaskSheetOpen]);
+  }, [archiveRetrospectiveDetail, editingTemplateKey, isNavOpen, isTaskSheetOpen]);
 
   const loadTaskDetail = useEffectEvent(async (taskId: string | null) => {
     if (!taskId) {
@@ -1222,19 +1229,13 @@ export function App() {
     return result;
   }
 
-  async function openRetrospectiveDetail(retrospectiveId: string) {
-    const detail = await api.getRetrospective(retrospectiveId);
+  async function openArchivedRetrospectiveDetail(retrospectiveId: string) {
+    try {
+      const detail = await api.getRetrospective(retrospectiveId);
 
-    setRetrospectiveState((current) => ({
-      ...current,
-      detail: detail.item
-    }));
-    setView("retrospective");
-
-    const nextHash = buildHashForRoute("retrospective", settingsPage, archiveMode);
-
-    if (window.location.hash !== `#${nextHash}`) {
-      window.location.hash = nextHash;
+      setArchiveRetrospectiveDetail(detail.item);
+    } catch (error) {
+      showErrorToast(buildFlashMessage(error), "retrospective-artifact-error");
     }
   }
 
@@ -1953,7 +1954,7 @@ export function App() {
                   isRetrospectiveLoading={retrospectiveState.isLoading}
                   onArchiveModeChange={handleArchiveModeChange}
                   onArchiveSearchChange={setArchiveSearch}
-                  onOpenRetrospective={openRetrospectiveDetail}
+                  onOpenRetrospective={openArchivedRetrospectiveDetail}
                   onOpenTask={openTask}
                   retrospectives={retrospectiveState.finalizedRetrospectives}
                   settings={snapshot.settings}
@@ -2150,6 +2151,11 @@ export function App() {
             task={selectedTask}
             users={snapshot.users}
             variant={isCreatingTask ? "create" : "detail"}
+          />
+
+          <RetrospectiveArtifactSheet
+            detail={archiveRetrospectiveDetail}
+            onClose={() => setArchiveRetrospectiveDetail(null)}
           />
         </>
       )}
@@ -5705,6 +5711,195 @@ function RetrospectiveArchiveList(props: {
       )}
     </SurfaceCard>
   );
+}
+
+function RetrospectiveArtifactSheet(props: {
+  detail: RetrospectiveDetail | null;
+  onClose: () => void;
+}) {
+  if (!props.detail) {
+    return null;
+  }
+
+  const detail = props.detail;
+  const periodLabel = detail.period
+    ? `${formatIsoDate(detail.period.periodStartOn)} to ${formatIsoDate(detail.period.closureOn)}`
+    : "No period attached";
+  const capturedCommitments = detail.commitments.filter(
+    (commitment) => commitment.createdInRetrospectiveId === detail.id
+  );
+  const reviewedCommitments = detail.commitments.filter(
+    (commitment) =>
+      commitment.commitmentPeriodId === detail.commitmentPeriodId &&
+      commitment.createdInRetrospectiveId !== detail.id
+  );
+
+  return (
+    <div className="sheet-backdrop" role="presentation">
+      <aside
+        aria-label="Archived retrospective"
+        className="sheet-panel retrospective-artifact-panel"
+      >
+        <header className="sheet-header">
+          <div className="sheet-header-copy">
+            <p className="eyebrow">Archived Retro</p>
+            <h2>{detail.title}</h2>
+            <p className="section-copy">
+              {periodLabel}
+              {detail.finalizedAt
+                ? ` · Finalized ${formatTimestamp(detail.finalizedAt)}`
+                : ""}
+            </p>
+          </div>
+          <Button
+            className="rounded-full"
+            onClick={props.onClose}
+            size="icon"
+            type="button"
+            variant="outline"
+          >
+            <X className="size-4" />
+            <span className="sr-only">Close archived retrospective</span>
+          </Button>
+        </header>
+
+        <div className="sheet-body">
+          <section className="sheet-section retrospective-artifact-summary">
+            <InfoRow>
+              <div>
+                <strong>Status</strong>
+                <span>{detail.status}</span>
+              </div>
+            </InfoRow>
+            <InfoRow>
+              <div>
+                <strong>Rounds</strong>
+                <span>{detail.rounds.length}</span>
+              </div>
+            </InfoRow>
+            <InfoRow>
+              <div>
+                <strong>Commitments</strong>
+                <span>
+                  {reviewedCommitments.length} reviewed · {capturedCommitments.length} new
+                </span>
+              </div>
+            </InfoRow>
+          </section>
+
+          <section className="sheet-section">
+            <SectionHeading
+              compact
+              eyebrow="Artifact"
+              title="Rounds"
+              titleAs="h3"
+            />
+            <div className="retrospective-artifact-rounds">
+              {detail.rounds.map((round) => (
+                <SurfaceCard className="retrospective-artifact-round" key={round.id}>
+                  <SectionHeading
+                    compact
+                    eyebrow={formatRetrospectiveRoundKind(round.kind)}
+                    title={round.title}
+                    titleAs="h3"
+                    {...(round.prompt ? { description: round.prompt } : {})}
+                  />
+                  <RetrospectiveArtifactRoundBody
+                    capturedCommitments={capturedCommitments}
+                    detail={detail}
+                    notes={detail.notes.filter((note) => note.roundId === round.id)}
+                    reviewedCommitments={reviewedCommitments}
+                    round={round}
+                  />
+                </SurfaceCard>
+              ))}
+            </div>
+          </section>
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+function RetrospectiveArtifactRoundBody(props: {
+  capturedCommitments: Commitment[];
+  detail: RetrospectiveDetail;
+  notes: RetrospectiveNote[];
+  reviewedCommitments: Commitment[];
+  round: RetrospectiveRound;
+}) {
+  if (props.round.kind === "task_lookback") {
+    return (
+      <div className="retrospective-list">
+        {props.detail.taskLookback.length === 0 ? (
+          <EmptyStateCard message="No completed tasks landed in this period." />
+        ) : null}
+        {props.detail.taskLookback.map((task) => (
+          <div className="retrospective-row" key={task.id}>
+            <strong>{task.title}</strong>
+            <span>{task.completedAt ? formatTimestamp(task.completedAt) : ""}</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (props.round.kind === "notes") {
+    return <RetrospectiveNoteList notes={props.notes} />;
+  }
+
+  if (props.round.kind === "commitment_capture") {
+    return (
+      <RetrospectiveCommitmentArtifactList
+        commitments={props.capturedCommitments}
+        emptyMessage="No new commitments were captured in this round."
+      />
+    );
+  }
+
+  return (
+    <RetrospectiveCommitmentArtifactList
+      commitments={props.reviewedCommitments}
+      emptyMessage="No commitments were reviewed in this round."
+    />
+  );
+}
+
+function RetrospectiveCommitmentArtifactList(props: {
+  commitments: Commitment[];
+  emptyMessage: string;
+}) {
+  if (props.commitments.length === 0) {
+    return <EmptyStateCard message={props.emptyMessage} />;
+  }
+
+  return (
+    <div className="retrospective-list">
+      {props.commitments.map((commitment) => (
+        <div className="retrospective-row" key={commitment.id}>
+          <span>
+            <strong>{commitment.title}</strong>
+            <span>{getCommitmentProgressLabel(commitment)}</span>
+            {commitment.description ? <span>{commitment.description}</span> : null}
+          </span>
+          <Badge variant="outline">{commitment.status}</Badge>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function formatRetrospectiveRoundKind(kind: RetrospectiveRound["kind"]) {
+  switch (kind) {
+    case "commitment_capture":
+      return "Commitment Capture";
+    case "commitment_review":
+      return "Commitment Review";
+    case "task_lookback":
+      return "Task Lookback";
+    case "notes":
+      return "Notes";
+  }
 }
 
 function RetrospectiveView(props: {
