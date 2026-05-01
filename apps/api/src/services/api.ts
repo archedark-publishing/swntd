@@ -240,6 +240,7 @@ export type CommitmentDto = Commitment & {
   assignee: UserRef | null;
   checkins: CommitmentCheckinDto[];
   checklistItems: CommitmentChecklistItemDto[];
+  reviews: CommitmentReviewDto[];
 };
 
 export type CommitmentReviewDto = CommitmentReview & {
@@ -1202,11 +1203,18 @@ async function getCommitmentDtos(
         .from(commitmentCheckins)
         .where(inArray(commitmentCheckins.commitmentId, commitmentIds))
     : [];
+  const reviewRows = commitmentIds.length
+    ? await db
+        .select()
+        .from(commitmentReviews)
+        .where(inArray(commitmentReviews.commitmentId, commitmentIds))
+    : [];
   const userIds = [
     ...commitmentRows
       .map((commitment) => commitment.assigneeUserId)
       .filter((value) => value !== null),
-    ...checkinRows.map((checkin) => checkin.actorUserId)
+    ...checkinRows.map((checkin) => checkin.actorUserId),
+    ...reviewRows.map((review) => review.createdByUserId)
   ];
   const userMap = await getUserRefsById(db, userIds);
 
@@ -1234,6 +1242,13 @@ async function getCommitmentDtos(
         note: checkin.note,
         updatedAt: checkin.updatedAt
       }));
+    const reviewsForCommitment = reviewRows
+      .filter((review) => review.commitmentId === commitment.id)
+      .sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime())
+      .map((review) => ({
+        ...review,
+        createdBy: userMap.get(review.createdByUserId) ?? null
+      }));
 
     return {
       ...commitment,
@@ -1241,7 +1256,8 @@ async function getCommitmentDtos(
         ? userMap.get(commitment.assigneeUserId) ?? null
         : null,
       checkins: checkinsForCommitment,
-      checklistItems: checklistItemsForCommitment
+      checklistItems: checklistItemsForCommitment,
+      reviews: reviewsForCommitment
     };
   });
 }
@@ -2776,22 +2792,45 @@ export async function createCommitmentReview(
     );
   }
 
-  const [created] = await db
-    .insert(commitmentReviews)
-    .values({
-      commitmentId: commitment.id,
-      createdByUserId: actor.id,
-      note: input.note ?? "",
-      rating: input.rating,
-      retrospectiveId: retrospective.id,
-      roundId: round.id,
-      updatedByUserId: actor.id
-    })
-    .returning();
+  const [existingReview] = await db
+    .select()
+    .from(commitmentReviews)
+    .where(
+      and(
+        eq(commitmentReviews.commitmentId, commitment.id),
+        eq(commitmentReviews.retrospectiveId, retrospective.id)
+      )
+    );
+  const [reviewRow] = existingReview
+    ? await db
+        .update(commitmentReviews)
+        .set({
+          note: input.note ?? existingReview.note,
+          rating: input.rating,
+          roundId: round.id,
+          updatedAt: new Date(),
+          updatedByUserId: actor.id
+        })
+        .where(eq(commitmentReviews.id, existingReview.id))
+        .returning()
+    : await db
+        .insert(commitmentReviews)
+        .values({
+          commitmentId: commitment.id,
+          createdByUserId: actor.id,
+          note: input.note ?? "",
+          rating: input.rating,
+          retrospectiveId: retrospective.id,
+          roundId: round.id,
+          updatedByUserId: actor.id
+        })
+        .returning();
   const review = getRequiredRow(
-    created,
-    "commitment_review_create_failed",
-    "Commitment review creation failed."
+    reviewRow,
+    existingReview ? "commitment_review_update_failed" : "commitment_review_create_failed",
+    existingReview
+      ? "Commitment review update failed."
+      : "Commitment review creation failed."
   );
 
   await db

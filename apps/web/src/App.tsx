@@ -6412,41 +6412,58 @@ function RetrospectiveRoundBody(props: {
       {props.commitments.length === 0 ? (
         <EmptyStateCard message="No commitments are ready for review." />
       ) : null}
-      {props.commitments.map((commitment) => (
-        <div className="retrospective-row" key={commitment.id}>
-          <span>
-            <strong>{commitment.title}</strong>
-            <span>{getCommitmentProgressLabel(commitment)}</span>
-          </span>
-          <div className="retrospective-rating-row">
-            {[
-              ["met", "Met"],
-              ["mostly_met", "Mostly"],
-              ["partly_met", "Partly"],
-              ["missed", "Missed"],
-              ["skipped", "Skip"]
-            ].map(([rating, label]) => (
-              <Button
-                disabled={commitment.status === "reviewed"}
-                key={rating}
-                onClick={() =>
-                  void props.onReviewCommitment(
-                    commitment.id,
-                    props.detail.id,
-                    props.round.id,
-                    rating as "met" | "mostly_met" | "partly_met" | "missed" | "skipped"
-                  )
-                }
-                size="sm"
-                type="button"
-                variant={commitment.status === "reviewed" ? "outline" : "ghost"}
-              >
-                {label}
-              </Button>
-            ))}
+      {props.commitments.map((commitment) => {
+        const currentReview = commitment.reviews.find(
+          (review) => review.retrospectiveId === props.detail.id
+        );
+
+        return (
+          <div className="retrospective-row" key={commitment.id}>
+            <span>
+              <strong>{commitment.title}</strong>
+              <span>{getCommitmentProgressLabel(commitment)}</span>
+            </span>
+            <div className="retrospective-rating-row">
+              {[
+                ["met", "Met"],
+                ["mostly_met", "Mostly"],
+                ["partly_met", "Partly"],
+                ["missed", "Missed"],
+                ["skipped", "Skip"]
+              ].map(([rating, label]) => {
+                const isSelected = currentReview?.rating === rating;
+
+                return (
+                  <Button
+                    className={
+                      isSelected ? "bg-black text-white hover:bg-black/80" : undefined
+                    }
+                    key={rating}
+                    onClick={() =>
+                      void props.onReviewCommitment(
+                        commitment.id,
+                        props.detail.id,
+                        props.round.id,
+                        rating as
+                          | "met"
+                          | "mostly_met"
+                          | "partly_met"
+                          | "missed"
+                          | "skipped"
+                      )
+                    }
+                    size="sm"
+                    type="button"
+                    variant={isSelected ? "default" : "ghost"}
+                  >
+                    {label}
+                  </Button>
+                );
+              })}
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

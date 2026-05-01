@@ -314,6 +314,7 @@ export type Commitment = {
   title: string;
   trackingInterval: CommitmentTrackingInterval;
   trackingKind: CommitmentTrackingKind;
+  reviews: CommitmentReview[];
   updatedAt: string;
   updatedByUserId: string;
 };
