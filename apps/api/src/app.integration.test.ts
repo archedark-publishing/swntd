@@ -943,6 +943,10 @@ describe("Phase 3 API", () => {
       })
     );
     expect(retrospectiveCreateResponse.status).toBe(201);
+    const createdRetrospective = await parseJson<RetrospectiveResponse>(
+      retrospectiveCreateResponse
+    );
+    expect(createdRetrospective.item.status).toBe("active");
   });
 
   it("allows early retrospective creation when a period is still active", async () => {
@@ -969,6 +973,7 @@ describe("Phase 3 API", () => {
     const earlyRetrospective = await parseJson<RetrospectiveResponse>(
       earlyRetrospectiveResponse
     );
+    expect(earlyRetrospective.item.status).toBe("active");
     expect(earlyRetrospective.item.period.closureOn).toBe(todayIsoDate());
     expect(earlyRetrospective.item.period.status).toBe("closed");
 

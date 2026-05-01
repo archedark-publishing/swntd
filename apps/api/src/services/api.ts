@@ -1917,6 +1917,8 @@ export async function createRetrospective(
         commitmentPeriodId: period.id,
         createdByUserId: actor.id,
         householdId: actor.householdId,
+        startedAt: new Date(),
+        status: "active",
         templateId: template.id,
         title:
           input.title?.trim() ||

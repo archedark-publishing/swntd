@@ -2036,12 +2036,6 @@ export function App() {
                       "Progress removed."
                     )
                   }
-                  onCompleteRound={(retrospectiveId, roundId) =>
-                    runRetrospectiveMutation(
-                      () => api.completeRetrospectiveRound(retrospectiveId, roundId),
-                      "Round completed."
-                    )
-                  }
                   onCreateCommitment={(retrospectiveId, draft) =>
                     runRetrospectiveMutation(
                       () =>
@@ -2100,12 +2094,6 @@ export function App() {
                           roundId
                         }),
                       "Commitment reviewed."
-                    )
-                  }
-                  onStart={(retrospectiveId) =>
-                    runRetrospectiveMutation(
-                      () => api.startRetrospective(retrospectiveId),
-                      "Retrospective started."
                     )
                   }
                 />
@@ -5950,7 +5938,6 @@ function formatRetrospectiveRoundKind(kind: RetrospectiveRound["kind"]) {
 function RetrospectiveView(props: {
   actor: Actor | null;
   onAddCheckin: (commitmentId: string) => Promise<unknown>;
-  onCompleteRound: (retrospectiveId: string, roundId: string) => Promise<unknown>;
   onCreateCommitment: (
     retrospectiveId: string,
     draft: CommitmentDraft
@@ -5975,7 +5962,6 @@ function RetrospectiveView(props: {
     roundId: string,
     rating: "met" | "mostly_met" | "partly_met" | "missed" | "skipped"
   ) => Promise<unknown>;
-  onStart: (retrospectiveId: string) => Promise<unknown>;
   state: RetrospectiveState;
 }) {
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
@@ -6097,14 +6083,12 @@ function RetrospectiveView(props: {
       {detail ? (
         <ActiveRetrospectivePanel
           detail={detail}
-          onCompleteRound={props.onCompleteRound}
           onCreateCommitment={props.onCreateCommitment}
           onCreateNote={props.onCreateNote}
           onDeleteNote={props.onDeleteNote}
           onEnterRound={props.onEnterRound}
           onFinalize={props.onFinalize}
           onReviewCommitment={props.onReviewCommitment}
-          onStart={props.onStart}
         />
       ) : null}
 
@@ -6146,7 +6130,6 @@ function RetrospectiveView(props: {
 
 function ActiveRetrospectivePanel(props: {
   detail: RetrospectiveDetail;
-  onCompleteRound: (retrospectiveId: string, roundId: string) => Promise<unknown>;
   onCreateCommitment: (
     retrospectiveId: string,
     draft: CommitmentDraft
@@ -6168,7 +6151,6 @@ function ActiveRetrospectivePanel(props: {
     roundId: string,
     rating: "met" | "mostly_met" | "partly_met" | "missed" | "skipped"
   ) => Promise<unknown>;
-  onStart: (retrospectiveId: string) => Promise<unknown>;
 }) {
   const currentRound =
     props.detail.rounds.find((round) => round.id === props.detail.currentRoundId) ??
@@ -6180,28 +6162,17 @@ function ActiveRetrospectivePanel(props: {
     <SurfaceCard className="retrospective-card">
       <SectionHeading
         actions={
-          <div className="header-action-row">
-            {props.detail.status === "draft" ? (
-              <Button
-                onClick={() => void props.onStart(props.detail.id)}
-                size="sm"
-                type="button"
-              >
-                Start
-              </Button>
-            ) : null}
-            {lastRound && currentRound?.id === lastRound.id ? (
-              <Button
-                disabled={props.detail.status === "finalized"}
-                onClick={() => void props.onFinalize(props.detail.id)}
-                size="sm"
-                type="button"
-                variant="outline"
-              >
-                Finalize
-              </Button>
-            ) : null}
-          </div>
+          lastRound && currentRound?.id === lastRound.id ? (
+            <Button
+              disabled={props.detail.status === "finalized"}
+              onClick={() => void props.onFinalize(props.detail.id)}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              Finalize
+            </Button>
+          ) : null
         }
         compact
         description={
@@ -6240,16 +6211,6 @@ function ActiveRetrospectivePanel(props: {
         />
       ) : null}
 
-      {currentRound && props.detail.status !== "finalized" ? (
-        <div className="header-action-row">
-          <Button
-            onClick={() => void props.onCompleteRound(props.detail.id, currentRound.id)}
-            type="button"
-          >
-            Complete Round
-          </Button>
-        </div>
-      ) : null}
     </SurfaceCard>
   );
 }
