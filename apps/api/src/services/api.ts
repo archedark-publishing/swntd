@@ -325,6 +325,7 @@ export type CreateRecurringTemplateInput = {
 export type UpdateRecurringTemplateInput = CreateRecurringTemplateInput;
 
 export type CreateRetrospectiveInput = {
+  closureOn?: string | undefined;
   templateId?: string | undefined;
   title?: string | undefined;
 };
@@ -1909,7 +1910,20 @@ export async function createRetrospective(
     }
 
     const today = todayIsoDate();
-    const closureOn = period.closureOn > today ? today : period.closureOn;
+    const latestAllowedClosureOn = period.closureOn > today ? today : period.closureOn;
+    const closureOn = input.closureOn ?? latestAllowedClosureOn;
+
+    if (
+      closureOn < period.periodStartOn ||
+      closureOn > period.closureOn ||
+      closureOn > today
+    ) {
+      throw new ApiError(
+        400,
+        "retrospective_closure_on_invalid",
+        "The retrospective end date must be within the active commitment period and cannot be in the future."
+      );
+    }
 
     const [created] = await tx
       .insert(retrospectives)

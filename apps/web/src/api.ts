@@ -610,7 +610,11 @@ export const api = {
       }
     );
   },
-  createRetrospective(input: { templateId?: string; title?: string }) {
+  createRetrospective(input: {
+    closureOn?: string;
+    templateId?: string;
+    title?: string;
+  }) {
     return request<{ item: RetrospectiveDetail }>("/api/v1/retrospectives", {
       body: JSON.stringify(input),
       headers: {

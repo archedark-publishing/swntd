@@ -869,6 +869,21 @@ function getInclusiveDayCount(startOn: string, endOn: string) {
   return Math.max(1, Math.floor((end - start) / 86_400_000) + 1);
 }
 
+function getDayDistance(startOn: string, endOn: string) {
+  const start = new Date(`${startOn}T00:00:00.000Z`).getTime();
+  const end = new Date(`${endOn}T00:00:00.000Z`).getTime();
+
+  return Math.max(0, Math.floor((end - start) / 86_400_000));
+}
+
+function todayIsoDate() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function minIsoDate(left: string, right: string) {
+  return left < right ? left : right;
+}
+
 function getCommitmentGridRows(
   commitment: Commitment,
   period: CommitmentPeriod | null
@@ -2063,12 +2078,9 @@ export function App() {
                       "Note deleted."
                     )
                   }
-                  onCreateRetrospective={(templateId) =>
+                  onCreateRetrospective={(input) =>
                     runRetrospectiveMutation(
-                      () =>
-                        api.createRetrospective(
-                          templateId ? { templateId } : {}
-                        ),
+                      () => api.createRetrospective(input),
                       "Retrospective created."
                     )
                   }
@@ -5952,7 +5964,10 @@ function RetrospectiveView(props: {
   }) => Promise<unknown>;
   onDeleteCheckin: (checkinId: string) => Promise<unknown>;
   onDeleteNote: (noteId: string) => Promise<unknown>;
-  onCreateRetrospective: (templateId?: string) => Promise<unknown>;
+  onCreateRetrospective: (input: {
+    closureOn?: string;
+    templateId?: string;
+  }) => Promise<unknown>;
   onEnterRound: (retrospectiveId: string, roundId: string) => Promise<unknown>;
   onFinalize: (retrospectiveId: string) => Promise<unknown>;
   onRefresh: () => Promise<void>;
@@ -5965,9 +5980,13 @@ function RetrospectiveView(props: {
   state: RetrospectiveState;
 }) {
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
+  const [selectedClosureOn, setSelectedClosureOn] = useState("");
   const home = props.state.home;
   const detail = props.state.detail;
   const activePeriod = home?.activePeriod ?? detail?.period ?? null;
+  const latestAllowedClosureOn = home?.activePeriod
+    ? minIsoDate(todayIsoDate(), home.activePeriod.closureOn)
+    : "";
   const defaultTemplateId =
     selectedTemplateId ||
     home?.settings?.defaultRetrospectiveTemplateId ||
@@ -5982,6 +6001,10 @@ function RetrospectiveView(props: {
         round.kind === "notes" &&
         (round.entryPhase === "commitment_period" || round.entryPhase === "both")
     ) ?? [];
+
+  useEffect(() => {
+    setSelectedClosureOn(latestAllowedClosureOn);
+  }, [home?.activePeriod?.id, latestAllowedClosureOn]);
 
   if (props.actor?.role !== "admin") {
     return (
@@ -6021,7 +6044,8 @@ function RetrospectiveView(props: {
       return;
     }
 
-    const daysUntilClosure = home.daysUntilClosure ?? 0;
+    const closureOn = selectedClosureOn || latestAllowedClosureOn;
+    const daysUntilClosure = getDayDistance(closureOn, home.activePeriod.closureOn);
 
     if (
       daysUntilClosure > 0 &&
@@ -6034,7 +6058,10 @@ function RetrospectiveView(props: {
       return;
     }
 
-    void props.onCreateRetrospective(defaultTemplateId);
+    void props.onCreateRetrospective({
+      closureOn,
+      ...(defaultTemplateId ? { templateId: defaultTemplateId } : {})
+    });
   };
 
   return (
@@ -6055,8 +6082,27 @@ function RetrospectiveView(props: {
                 />
               </div>
             ) : null}
+            {home.activePeriod ? (
+              <div className="retrospective-header-template">
+                <FormField label="Ends on">
+                  <FormInput
+                    max={latestAllowedClosureOn}
+                    min={home.activePeriod.periodStartOn}
+                    onChange={(event) => setSelectedClosureOn(event.target.value)}
+                    type="date"
+                    value={selectedClosureOn}
+                  />
+                </FormField>
+              </div>
+            ) : null}
             <Button
-              disabled={!home.activePeriod || !defaultTemplateId}
+              disabled={
+                !home.activePeriod ||
+                !defaultTemplateId ||
+                !selectedClosureOn ||
+                selectedClosureOn < home.activePeriod.periodStartOn ||
+                selectedClosureOn > latestAllowedClosureOn
+              }
               onClick={handleCreateRetrospective}
               type="button"
             >

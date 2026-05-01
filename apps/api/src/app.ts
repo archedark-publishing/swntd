@@ -255,6 +255,7 @@ const retrospectiveListQuerySchema = z.object({
 });
 
 const createRetrospectiveSchema = z.object({
+  closureOn: isoDateSchema.optional(),
   templateId: z.string().trim().min(1).optional(),
   title: z.string().trim().min(1).optional()
 });

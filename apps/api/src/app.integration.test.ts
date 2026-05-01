@@ -152,6 +152,7 @@ type RetrospectiveTemplatesResponse = {
 type RetrospectiveHomeResponse = {
   activePeriod: {
     id: string;
+    periodStartOn: string;
   };
   daysUntilClosure: number;
 };
@@ -242,6 +243,13 @@ async function parseJson<T>(response: Response) {
 
 function todayIsoDate() {
   return new Date().toISOString().slice(0, 10);
+}
+
+function addDaysIso(dateValue: string, days: number) {
+  const date = new Date(`${dateValue}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+
+  return date.toISOString().slice(0, 10);
 }
 
 async function forceActiveCommitmentPeriodClosed(closureOn: string) {
@@ -956,13 +964,20 @@ describe("Phase 3 API", () => {
       headers: adminHeaders
     });
     expect(homeResponse.status).toBe(200);
+    const home = await parseJson<RetrospectiveHomeResponse>(homeResponse);
 
     await forceActiveCommitmentPeriodClosed("2999-01-31");
+    const yesterday = addDaysIso(todayIsoDate(), -1);
+    const selectedClosureOn =
+      yesterday < home.activePeriod.periodStartOn
+        ? home.activePeriod.periodStartOn
+        : yesterday;
 
     const earlyRetrospectiveResponse = await app.request(
       "/api/v1/retrospectives",
       jsonRequest({
         body: {
+          closureOn: selectedClosureOn,
           title: "Early retro"
         },
         headers: adminHeaders,
@@ -974,7 +989,7 @@ describe("Phase 3 API", () => {
       earlyRetrospectiveResponse
     );
     expect(earlyRetrospective.item.status).toBe("active");
-    expect(earlyRetrospective.item.period.closureOn).toBe(todayIsoDate());
+    expect(earlyRetrospective.item.period.closureOn).toBe(selectedClosureOn);
     expect(earlyRetrospective.item.period.status).toBe("closed");
 
     await createActiveCommitmentPeriod(todayIsoDate(), "2999-02-28");
@@ -1166,13 +1181,12 @@ describe("Phase 3 API", () => {
     await forceActiveCommitmentPeriodClosed("2999-01-31");
 
     await setTemplateRoundPrivacy("Planning", "private");
-    await forceActiveCommitmentPeriodClosed("2026-01-31");
 
     const retrospectiveCreateResponse = await app.request(
       "/api/v1/retrospectives",
       jsonRequest({
         body: {
-          title: "January retro"
+          title: "Current retro"
         },
         headers: adminHeaders,
         method: "POST"
