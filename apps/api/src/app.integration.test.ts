@@ -1069,6 +1069,15 @@ describe("Phase 3 API", () => {
     );
     expect(hiddenNotes.items).toHaveLength(0);
 
+    const otherDeletePrivateNoteResponse = await app.request(
+      `/api/v1/retrospective-notes/${privateNote.item.id}`,
+      {
+        headers: otherAdminHeaders,
+        method: "DELETE"
+      }
+    );
+    expect(otherDeletePrivateNoteResponse.status).toBe(403);
+
     await forceActiveCommitmentPeriodClosed("2999-01-31");
 
     const earlyRetrospectiveResponse = await app.request(
@@ -1272,6 +1281,32 @@ describe("Phase 3 API", () => {
       otherVisibleNotesAfterReveal
     );
     expect(notesAfterReveal.items).toHaveLength(1);
+
+    const deleteRevealedNoteResponse = await app.request(
+      `/api/v1/retrospective-notes/${privateNote.item.id}`,
+      {
+        headers: otherAdminHeaders,
+        method: "DELETE"
+      }
+    );
+    expect(deleteRevealedNoteResponse.status).toBe(200);
+
+    const notesAfterDeleteResponse = await app.request(
+      `/api/v1/retrospective-notes?retrospectiveId=${createdRetrospective.item.id}`,
+      {
+        headers: adminHeaders
+      }
+    );
+    const notesAfterDelete = await parseJson<RetrospectiveNotesResponse>(
+      notesAfterDeleteResponse
+    );
+    expect(notesAfterDelete.items).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: privateNote.item.id
+        })
+      ])
+    );
   });
 
   it("does not let an admin remove the currently authenticated actor", async () => {

@@ -48,6 +48,7 @@ import {
   deleteArchivedTask,
   deleteChecklistItemFromTask,
   deleteLabel,
+  deleteRetrospectiveNote,
   getBootstrapContext,
   getCurrentActor,
   getRecurringTemplate,
@@ -778,6 +779,17 @@ export function createApp() {
     );
   });
 
+  app.delete("/api/v1/retrospective-notes/:noteId", async (c) =>
+    jsonOk(
+      c,
+      await deleteRetrospectiveNote(
+        c.var.db,
+        c.var.actor,
+        c.req.param("noteId")
+      )
+    )
+  );
+
   app.get("/api/v1/commitments", async (c) => {
     const query = parseQuery(c, commitmentListQuerySchema);
 
@@ -1070,7 +1082,7 @@ export function createApp() {
         "/api/v1/recurring-templates/{templateId}": ["get", "patch"],
         "/api/v1/retrospective-home": ["get"],
         "/api/v1/retrospective-notes": ["get", "post"],
-        "/api/v1/retrospective-notes/{noteId}": ["patch"],
+        "/api/v1/retrospective-notes/{noteId}": ["patch", "delete"],
         "/api/v1/retrospective-templates": ["get", "post"],
         "/api/v1/retrospective-templates/{templateId}": ["patch"],
         "/api/v1/retrospectives": ["get", "post"],

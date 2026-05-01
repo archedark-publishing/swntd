@@ -833,6 +833,14 @@ a {
   gap: 0.4rem;
 }
 
+.retrospective-note-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.4rem;
+  flex: 0 0 auto;
+}
+
 .retrospective-row strong,
 .retrospective-row span {
   overflow-wrap: anywhere;

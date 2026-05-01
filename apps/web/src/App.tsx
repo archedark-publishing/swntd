@@ -2024,6 +2024,12 @@ export function App() {
                       "Note added."
                     )
                   }
+                  onDeleteNote={(noteId) =>
+                    runRetrospectiveMutation(
+                      () => api.deleteRetrospectiveNote(noteId),
+                      "Note deleted."
+                    )
+                  }
                   onCreateRetrospective={(templateId) =>
                     runRetrospectiveMutation(
                       () =>
@@ -5918,6 +5924,7 @@ function RetrospectiveView(props: {
     roundId?: string | null;
     templateRoundId?: string | null;
   }) => Promise<unknown>;
+  onDeleteNote: (noteId: string) => Promise<unknown>;
   onCreateRetrospective: (templateId?: string) => Promise<unknown>;
   onEnterRound: (retrospectiveId: string, roundId: string) => Promise<unknown>;
   onFinalize: (retrospectiveId: string) => Promise<unknown>;
@@ -6013,6 +6020,7 @@ function RetrospectiveView(props: {
           onCompleteRound={props.onCompleteRound}
           onCreateCommitment={props.onCreateCommitment}
           onCreateNote={props.onCreateNote}
+          onDeleteNote={props.onDeleteNote}
           onEnterRound={props.onEnterRound}
           onFinalize={props.onFinalize}
           onReviewCommitment={props.onReviewCommitment}
@@ -6067,6 +6075,7 @@ function RetrospectiveView(props: {
                 <RetrospectiveNoteList
                   emptyMessage="No visible notes for this prompt yet."
                   notes={home.notes.filter((note) => note.templateRoundId === round.id)}
+                  onDeleteNote={props.onDeleteNote}
                 />
                 <RetrospectiveNoteComposer
                   commitmentPeriodId={activePeriod.id}
@@ -6103,6 +6112,7 @@ function ActiveRetrospectivePanel(props: {
     roundId?: string | null;
     templateRoundId?: string | null;
   }) => Promise<unknown>;
+  onDeleteNote: (noteId: string) => Promise<unknown>;
   onEnterRound: (retrospectiveId: string, roundId: string) => Promise<unknown>;
   onFinalize: (retrospectiveId: string) => Promise<unknown>;
   onReviewCommitment: (
@@ -6177,6 +6187,7 @@ function ActiveRetrospectivePanel(props: {
           notes={props.detail.notes.filter((note) => note.roundId === currentRound.id)}
           onCreateCommitment={props.onCreateCommitment}
           onCreateNote={props.onCreateNote}
+          onDeleteNote={props.onDeleteNote}
           onReviewCommitment={props.onReviewCommitment}
           round={currentRound}
         />
@@ -6212,6 +6223,7 @@ function RetrospectiveRoundBody(props: {
     roundId?: string | null;
     templateRoundId?: string | null;
   }) => Promise<unknown>;
+  onDeleteNote: (noteId: string) => Promise<unknown>;
   onReviewCommitment: (
     commitmentId: string,
     retrospectiveId: string,
@@ -6247,7 +6259,10 @@ function RetrospectiveRoundBody(props: {
   if (props.round.kind === "notes") {
     return (
       <div className="retrospective-note-grid">
-        <RetrospectiveNoteList notes={props.notes} />
+        <RetrospectiveNoteList
+          notes={props.notes}
+          onDeleteNote={props.onDeleteNote}
+        />
         {props.round.entryPhase === "retrospective" || props.round.entryPhase === "both" ? (
           <RetrospectiveNoteComposer
             commitmentPeriodId={props.detail.commitmentPeriodId}
@@ -6309,6 +6324,7 @@ function RetrospectiveRoundBody(props: {
 function RetrospectiveNoteList(props: {
   emptyMessage?: string;
   notes: RetrospectiveNote[];
+  onDeleteNote?: (noteId: string) => Promise<unknown>;
 }) {
   if (props.notes.length === 0) {
     return <EmptyStateCard message={props.emptyMessage ?? "No notes for this round yet."} />;
@@ -6330,7 +6346,23 @@ function RetrospectiveNoteList(props: {
             <strong>{note.author?.displayName ?? "Someone"}</strong>
             <span>{note.body}</span>
           </span>
-          <Badge variant="outline">{getRetrospectiveNoteVisibilityLabel(note)}</Badge>
+          <div className="retrospective-note-actions">
+            <Badge variant="outline">{getRetrospectiveNoteVisibilityLabel(note)}</Badge>
+            {props.onDeleteNote ? (
+              <Button
+                className="rounded-full"
+                onClick={() => {
+                  void props.onDeleteNote?.(note.id);
+                }}
+                size="icon"
+                type="button"
+                variant="ghost"
+              >
+                <Trash2 className="size-4" />
+                <span className="sr-only">Delete note</span>
+              </Button>
+            ) : null}
+          </div>
         </div>
       ))}
     </div>

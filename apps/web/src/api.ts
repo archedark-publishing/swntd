@@ -636,6 +636,14 @@ export const api = {
       method: "POST"
     });
   },
+  deleteRetrospectiveNote(noteId: string) {
+    return request<{ item: { id: string } }>(
+      `/api/v1/retrospective-notes/${noteId}`,
+      {
+        method: "DELETE"
+      }
+    );
+  },
   createTask(input: {
     aiAssistanceEnabled: boolean;
     assigneeUserId: string | null;

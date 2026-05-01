@@ -2401,6 +2401,47 @@ export async function updateRetrospectiveNote(
   };
 }
 
+export async function deleteRetrospectiveNote(
+  db: DatabaseClient,
+  actor: AuthenticatedActor,
+  noteId: string
+) {
+  assertRetrospectiveAdmin(actor);
+
+  const [note] = await db
+    .select()
+    .from(retrospectiveNotes)
+    .where(
+      and(
+        eq(retrospectiveNotes.id, noteId),
+        eq(retrospectiveNotes.householdId, actor.householdId)
+      )
+    );
+
+  if (!note) {
+    throw new ApiError(404, "retrospective_note_not_found", "Note not found.");
+  }
+
+  if (!canMutateRetrospectiveNote(actor, note)) {
+    throw new ApiError(403, "forbidden", "You cannot delete this note.");
+  }
+
+  const [deleted] = await db
+    .delete(retrospectiveNotes)
+    .where(eq(retrospectiveNotes.id, note.id))
+    .returning({
+      id: retrospectiveNotes.id
+    });
+
+  return {
+    item: getRequiredRow(
+      deleted,
+      "retrospective_note_delete_failed",
+      "Note deletion failed."
+    )
+  };
+}
+
 export async function listCommitments(
   db: DatabaseClient,
   actor: AuthenticatedActor,
