@@ -250,6 +250,8 @@ export type Retrospective = {
   finalizedAt: string | null;
   householdId: string;
   id: string;
+  nextCommitmentPeriodClosureOn: string | null;
+  nextCommitmentPeriodStartOn: string | null;
   rounds: RetrospectiveRound[];
   startedAt: string | null;
   status: "draft" | "active" | "finalized";

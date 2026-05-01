@@ -151,6 +151,7 @@ type RetrospectiveTemplatesResponse = {
 
 type RetrospectiveHomeResponse = {
   activePeriod: {
+    closureOn: string;
     id: string;
     periodStartOn: string;
   };
@@ -187,6 +188,8 @@ type RetrospectiveResponse = {
     }>;
     currentRoundId: string | null;
     id: string;
+    nextCommitmentPeriodClosureOn: string | null;
+    nextCommitmentPeriodStartOn: string | null;
     period: {
       closureOn: string;
       id: string;
@@ -964,14 +967,9 @@ describe("Phase 3 API", () => {
       headers: adminHeaders
     });
     expect(homeResponse.status).toBe(200);
-    const home = await parseJson<RetrospectiveHomeResponse>(homeResponse);
 
     await forceActiveCommitmentPeriodClosed("2999-01-31");
-    const yesterday = addDaysIso(todayIsoDate(), -1);
-    const selectedClosureOn =
-      yesterday < home.activePeriod.periodStartOn
-        ? home.activePeriod.periodStartOn
-        : yesterday;
+    const selectedClosureOn = addDaysIso(todayIsoDate(), 30);
 
     const earlyRetrospectiveResponse = await app.request(
       "/api/v1/retrospectives",
@@ -989,7 +987,11 @@ describe("Phase 3 API", () => {
       earlyRetrospectiveResponse
     );
     expect(earlyRetrospective.item.status).toBe("active");
-    expect(earlyRetrospective.item.period.closureOn).toBe(selectedClosureOn);
+    expect(earlyRetrospective.item.nextCommitmentPeriodClosureOn).toBe(
+      selectedClosureOn
+    );
+    expect(earlyRetrospective.item.nextCommitmentPeriodStartOn).toBe(todayIsoDate());
+    expect(earlyRetrospective.item.period.closureOn).toBe(todayIsoDate());
     expect(earlyRetrospective.item.period.status).toBe("closed");
 
     const updateClosureResponse = await app.request(
@@ -1006,7 +1008,9 @@ describe("Phase 3 API", () => {
     const updatedRetrospective = await parseJson<RetrospectiveResponse>(
       updateClosureResponse
     );
-    expect(updatedRetrospective.item.period.closureOn).toBe(todayIsoDate());
+    expect(updatedRetrospective.item.nextCommitmentPeriodClosureOn).toBe(
+      todayIsoDate()
+    );
 
     const futureClosureResponse = await app.request(
       `/api/v1/retrospectives/${earlyRetrospective.item.id}`,
@@ -1022,7 +1026,9 @@ describe("Phase 3 API", () => {
     const futureRetrospective = await parseJson<RetrospectiveResponse>(
       futureClosureResponse
     );
-    expect(futureRetrospective.item.period.closureOn).toBe("2999-02-01");
+    expect(futureRetrospective.item.nextCommitmentPeriodClosureOn).toBe(
+      "2999-02-01"
+    );
 
     const invalidClosureResponse = await app.request(
       `/api/v1/retrospectives/${earlyRetrospective.item.id}`,
@@ -1240,6 +1246,18 @@ describe("Phase 3 API", () => {
     const createdRetrospective = await parseJson<RetrospectiveResponse>(
       retrospectiveCreateResponse
     );
+    const plannedClosureOn = addDaysIso(todayIsoDate(), 30);
+    const planNextPeriodResponse = await app.request(
+      `/api/v1/retrospectives/${createdRetrospective.item.id}`,
+      jsonRequest({
+        body: {
+          closureOn: plannedClosureOn
+        },
+        headers: adminHeaders,
+        method: "PATCH"
+      })
+    );
+    expect(planNextPeriodResponse.status).toBe(200);
 
     const duplicateRetrospectiveResponse = await app.request(
       "/api/v1/retrospectives",
@@ -1409,6 +1427,19 @@ describe("Phase 3 API", () => {
     const finalized = await parseJson<RetrospectiveResponse>(finalizeResponse);
     expect(finalized.item.status).toBe("finalized");
     expect(finalized.item.period.status).toBe("reviewed");
+
+    const homeAfterFinalizeResponse = await app.request(
+      "/api/v1/retrospective-home",
+      {
+        headers: adminHeaders
+      }
+    );
+    expect(homeAfterFinalizeResponse.status).toBe(200);
+    const homeAfterFinalize = await parseJson<RetrospectiveHomeResponse>(
+      homeAfterFinalizeResponse
+    );
+    expect(homeAfterFinalize.activePeriod.periodStartOn).toBe(todayIsoDate());
+    expect(homeAfterFinalize.activePeriod.closureOn).toBe(plannedClosureOn);
 
     const commitmentsResponse = await app.request("/api/v1/commitments", {
       headers: adminHeaders

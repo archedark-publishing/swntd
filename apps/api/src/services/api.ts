@@ -1835,39 +1835,23 @@ export async function updateRetrospective(
   }
 
   if (input.closureOn) {
-    const [period] = await db
-      .select()
-      .from(commitmentPeriods)
-      .where(eq(commitmentPeriods.id, retrospective.commitmentPeriodId));
+    const nextPeriodStartOn =
+      retrospective.nextCommitmentPeriodStartOn ?? todayIsoDate();
 
-    if (!period) {
-      throw new ApiError(
-        404,
-        "commitment_period_not_found",
-        "Retrospective commitment period not found."
-      );
-    }
-
-    if (input.closureOn < period.periodStartOn) {
+    if (input.closureOn < nextPeriodStartOn) {
       throw new ApiError(
         400,
         "retrospective_closure_on_invalid",
-        "The retrospective end date cannot be before the commitment period starts."
+        "The next commitment period end date cannot be before it starts."
       );
     }
-
-    await db
-      .update(commitmentPeriods)
-      .set({
-        closureOn: input.closureOn,
-        updatedAt: new Date()
-      })
-      .where(eq(commitmentPeriods.id, period.id));
   }
 
   await db
     .update(retrospectives)
     .set({
+      nextCommitmentPeriodClosureOn:
+        input.closureOn ?? retrospective.nextCommitmentPeriodClosureOn,
       updatedAt: new Date(),
       updatedByUserId: actor.id
     })
@@ -1972,18 +1956,25 @@ export async function createRetrospective(
     }
 
     const today = todayIsoDate();
-    const latestAllowedClosureOn = period.closureOn > today ? today : period.closureOn;
-    const closureOn = input.closureOn ?? latestAllowedClosureOn;
+    const reviewedClosureOn = period.closureOn > today ? today : period.closureOn;
+    const nextPeriodStartOn = today;
+    const nextPeriodClosureOn =
+      input.closureOn ??
+      computeNextClosureOn({
+        cadence: settings?.retrospectiveCadence ?? "monthly",
+        interval: settings?.retrospectiveCadenceInterval ?? 1,
+        periodStartOn: nextPeriodStartOn
+      });
 
     if (
-      closureOn < period.periodStartOn ||
-      closureOn > period.closureOn ||
-      closureOn > today
+      reviewedClosureOn < period.periodStartOn ||
+      reviewedClosureOn > period.closureOn ||
+      nextPeriodClosureOn < nextPeriodStartOn
     ) {
       throw new ApiError(
         400,
         "retrospective_closure_on_invalid",
-        "The retrospective end date must be within the active commitment period and cannot be in the future."
+        "The retrospective dates are outside the allowed commitment period range."
       );
     }
 
@@ -1993,12 +1984,14 @@ export async function createRetrospective(
         commitmentPeriodId: period.id,
         createdByUserId: actor.id,
         householdId: actor.householdId,
+        nextCommitmentPeriodClosureOn: nextPeriodClosureOn,
+        nextCommitmentPeriodStartOn: nextPeriodStartOn,
         startedAt: new Date(),
         status: "active",
         templateId: template.id,
         title:
           input.title?.trim() ||
-          `Retrospective for ${period.periodStartOn} to ${closureOn}`,
+          `Retrospective for ${period.periodStartOn} to ${reviewedClosureOn}`,
         updatedByUserId: actor.id
       })
       .returning();
@@ -2044,7 +2037,7 @@ export async function createRetrospective(
     await tx
       .update(commitmentPeriods)
       .set({
-        closureOn,
+        closureOn: reviewedClosureOn,
         status: "closed",
         updatedAt: new Date()
       })
@@ -2225,16 +2218,15 @@ export async function finalizeRetrospective(
       .select()
       .from(householdSettings)
       .where(eq(householdSettings.householdId, actor.householdId));
-    const [period] = await tx
-      .select()
-      .from(commitmentPeriods)
-      .where(eq(commitmentPeriods.id, retrospective.commitmentPeriodId));
-    const periodStartOn = period?.closureOn ?? todayIsoDate();
-    const closureOn = computeNextClosureOn({
-      cadence: settings?.retrospectiveCadence ?? "monthly",
-      interval: settings?.retrospectiveCadenceInterval ?? 1,
-      periodStartOn
-    });
+    const periodStartOn =
+      retrospective.nextCommitmentPeriodStartOn ?? todayIsoDate();
+    const closureOn =
+      retrospective.nextCommitmentPeriodClosureOn ??
+      computeNextClosureOn({
+        cadence: settings?.retrospectiveCadence ?? "monthly",
+        interval: settings?.retrospectiveCadenceInterval ?? 1,
+        periodStartOn
+      });
     const [nextPeriod] = await tx
       .insert(commitmentPeriods)
       .values({

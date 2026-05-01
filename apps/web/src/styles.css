@@ -888,6 +888,31 @@ a {
   gap: 0.35rem;
 }
 
+.commitment-checklist-editor,
+.commitment-checklist-track {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.commitment-checklist-edit-row,
+.commitment-checklist-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.commitment-checklist-item {
+  grid-template-columns: auto minmax(0, 1fr);
+  font-size: 0.9rem;
+  color: rgb(47 33 22 / 0.78);
+}
+
+.muted-text {
+  color: rgb(47 33 22 / 0.58);
+  font-size: 0.86rem;
+}
+
 .task-sortable-shell {
   touch-action: manipulation;
 }

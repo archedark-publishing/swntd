@@ -221,6 +221,7 @@ type RetrospectiveState = {
 };
 
 type CommitmentDraft = {
+  checklistItems: ChecklistDraftItem[];
   targetCount: string;
   title: string;
   trackingInterval: "none" | "daily" | "weekly" | "monthly";
@@ -884,11 +885,11 @@ function getCommitmentGridRows(
   }
 
   if (commitment.trackingInterval === "monthly") {
-    return Math.max(1, Math.ceil(dayCount / 30));
+    return Math.max(1, Math.floor(dayCount / 30));
   }
 
   if (commitment.trackingInterval === "weekly") {
-    return Math.max(1, Math.ceil(dayCount / 7));
+    return Math.max(1, Math.floor(dayCount / 7));
   }
 
   return 1;
@@ -2036,14 +2037,48 @@ export function App() {
                       "Progress removed."
                     )
                   }
+                  onToggleCommitmentChecklistItem={(commitment, itemId, isCompleted) =>
+                    runRetrospectiveMutation(
+                      () =>
+                        api.updateCommitment(commitment.id, {
+                          assigneeUserId: commitment.assigneeUserId,
+                          checklistItems: commitment.checklistItems.map((item) => ({
+                            body: item.body,
+                            isCompleted:
+                              item.id === itemId ? isCompleted : item.isCompleted
+                          })),
+                          commitmentPeriodId: commitment.commitmentPeriodId,
+                          createdInRetrospectiveId:
+                            commitment.createdInRetrospectiveId,
+                          description: commitment.description,
+                          status: commitment.status,
+                          targetCount: commitment.targetCount,
+                          title: commitment.title,
+                          trackingInterval: commitment.trackingInterval,
+                          trackingKind: commitment.trackingKind
+                        }),
+                      "Checklist updated."
+                    )
+                  }
                   onCreateCommitment={(retrospectiveId, draft) =>
                     runRetrospectiveMutation(
                       () =>
                         api.createCommitment({
                           createdInRetrospectiveId: retrospectiveId,
-                          targetCount: draft.targetCount
-                            ? Number(draft.targetCount)
-                            : null,
+                          ...(draft.trackingKind === "checklist"
+                            ? {
+                                checklistItems: draft.checklistItems
+                                  .map((item) => ({
+                                    body: item.body.trim(),
+                                    isCompleted: item.isCompleted
+                                  }))
+                                  .filter((item) => item.body)
+                              }
+                            : {}),
+                          targetCount:
+                            draft.trackingKind !== "checklist" && draft.targetCount
+                              ? Number(draft.targetCount)
+                              : null,
                           title: draft.title,
                           trackingInterval: draft.trackingInterval,
                           trackingKind: draft.trackingKind
@@ -5945,6 +5980,11 @@ function RetrospectiveView(props: {
     retrospectiveId: string,
     draft: CommitmentDraft
   ) => Promise<unknown>;
+  onToggleCommitmentChecklistItem: (
+    commitment: Commitment,
+    itemId: string,
+    isCompleted: boolean
+  ) => Promise<unknown>;
   onCreateNote: (input: {
     body: string;
     commitmentPeriodId: string;
@@ -6104,12 +6144,13 @@ function RetrospectiveView(props: {
         />
       ) : null}
 
-      <CommitmentTracker
-        commitments={detail?.commitments ?? home.commitments}
-        onAddCheckin={props.onAddCheckin}
-        onDeleteCheckin={props.onDeleteCheckin}
-        period={activePeriod}
-      />
+        <CommitmentTracker
+          commitments={detail?.commitments ?? home.commitments}
+          onAddCheckin={props.onAddCheckin}
+          onDeleteCheckin={props.onDeleteCheckin}
+          onToggleChecklistItem={props.onToggleCommitmentChecklistItem}
+          period={activePeriod}
+        />
 
       {activePeriod && !detail ? (
         <SurfaceCard className="retrospective-card">
@@ -6166,19 +6207,21 @@ function ActiveRetrospectivePanel(props: {
   onUpdateClosureOn: (retrospectiveId: string, closureOn: string) => Promise<unknown>;
 }) {
   const [closureOnDraft, setClosureOnDraft] = useState(
-    props.detail.period?.closureOn ?? ""
+    props.detail.nextCommitmentPeriodClosureOn ?? ""
   );
   const currentRound =
     props.detail.rounds.find((round) => round.id === props.detail.currentRoundId) ??
     props.detail.rounds[0] ??
     null;
   const lastRound = props.detail.rounds[props.detail.rounds.length - 1] ?? null;
+  const nextCommitmentPeriodStartOn =
+    props.detail.nextCommitmentPeriodStartOn ?? props.detail.period?.closureOn ?? "";
   const canEditClosureOn =
-    props.detail.status !== "finalized" && props.detail.period !== null;
+    props.detail.status !== "finalized" && nextCommitmentPeriodStartOn !== "";
 
   useEffect(() => {
-    setClosureOnDraft(props.detail.period?.closureOn ?? "");
-  }, [props.detail.period?.id, props.detail.period?.closureOn]);
+    setClosureOnDraft(props.detail.nextCommitmentPeriodClosureOn ?? "");
+  }, [props.detail.id, props.detail.nextCommitmentPeriodClosureOn]);
 
   const handleClosureOnChange = (value: string) => {
     setClosureOnDraft(value);
@@ -6187,8 +6230,8 @@ function ActiveRetrospectivePanel(props: {
       !props.detail.period ||
       props.detail.status === "finalized" ||
       !value ||
-      value < props.detail.period.periodStartOn ||
-      value === props.detail.period.closureOn
+      value < nextCommitmentPeriodStartOn ||
+      value === props.detail.nextCommitmentPeriodClosureOn
     ) {
       return;
     }
@@ -6201,12 +6244,12 @@ function ActiveRetrospectivePanel(props: {
       <SectionHeading
         actions={
           <div className="header-action-row">
-            {props.detail.period ? (
+            {nextCommitmentPeriodStartOn ? (
               <div className="retrospective-header-template">
                 <FormField label="Ends on">
                   <FormInput
                     disabled={!canEditClosureOn}
-                    min={props.detail.period.periodStartOn}
+                    min={nextCommitmentPeriodStartOn}
                     onChange={(event) => handleClosureOnChange(event.target.value)}
                     type="date"
                     value={closureOnDraft}
@@ -6511,11 +6554,48 @@ function CommitmentCaptureForm(props: {
   onSubmit: (draft: CommitmentDraft) => Promise<unknown>;
 }) {
   const [draft, setDraft] = useState<CommitmentDraft>({
+    checklistItems: [],
     targetCount: "",
     title: "",
     trackingInterval: "none",
     trackingKind: "binary"
   });
+  const [checklistComposerValue, setChecklistComposerValue] = useState("");
+  const resetDraft = () => {
+    setDraft({
+      checklistItems: [],
+      targetCount: "",
+      title: "",
+      trackingInterval: "none",
+      trackingKind: "binary"
+    });
+    setChecklistComposerValue("");
+  };
+  const addChecklistItem = () => {
+    const body = checklistComposerValue.trim();
+
+    if (!body) {
+      return;
+    }
+
+    setDraft((current) => ({
+      ...current,
+      checklistItems: [
+        ...current.checklistItems,
+        {
+          body,
+          clientId: crypto.randomUUID(),
+          isCompleted: false
+        }
+      ]
+    }));
+    setChecklistComposerValue("");
+  };
+  const canSubmit =
+    Boolean(draft.title.trim()) &&
+    (draft.trackingKind !== "checklist" ||
+      draft.checklistItems.some((item) => item.body.trim()) ||
+      Boolean(checklistComposerValue.trim()));
 
   return (
     <form
@@ -6523,18 +6603,27 @@ function CommitmentCaptureForm(props: {
       onSubmit={(event) => {
         event.preventDefault();
 
-        if (!draft.title.trim()) {
+        if (!canSubmit) {
           return;
         }
 
-        void props.onSubmit(draft).then(() =>
-          setDraft({
-            targetCount: "",
-            title: "",
-            trackingInterval: "none",
-            trackingKind: "binary"
-          })
-        );
+        const pendingChecklistItem = checklistComposerValue.trim();
+        const submitDraft =
+          draft.trackingKind === "checklist" && pendingChecklistItem
+            ? {
+                ...draft,
+                checklistItems: [
+                  ...draft.checklistItems,
+                  {
+                    body: pendingChecklistItem,
+                    clientId: crypto.randomUUID(),
+                    isCompleted: false
+                  }
+                ]
+              }
+            : draft;
+
+        void props.onSubmit(submitDraft).then(resetDraft);
       }}
     >
       <FormField label="Commitment">
@@ -6548,7 +6637,11 @@ function CommitmentCaptureForm(props: {
         <FormSelect
           label="Tracking"
           onValueChange={(value) =>
-            setDraft({ ...draft, trackingKind: value as CommitmentTrackingKind })
+            setDraft({
+              ...draft,
+              targetCount: value === "checklist" ? "" : draft.targetCount,
+              trackingKind: value as CommitmentTrackingKind
+            })
           }
           options={[
             { label: "Binary", value: "binary" },
@@ -6574,19 +6667,81 @@ function CommitmentCaptureForm(props: {
           ]}
           value={draft.trackingInterval}
         />
-        <FormField label="Target">
-          <FormInput
-            min={0}
-            onChange={(event) =>
-              setDraft({ ...draft, targetCount: event.target.value })
-            }
-            placeholder="3"
-            type="number"
-            value={draft.targetCount}
-          />
-        </FormField>
+        {draft.trackingKind !== "checklist" ? (
+          <FormField label="Target">
+            <FormInput
+              min={0}
+              onChange={(event) =>
+                setDraft({ ...draft, targetCount: event.target.value })
+              }
+              placeholder="3"
+              type="number"
+              value={draft.targetCount}
+            />
+          </FormField>
+        ) : null}
       </div>
-      <Button type="submit">
+      {draft.trackingKind === "checklist" ? (
+        <div className="commitment-checklist-editor">
+          {draft.checklistItems.map((item) => (
+            <div className="commitment-checklist-edit-row" key={item.clientId}>
+              <FormInput
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    checklistItems: current.checklistItems.map((entry) =>
+                      entry.clientId === item.clientId
+                        ? { ...entry, body: event.target.value }
+                        : entry
+                    )
+                  }))
+                }
+                value={item.body}
+              />
+              <Button
+                onClick={() =>
+                  setDraft((current) => ({
+                    ...current,
+                    checklistItems: current.checklistItems.filter(
+                      (entry) => entry.clientId !== item.clientId
+                    )
+                  }))
+                }
+                size="icon"
+                type="button"
+                variant="ghost"
+              >
+                <Trash2 className="size-4" />
+                <span className="sr-only">Remove checklist item</span>
+              </Button>
+            </div>
+          ))}
+          <div className="commitment-checklist-edit-row">
+            <FormInput
+              onChange={(event) => setChecklistComposerValue(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  addChecklistItem();
+                }
+              }}
+              placeholder="Checklist item"
+              value={checklistComposerValue}
+            />
+            <Button
+              disabled={!checklistComposerValue.trim()}
+              onClick={addChecklistItem}
+              size="icon"
+              type="button"
+              variant="outline"
+            >
+              <Plus className="size-4" />
+              <span className="sr-only">Add checklist item</span>
+            </Button>
+          </div>
+        </div>
+      ) : null}
+      <Button disabled={!canSubmit} type="submit">
         <Plus className="size-4" />
         Add Commitment
       </Button>
@@ -6598,6 +6753,11 @@ function CommitmentTracker(props: {
   commitments: Commitment[];
   onAddCheckin: (commitmentId: string) => Promise<unknown>;
   onDeleteCheckin: (checkinId: string) => Promise<unknown>;
+  onToggleChecklistItem: (
+    commitment: Commitment,
+    itemId: string,
+    isCompleted: boolean
+  ) => Promise<unknown>;
   period: CommitmentPeriod | null;
 }) {
   return (
@@ -6613,6 +6773,7 @@ function CommitmentTracker(props: {
               key={commitment.id}
               onAddCheckin={props.onAddCheckin}
               onDeleteCheckin={props.onDeleteCheckin}
+              onToggleChecklistItem={props.onToggleChecklistItem}
               period={props.period}
             />
           ))}
@@ -6626,6 +6787,11 @@ function CommitmentTrackerRow(props: {
   commitment: Commitment;
   onAddCheckin: (commitmentId: string) => Promise<unknown>;
   onDeleteCheckin: (checkinId: string) => Promise<unknown>;
+  onToggleChecklistItem: (
+    commitment: Commitment,
+    itemId: string,
+    isCompleted: boolean
+  ) => Promise<unknown>;
   period: CommitmentPeriod | null;
 }) {
   const sortedCheckins = props.commitment.checkins
@@ -6637,6 +6803,7 @@ function CommitmentTrackerRow(props: {
     );
   const latestCheckin = sortedCheckins[sortedCheckins.length - 1] ?? null;
   const isCountGrid = props.commitment.trackingKind === "count_per_period";
+  const isChecklist = props.commitment.trackingKind === "checklist";
   const targetCount = Math.max(1, props.commitment.targetCount ?? 1);
   const rowCount = isCountGrid
     ? getCommitmentGridRows(props.commitment, props.period)
@@ -6694,6 +6861,28 @@ function CommitmentTrackerRow(props: {
               <span className="sr-only">Remove progress</span>
             </Button>
           </div>
+        </div>
+      ) : isChecklist ? (
+        <div className="commitment-checklist-track">
+          {props.commitment.checklistItems.length === 0 ? (
+            <span className="muted-text">No checklist items yet.</span>
+          ) : null}
+          {props.commitment.checklistItems.map((item) => (
+            <label className="commitment-checklist-item" key={item.id}>
+              <Checkbox
+                checked={item.isCompleted}
+                disabled={!canMutate}
+                onCheckedChange={(checked) =>
+                  void props.onToggleChecklistItem(
+                    props.commitment,
+                    item.id,
+                    checked === true
+                  )
+                }
+              />
+              <span>{item.body}</span>
+            </label>
+          ))}
         </div>
       ) : (
         <Button

@@ -441,6 +441,8 @@ export const retrospectives = sqliteTable(
       .references(() => users.id, { onDelete: "restrict" }),
     startedAt: integer("started_at", { mode: "timestamp_ms" }),
     finalizedAt: integer("finalized_at", { mode: "timestamp_ms" }),
+    nextCommitmentPeriodStartOn: text("next_commitment_period_start_on"),
+    nextCommitmentPeriodClosureOn: text("next_commitment_period_closure_on"),
     createdAt: integer("created_at", { mode: "timestamp_ms" })
       .notNull()
       .$defaultFn(now),
