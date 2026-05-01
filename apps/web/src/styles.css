@@ -895,7 +895,7 @@ a {
 }
 
 .commitment-checklist-edit-row,
-.commitment-checklist-item {
+.commitment-checklist-add-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
@@ -903,7 +903,10 @@ a {
 }
 
 .commitment-checklist-item {
-  grid-template-columns: auto minmax(0, 1fr);
+  display: grid;
+  grid-template-columns: auto minmax(0, 14rem) auto;
+  align-items: center;
+  gap: 0.45rem;
   font-size: 0.9rem;
   color: rgb(47 33 22 / 0.78);
 }

@@ -848,17 +848,36 @@ function formatIsoDate(value: string | null | undefined) {
   }).format(new Date(`${value}T00:00:00.000Z`));
 }
 
+function formatCommitmentIntervalLabel(
+  interval: Commitment["trackingInterval"]
+) {
+  switch (interval) {
+    case "daily":
+      return "day";
+    case "weekly":
+      return "week";
+    case "monthly":
+      return "month";
+    case "none":
+      return "period";
+  }
+}
+
 function getCommitmentProgressLabel(commitment: Commitment) {
   if (commitment.trackingKind === "count_per_period") {
     const total = commitment.checkins.reduce((sum, checkin) => sum + checkin.amount, 0);
 
-    return `${total}${commitment.targetCount ? ` / ${commitment.targetCount}` : ""} this ${commitment.trackingInterval}`;
+    return `${total}${commitment.targetCount ? ` / ${commitment.targetCount}` : ""} this ${formatCommitmentIntervalLabel(commitment.trackingInterval)}`;
   }
 
   if (commitment.trackingKind === "checklist") {
     const completed = commitment.checklistItems.filter((item) => item.isCompleted).length;
 
     return `${completed} / ${commitment.checklistItems.length} done`;
+  }
+
+  if (commitment.trackingKind === "binary") {
+    return commitment.checkins.length > 0 ? "Finished" : "Not finished";
   }
 
   return commitment.status;
@@ -2046,16 +2065,12 @@ export function App() {
                       "Progress removed."
                     )
                   }
-                  onToggleCommitmentChecklistItem={(commitment, itemId, isCompleted) =>
+                  onUpdateCommitmentChecklist={(commitment, checklistItems) =>
                     runRetrospectiveMutation(
                       () =>
                         api.updateCommitment(commitment.id, {
                           assigneeUserId: commitment.assigneeUserId,
-                          checklistItems: commitment.checklistItems.map((item) => ({
-                            body: item.body,
-                            isCompleted:
-                              item.id === itemId ? isCompleted : item.isCompleted
-                          })),
+                          checklistItems,
                           commitmentPeriodId: commitment.commitmentPeriodId,
                           createdInRetrospectiveId:
                             commitment.createdInRetrospectiveId,
@@ -5989,10 +6004,9 @@ function RetrospectiveView(props: {
     retrospectiveId: string,
     draft: CommitmentDraft
   ) => Promise<unknown>;
-  onToggleCommitmentChecklistItem: (
+  onUpdateCommitmentChecklist: (
     commitment: Commitment,
-    itemId: string,
-    isCompleted: boolean
+    checklistItems: Array<{ body: string; isCompleted?: boolean }>
   ) => Promise<unknown>;
   onCreateNote: (input: {
     body: string;
@@ -6160,7 +6174,7 @@ function RetrospectiveView(props: {
           commitments={detail?.commitments ?? home.commitments}
           onAddCheckin={props.onAddCheckin}
           onDeleteCheckin={props.onDeleteCheckin}
-          onToggleChecklistItem={props.onToggleCommitmentChecklistItem}
+          onUpdateChecklist={props.onUpdateCommitmentChecklist}
           period={activePeriod}
         />
 
@@ -6658,8 +6672,7 @@ function CommitmentCaptureForm(props: {
           options={[
             { label: "Binary", value: "binary" },
             { label: "Count per period", value: "count_per_period" },
-            { label: "Checklist", value: "checklist" },
-            { label: "Freeform", value: "freeform" }
+            { label: "Checklist", value: "checklist" }
           ]}
           value={draft.trackingKind}
         />
@@ -6765,10 +6778,9 @@ function CommitmentTracker(props: {
   commitments: Commitment[];
   onAddCheckin: (commitmentId: string) => Promise<unknown>;
   onDeleteCheckin: (checkinId: string) => Promise<unknown>;
-  onToggleChecklistItem: (
+  onUpdateChecklist: (
     commitment: Commitment,
-    itemId: string,
-    isCompleted: boolean
+    checklistItems: Array<{ body: string; isCompleted?: boolean }>
   ) => Promise<unknown>;
   period: CommitmentPeriod | null;
 }) {
@@ -6785,7 +6797,7 @@ function CommitmentTracker(props: {
               key={commitment.id}
               onAddCheckin={props.onAddCheckin}
               onDeleteCheckin={props.onDeleteCheckin}
-              onToggleChecklistItem={props.onToggleChecklistItem}
+              onUpdateChecklist={props.onUpdateChecklist}
               period={props.period}
             />
           ))}
@@ -6799,13 +6811,13 @@ function CommitmentTrackerRow(props: {
   commitment: Commitment;
   onAddCheckin: (commitmentId: string) => Promise<unknown>;
   onDeleteCheckin: (checkinId: string) => Promise<unknown>;
-  onToggleChecklistItem: (
+  onUpdateChecklist: (
     commitment: Commitment,
-    itemId: string,
-    isCompleted: boolean
+    checklistItems: Array<{ body: string; isCompleted?: boolean }>
   ) => Promise<unknown>;
   period: CommitmentPeriod | null;
 }) {
+  const [checklistComposerValue, setChecklistComposerValue] = useState("");
   const sortedCheckins = props.commitment.checkins
     .slice()
     .sort((left, right) =>
@@ -6826,6 +6838,37 @@ function CommitmentTrackerRow(props: {
     sortedCheckins.reduce((sum, checkin) => sum + checkin.amount, 0)
   );
   const canMutate = props.commitment.status === "active";
+  const isBinaryFinished =
+    props.commitment.trackingKind === "binary" && latestCheckin !== null;
+  const updateChecklist = (
+    items: Array<{ body: string; isCompleted?: boolean }>
+  ) => {
+    void props.onUpdateChecklist(
+      props.commitment,
+      items
+        .map((item) => ({
+          body: item.body.trim(),
+          isCompleted: item.isCompleted ?? false
+        }))
+        .filter((item) => item.body)
+    );
+  };
+  const addChecklistItem = () => {
+    const body = checklistComposerValue.trim();
+
+    if (!body) {
+      return;
+    }
+
+    updateChecklist([
+      ...props.commitment.checklistItems.map((item) => ({
+        body: item.body,
+        isCompleted: item.isCompleted
+      })),
+      { body, isCompleted: false }
+    ]);
+    setChecklistComposerValue("");
+  };
 
   return (
     <div className="retrospective-row commitment-tracker-row">
@@ -6880,32 +6923,105 @@ function CommitmentTrackerRow(props: {
             <span className="muted-text">No checklist items yet.</span>
           ) : null}
           {props.commitment.checklistItems.map((item) => (
-            <label className="commitment-checklist-item" key={item.id}>
+            <div className="commitment-checklist-item" key={item.id}>
               <Checkbox
                 checked={item.isCompleted}
                 disabled={!canMutate}
                 onCheckedChange={(checked) =>
-                  void props.onToggleChecklistItem(
-                    props.commitment,
-                    item.id,
-                    checked === true
+                  updateChecklist(
+                    props.commitment.checklistItems.map((entry) => ({
+                      body: entry.body,
+                      isCompleted:
+                        entry.id === item.id ? checked === true : entry.isCompleted
+                    }))
                   )
                 }
               />
-              <span>{item.body}</span>
-            </label>
+              <FormInput
+                defaultValue={item.body}
+                disabled={!canMutate}
+                onBlur={(event) => {
+                  const body = event.target.value.trim();
+
+                  if (body && body !== item.body) {
+                    updateChecklist(
+                      props.commitment.checklistItems.map((entry) => ({
+                        body: entry.id === item.id ? body : entry.body,
+                        isCompleted: entry.isCompleted
+                      }))
+                    );
+                  }
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.currentTarget.blur();
+                  }
+                }}
+              />
+              <Button
+                disabled={!canMutate}
+                onClick={() =>
+                  updateChecklist(
+                    props.commitment.checklistItems
+                      .filter((entry) => entry.id !== item.id)
+                      .map((entry) => ({
+                        body: entry.body,
+                        isCompleted: entry.isCompleted
+                      }))
+                  )
+                }
+                size="icon"
+                type="button"
+                variant="ghost"
+              >
+                <Trash2 className="size-4" />
+                <span className="sr-only">Remove checklist item</span>
+              </Button>
+            </div>
           ))}
+          {canMutate ? (
+            <div className="commitment-checklist-add-row">
+              <FormInput
+                onChange={(event) => setChecklistComposerValue(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    addChecklistItem();
+                  }
+                }}
+                placeholder="Add checklist item"
+                value={checklistComposerValue}
+              />
+              <Button
+                disabled={!checklistComposerValue.trim()}
+                onClick={addChecklistItem}
+                size="icon"
+                type="button"
+                variant="outline"
+              >
+                <Plus className="size-4" />
+                <span className="sr-only">Add checklist item</span>
+              </Button>
+            </div>
+          ) : null}
         </div>
       ) : (
         <Button
           disabled={!canMutate}
-          onClick={() => void props.onAddCheckin(props.commitment.id)}
+          className={
+            isBinaryFinished ? undefined : "bg-black text-white hover:bg-black/80"
+          }
+          onClick={() =>
+            isBinaryFinished && latestCheckin
+              ? void props.onDeleteCheckin(latestCheckin.id)
+              : void props.onAddCheckin(props.commitment.id)
+          }
           size="sm"
           type="button"
-          variant="outline"
+          variant={isBinaryFinished ? "outline" : "default"}
         >
           <Check className="size-4" />
-          Mark
+          {isBinaryFinished ? "Unmark" : "Finish"}
         </Button>
       )}
     </div>
