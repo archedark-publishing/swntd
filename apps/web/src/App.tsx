@@ -214,6 +214,7 @@ type LabelDraft = {
 
 type RetrospectiveState = {
   detail: RetrospectiveDetail | null;
+  errorMessage: string | null;
   finalizedRetrospectives: Retrospective[];
   home: RetrospectiveHome | null;
   isLoading: boolean;
@@ -953,6 +954,7 @@ export function App() {
   const [archiveSearch, setArchiveSearch] = useState("");
   const [retrospectiveState, setRetrospectiveState] = useState<RetrospectiveState>({
     detail: null,
+    errorMessage: null,
     finalizedRetrospectives: [],
     home: null,
     isLoading: false,
@@ -1132,14 +1134,21 @@ export function App() {
 
       setRetrospectiveState({
         detail,
+        errorMessage: null,
         finalizedRetrospectives: finalizedRetrospectives.items,
         home,
         isLoading: false,
         templates: templates.items
       });
     } catch (error) {
-      setRetrospectiveState((current) => ({ ...current, isLoading: false }));
-      showErrorToast(buildFlashMessage(error), "retrospective-refresh-error");
+      const message = buildFlashMessage(error);
+
+      setRetrospectiveState((current) => ({
+        ...current,
+        errorMessage: message,
+        isLoading: false
+      }));
+      showErrorToast(message, "retrospective-refresh-error");
     }
   });
 
@@ -6054,7 +6063,10 @@ function RetrospectiveView(props: {
     return (
       <section className="panel-stack">
         <StatusMessageCard
-          description="The retrospective data did not load."
+          description={
+            props.state.errorMessage ??
+            "The retrospective data did not load."
+          }
           title="Retrospective is unavailable."
         />
         <Button onClick={() => void props.onRefresh()} type="button" variant="outline">
