@@ -114,6 +114,11 @@ describe("authorization policies", () => {
 
   it("limits commitments to admins in the same household", () => {
     const commitment = {
+      assigneeUserId: adminActor.id,
+      householdId: "default-household"
+    };
+    const otherCommitment = {
+      assigneeUserId: "someone-else",
       householdId: "default-household"
     };
     const otherHouseholdAdmin = {
@@ -123,6 +128,7 @@ describe("authorization policies", () => {
 
     expect(canReadCommitment(adminActor, commitment)).toBe(true);
     expect(canMutateCommitment(adminActor, commitment)).toBe(true);
+    expect(canMutateCommitment(adminActor, otherCommitment)).toBe(false);
     expect(canReadCommitment(otherHouseholdAdmin, commitment)).toBe(false);
     expect(canMutateCommitment(serviceActor, commitment)).toBe(false);
   });

@@ -385,8 +385,7 @@ export type ListCommitmentFilters = {
   status?: "active" | "reviewed" | "archived" | undefined;
 };
 
-export type CreateCommitmentInput = {
-  assigneeUserId?: string | null | undefined;
+type CommitmentWriteInput = {
   checklistItems?: Array<{ body: string; isCompleted?: boolean | undefined }> | undefined;
   commitmentPeriodId?: string | null | undefined;
   createdInRetrospectiveId?: string | null | undefined;
@@ -397,7 +396,12 @@ export type CreateCommitmentInput = {
   trackingKind: CommitmentTrackingKind;
 };
 
-export type UpdateCommitmentInput = CreateCommitmentInput & {
+export type CreateCommitmentInput = CommitmentWriteInput & {
+  assigneeUserId: string;
+};
+
+export type UpdateCommitmentInput = CommitmentWriteInput & {
+  assigneeUserId?: string | undefined;
   status?: "active" | "reviewed" | "archived" | undefined;
 };
 
@@ -610,6 +614,36 @@ async function assertAssigneeInHousehold(
 
   if (!row) {
     throw new ApiError(400, "invalid_assignee", "Assignee must belong to the household.");
+  }
+
+  return row.id;
+}
+
+async function assertCommitmentAssigneeInHousehold(
+  db: DatabaseClient,
+  householdId: string,
+  assigneeUserId: string
+) {
+  const [row] = await db
+    .select({
+      id: users.id
+    })
+    .from(users)
+    .where(
+      and(
+        eq(users.id, assigneeUserId),
+        eq(users.householdId, householdId),
+        eq(users.role, "admin"),
+        isNull(users.deactivatedAt)
+      )
+    );
+
+  if (!row) {
+    throw new ApiError(
+      400,
+      "invalid_commitment_assignee",
+      "Commitment assignee must be an active household admin."
+    );
   }
 
   return row.id;
@@ -2652,7 +2686,7 @@ export async function createCommitment(
     await getRetrospectiveOrThrow(db, actor, input.createdInRetrospectiveId);
   }
 
-  const assigneeUserId = await assertAssigneeInHousehold(
+  const assigneeUserId = await assertCommitmentAssigneeInHousehold(
     db,
     actor.householdId,
     input.assigneeUserId
@@ -2716,11 +2750,13 @@ export async function updateCommitment(
     throw new ApiError(403, "forbidden", "You cannot edit this commitment.");
   }
 
-  const assigneeUserId = await assertAssigneeInHousehold(
-    db,
-    actor.householdId,
-    input.assigneeUserId
-  );
+  const assigneeUserId = input.assigneeUserId
+    ? await assertCommitmentAssigneeInHousehold(
+        db,
+        actor.householdId,
+        input.assigneeUserId
+      )
+    : existing.assigneeUserId;
 
   await db.transaction(async (tx) => {
     await tx
@@ -2963,6 +2999,10 @@ export async function updateCommitmentReview(
       "commitment_review_not_found",
       "Commitment review not found."
     );
+  }
+
+  if (!canMutateCommitment(actor, review.commitments)) {
+    throw new ApiError(403, "forbidden", "You cannot update this commitment review.");
   }
 
   const [updated] = await db

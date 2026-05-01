@@ -222,6 +222,7 @@ type RetrospectiveState = {
 };
 
 type CommitmentDraft = {
+  assigneeUserId: string;
   checklistItems: ChecklistDraftItem[];
   targetCount: string;
   title: string;
@@ -2050,6 +2051,7 @@ export function App() {
                 <RetrospectiveView
                   actor={snapshot.actor}
                   state={retrospectiveState}
+                  users={snapshot.users}
                   onAddCheckin={(commitmentId) =>
                     runRetrospectiveMutation(
                       () =>
@@ -2069,7 +2071,9 @@ export function App() {
                     runRetrospectiveMutation(
                       () =>
                         api.updateCommitment(commitment.id, {
-                          assigneeUserId: commitment.assigneeUserId,
+                          ...(commitment.assigneeUserId
+                            ? { assigneeUserId: commitment.assigneeUserId }
+                            : {}),
                           checklistItems,
                           commitmentPeriodId: commitment.commitmentPeriodId,
                           createdInRetrospectiveId:
@@ -2088,6 +2092,7 @@ export function App() {
                     runRetrospectiveMutation(
                       () =>
                         api.createCommitment({
+                          assigneeUserId: draft.assigneeUserId,
                           createdInRetrospectiveId: retrospectiveId,
                           ...(draft.trackingKind === "checklist"
                             ? {
@@ -6045,6 +6050,7 @@ function RetrospectiveView(props: {
     rating: "met" | "mostly_met" | "partly_met" | "missed" | "skipped"
   ) => Promise<unknown>;
   state: RetrospectiveState;
+  users: UserRef[];
 }) {
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const home = props.state.home;
@@ -6181,7 +6187,9 @@ function RetrospectiveView(props: {
           onReviewCommitment={props.onReviewCommitment}
           onUpdateTemplate={props.onUpdateRetrospectiveTemplate}
           onUpdateClosureOn={props.onUpdateRetrospectiveClosure}
+          actor={props.actor}
           templates={props.state.templates}
+          users={props.users}
         />
       ) : null}
 
@@ -6190,6 +6198,7 @@ function RetrospectiveView(props: {
           onAddCheckin={props.onAddCheckin}
           onDeleteCheckin={props.onDeleteCheckin}
           onUpdateChecklist={props.onUpdateCommitmentChecklist}
+          actor={props.actor}
           period={activePeriod}
         />
 
@@ -6223,6 +6232,7 @@ function RetrospectiveView(props: {
 }
 
 function ActiveRetrospectivePanel(props: {
+  actor: Actor | null;
   detail: RetrospectiveDetail;
   onCreateCommitment: (
     retrospectiveId: string,
@@ -6248,6 +6258,7 @@ function ActiveRetrospectivePanel(props: {
   onUpdateClosureOn: (retrospectiveId: string, closureOn: string) => Promise<unknown>;
   onUpdateTemplate: (retrospectiveId: string, templateId: string) => Promise<unknown>;
   templates: RetrospectiveTemplate[];
+  users: UserRef[];
 }) {
   const [closureOnDraft, setClosureOnDraft] = useState(
     props.detail.nextCommitmentPeriodClosureOn ?? ""
@@ -6375,7 +6386,9 @@ function ActiveRetrospectivePanel(props: {
           onCreateNote={props.onCreateNote}
           onDeleteNote={props.onDeleteNote}
           onReviewCommitment={props.onReviewCommitment}
+          actor={props.actor}
           round={currentRound}
+          users={props.users}
         />
       ) : null}
 
@@ -6384,6 +6397,7 @@ function ActiveRetrospectivePanel(props: {
 }
 
 function RetrospectiveRoundBody(props: {
+  actor: Actor | null;
   commitments: Commitment[];
   detail: RetrospectiveDetail;
   notes: RetrospectiveNote[];
@@ -6407,11 +6421,14 @@ function RetrospectiveRoundBody(props: {
     rating: "met" | "mostly_met" | "partly_met" | "missed" | "skipped"
   ) => Promise<unknown>;
   round: RetrospectiveRound;
+  users: UserRef[];
 }) {
   if (props.round.kind === "commitment_capture") {
     return (
       <CommitmentCaptureForm
+        actor={props.actor}
         onSubmit={(draft) => props.onCreateCommitment(props.detail.id, draft)}
+        users={props.users}
       />
     );
   }
@@ -6462,12 +6479,17 @@ function RetrospectiveRoundBody(props: {
         const currentReview = commitment.reviews.find(
           (review) => review.retrospectiveId === props.detail.id
         );
+        const canMutateCommitment =
+          commitment.assigneeUserId !== null && commitment.assigneeUserId === props.actor?.id;
 
         return (
           <div className="retrospective-row" key={commitment.id}>
             <span>
               <strong>{commitment.title}</strong>
-              <span>{getCommitmentProgressLabel(commitment)}</span>
+              <span>
+                {commitment.assignee?.displayName ?? "Unassigned"} ·{" "}
+                {getCommitmentProgressLabel(commitment)}
+              </span>
             </span>
             <div className="retrospective-rating-row">
               {[
@@ -6484,6 +6506,7 @@ function RetrospectiveRoundBody(props: {
                     className={
                       isSelected ? "bg-black text-white hover:bg-black/80" : undefined
                     }
+                    disabled={!canMutateCommitment}
                     key={rating}
                     onClick={() =>
                       void props.onReviewCommitment(
@@ -6640,9 +6663,19 @@ function RetrospectiveNoteComposer(props: {
 }
 
 function CommitmentCaptureForm(props: {
+  actor: Actor | null;
   onSubmit: (draft: CommitmentDraft) => Promise<unknown>;
+  users: UserRef[];
 }) {
+  const assignableUsers = useMemo(
+    () => props.users.filter((user) => user.role === "admin"),
+    [props.users]
+  );
   const [draft, setDraft] = useState<CommitmentDraft>({
+    assigneeUserId:
+      assignableUsers.find((user) => user.id === props.actor?.id)?.id ??
+      assignableUsers[0]?.id ??
+      "",
     checklistItems: [],
     targetCount: "",
     title: "",
@@ -6650,8 +6683,27 @@ function CommitmentCaptureForm(props: {
     trackingKind: "binary"
   });
   const [checklistComposerValue, setChecklistComposerValue] = useState("");
+
+  useEffect(() => {
+    if (draft.assigneeUserId || assignableUsers.length === 0) {
+      return;
+    }
+
+    setDraft((current) => ({
+      ...current,
+      assigneeUserId:
+        assignableUsers.find((user) => user.id === props.actor?.id)?.id ??
+        assignableUsers[0]?.id ??
+        ""
+    }));
+  }, [assignableUsers, draft.assigneeUserId, props.actor?.id]);
+
   const resetDraft = () => {
     setDraft({
+      assigneeUserId:
+        assignableUsers.find((user) => user.id === props.actor?.id)?.id ??
+        assignableUsers[0]?.id ??
+        "",
       checklistItems: [],
       targetCount: "",
       title: "",
@@ -6681,6 +6733,7 @@ function CommitmentCaptureForm(props: {
     setChecklistComposerValue("");
   };
   const canSubmit =
+    Boolean(draft.assigneeUserId) &&
     Boolean(draft.title.trim()) &&
     (draft.trackingKind !== "checklist" ||
       draft.checklistItems.some((item) => item.body.trim()) ||
@@ -6723,6 +6776,20 @@ function CommitmentCaptureForm(props: {
         />
       </FormField>
       <div className="retrospective-form-grid">
+        <FormSelect
+          label="Assignee"
+          onValueChange={(value) =>
+            setDraft({
+              ...draft,
+              assigneeUserId: value
+            })
+          }
+          options={assignableUsers.map((user) => ({
+            label: user.displayName,
+            value: user.id
+          }))}
+          value={draft.assigneeUserId}
+        />
         <FormSelect
           label="Tracking"
           onValueChange={(value) =>
@@ -6838,6 +6905,7 @@ function CommitmentCaptureForm(props: {
 }
 
 function CommitmentTracker(props: {
+  actor: Actor | null;
   commitments: Commitment[];
   onAddCheckin: (commitmentId: string) => Promise<unknown>;
   onDeleteCheckin: (checkinId: string) => Promise<unknown>;
@@ -6847,22 +6915,38 @@ function CommitmentTracker(props: {
   ) => Promise<unknown>;
   period: CommitmentPeriod | null;
 }) {
+  const groups = groupCommitmentsByAssignee(props.commitments);
+
   return (
     <SurfaceCard className="retrospective-card">
       <p className="eyebrow">Commitments</p>
       {props.commitments.length === 0 ? (
         <EmptyStateCard message="No active commitments yet." />
       ) : (
-        <div className="retrospective-list">
-          {props.commitments.map((commitment) => (
-            <CommitmentTrackerRow
-              commitment={commitment}
-              key={commitment.id}
-              onAddCheckin={props.onAddCheckin}
-              onDeleteCheckin={props.onDeleteCheckin}
-              onUpdateChecklist={props.onUpdateChecklist}
-              period={props.period}
-            />
+        <div className="commitment-assignee-groups">
+          {groups.map((group) => (
+            <div className="commitment-assignee-group" key={group.key}>
+              <div className="commitment-assignee-heading">
+                <strong>{group.label}</strong>
+                <span>
+                  {group.commitments.length} commitment
+                  {group.commitments.length === 1 ? "" : "s"}
+                </span>
+              </div>
+              <div className="retrospective-list">
+                {group.commitments.map((commitment) => (
+                  <CommitmentTrackerRow
+                    actor={props.actor}
+                    commitment={commitment}
+                    key={commitment.id}
+                    onAddCheckin={props.onAddCheckin}
+                    onDeleteCheckin={props.onDeleteCheckin}
+                    onUpdateChecklist={props.onUpdateChecklist}
+                    period={props.period}
+                  />
+                ))}
+              </div>
+            </div>
           ))}
         </div>
       )}
@@ -6870,7 +6954,28 @@ function CommitmentTracker(props: {
   );
 }
 
+function groupCommitmentsByAssignee(commitments: Commitment[]) {
+  const groups = new Map<
+    string,
+    { commitments: Commitment[]; key: string; label: string }
+  >();
+
+  for (const commitment of commitments) {
+    const key = commitment.assigneeUserId ?? "unassigned";
+    const label = commitment.assignee?.displayName ?? "Unassigned";
+    const group = groups.get(key) ?? { commitments: [], key, label };
+
+    group.commitments.push(commitment);
+    groups.set(key, group);
+  }
+
+  return [...groups.values()].sort((left, right) =>
+    left.label.localeCompare(right.label)
+  );
+}
+
 function CommitmentTrackerRow(props: {
+  actor: Actor | null;
   commitment: Commitment;
   onAddCheckin: (commitmentId: string) => Promise<unknown>;
   onDeleteCheckin: (checkinId: string) => Promise<unknown>;
@@ -6900,7 +7005,10 @@ function CommitmentTrackerRow(props: {
     slotCount,
     sortedCheckins.reduce((sum, checkin) => sum + checkin.amount, 0)
   );
-  const canMutate = props.commitment.status === "active";
+  const canMutate =
+    props.commitment.status === "active" &&
+    props.commitment.assigneeUserId !== null &&
+    props.commitment.assigneeUserId === props.actor?.id;
   const isBinaryFinished =
     props.commitment.trackingKind === "binary" && latestCheckin !== null;
   const updateChecklist = (
@@ -6937,7 +7045,10 @@ function CommitmentTrackerRow(props: {
     <div className="retrospective-row commitment-tracker-row">
       <span>
         <strong>{props.commitment.title}</strong>
-        <span>{getCommitmentProgressLabel(props.commitment)}</span>
+        <span>
+          {canMutate ? "Yours" : (props.commitment.assignee?.displayName ?? "Unassigned")} ·{" "}
+          {getCommitmentProgressLabel(props.commitment)}
+        </span>
       </span>
       {isCountGrid ? (
         <div className="commitment-grid-wrap">

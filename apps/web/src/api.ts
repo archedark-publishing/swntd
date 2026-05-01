@@ -552,7 +552,7 @@ export const api = {
     });
   },
   createCommitment(input: {
-    assigneeUserId?: string | null;
+    assigneeUserId: string;
     checklistItems?: Array<{ body: string; isCompleted?: boolean }>;
     commitmentPeriodId?: string | null;
     createdInRetrospectiveId?: string | null;
@@ -955,7 +955,7 @@ export const api = {
   updateCommitment(
     commitmentId: string,
     input: {
-      assigneeUserId?: string | null;
+      assigneeUserId?: string;
       checklistItems?: Array<{ body: string; isCompleted?: boolean }>;
       commitmentPeriodId?: string | null;
       createdInRetrospectiveId?: string | null;

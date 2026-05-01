@@ -866,6 +866,29 @@ a {
   align-items: flex-start;
 }
 
+.commitment-assignee-groups,
+.commitment-assignee-group {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.commitment-assignee-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-inline: 0.15rem;
+  color: rgb(47 33 22 / 0.76);
+}
+
+.commitment-assignee-heading strong {
+  font-size: 0.95rem;
+}
+
+.commitment-assignee-heading span {
+  font-size: 0.82rem;
+}
+
 .commitment-grid-wrap {
   display: grid;
   grid-template-columns: minmax(0, auto) auto;

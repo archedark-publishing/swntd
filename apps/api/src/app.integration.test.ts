@@ -207,6 +207,7 @@ type RetrospectiveResponse = {
 
 type CommitmentResponse = {
   item: {
+    assigneeUserId: string | null;
     commitmentPeriodId: string | null;
     id: string;
     status?: string;
@@ -293,6 +294,28 @@ async function createActiveCommitmentPeriod(periodStartOn: string, closureOn: st
       householdId: admin.householdId,
       periodStartOn
     });
+  } finally {
+    client.close();
+  }
+}
+
+async function getAdminUserId(email: string) {
+  const { client, db } = await createDatabase();
+
+  try {
+    const [admin] = await db
+      .select({
+        id: users.id
+      })
+      .from(users)
+      .where(eq(users.email, email))
+      .limit(1);
+
+    if (!admin) {
+      throw new Error(`Admin user ${email} was not seeded.`);
+    }
+
+    return admin.id;
   } finally {
     client.close();
   }
@@ -1153,6 +1176,7 @@ describe("Phase 3 API", () => {
   it("supports retrospective notes, reveal, commitments, and finalization", async () => {
     const adminHeaders = trustedHeader("admin1@example.com");
     const otherAdminHeaders = trustedHeader("admin2@example.com");
+    const adminUserId = await getAdminUserId("admin1@example.com");
 
     const templatesResponse = await app.request("/api/v1/retrospective-templates", {
       headers: adminHeaders
@@ -1388,6 +1412,7 @@ describe("Phase 3 API", () => {
       "/api/v1/commitments",
       jsonRequest({
         body: {
+          assigneeUserId: adminUserId,
           createdInRetrospectiveId: createdRetrospective.item.id,
           targetCount: 3,
           title: "Read together",
@@ -1401,6 +1426,51 @@ describe("Phase 3 API", () => {
     expect(commitmentResponse.status).toBe(201);
     const commitment = await parseJson<CommitmentResponse>(commitmentResponse);
     expect(commitment.item.commitmentPeriodId).toBeNull();
+    expect(commitment.item.assigneeUserId).toBe(adminUserId);
+
+    const unassignedCommitmentResponse = await app.request(
+      "/api/v1/commitments",
+      jsonRequest({
+        body: {
+          createdInRetrospectiveId: createdRetrospective.item.id,
+          title: "No owner",
+          trackingInterval: "none",
+          trackingKind: "binary"
+        },
+        headers: adminHeaders,
+        method: "POST"
+      })
+    );
+    expect(unassignedCommitmentResponse.status).toBe(400);
+
+    const otherAdminCheckinResponse = await app.request(
+      `/api/v1/commitments/${commitment.item.id}/checkins`,
+      jsonRequest({
+        body: {
+          amount: 1,
+          checkinOn: "2026-02-01"
+        },
+        headers: otherAdminHeaders,
+        method: "POST"
+      })
+    );
+    expect(otherAdminCheckinResponse.status).toBe(403);
+
+    const otherAdminUpdateResponse = await app.request(
+      `/api/v1/commitments/${commitment.item.id}`,
+      jsonRequest({
+        body: {
+          assigneeUserId: adminUserId,
+          targetCount: 3,
+          title: "Read together, renamed by someone else",
+          trackingInterval: "weekly",
+          trackingKind: "count_per_period"
+        },
+        headers: otherAdminHeaders,
+        method: "PATCH"
+      })
+    );
+    expect(otherAdminUpdateResponse.status).toBe(403);
 
     const checkinResponse = await app.request(
       `/api/v1/commitments/${commitment.item.id}/checkins`,

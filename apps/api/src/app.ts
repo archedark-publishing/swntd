@@ -307,8 +307,7 @@ const commitmentListQuerySchema = z.object({
   status: commitmentStatusSchema.optional()
 });
 
-const commitmentSchema = z.object({
-  assigneeUserId: z.string().trim().min(1).nullable().optional(),
+const commitmentBaseSchema = z.object({
   checklistItems: z
     .array(
       z.object({
@@ -325,6 +324,12 @@ const commitmentSchema = z.object({
   title: z.string().trim().min(1),
   trackingInterval: commitmentTrackingIntervalSchema.optional(),
   trackingKind: commitmentTrackingKindSchema
+});
+const createCommitmentSchema = commitmentBaseSchema.extend({
+  assigneeUserId: z.string().trim().min(1)
+});
+const updateCommitmentSchema = commitmentBaseSchema.extend({
+  assigneeUserId: z.string().trim().min(1).optional()
 });
 
 const commitmentCheckinSchema = z.object({
@@ -819,13 +824,13 @@ export function createApp() {
   });
 
   app.post("/api/v1/commitments", async (c) => {
-    const input = await parseJsonBody(c, commitmentSchema);
+    const input = await parseJsonBody(c, createCommitmentSchema);
 
     return jsonOk(c, await createCommitment(c.var.db, c.var.actor, input), 201);
   });
 
   app.patch("/api/v1/commitments/:commitmentId", async (c) => {
-    const input = await parseJsonBody(c, commitmentSchema);
+    const input = await parseJsonBody(c, updateCommitmentSchema);
 
     return jsonOk(
       c,

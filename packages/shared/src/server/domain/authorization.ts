@@ -25,7 +25,7 @@ type RetrospectiveNoteAccessRecord = Pick<
   "authorUserId" | "householdId" | "visibilityState"
 >;
 
-type CommitmentAccessRecord = Pick<Commitment, "householdId">;
+type CommitmentAccessRecord = Pick<Commitment, "assigneeUserId" | "householdId">;
 
 export function isAdminActor(actor: AuthenticatedActor) {
   return actor.role === "admin";
@@ -132,5 +132,5 @@ export function canMutateCommitment(
   actor: AuthenticatedActor,
   commitment: CommitmentAccessRecord
 ) {
-  return canReadCommitment(actor, commitment);
+  return canReadCommitment(actor, commitment) && commitment.assigneeUserId === actor.id;
 }
