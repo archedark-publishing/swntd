@@ -112,8 +112,12 @@ export type Settings = {
   defaultCalendarExportKind: "google" | "ics";
   defaultTimezone: string;
   doneArchiveAfterDays: number;
+  finalizedRetrospectiveEditPolicy: "locked" | "editable";
   nearDueThresholdDays: number;
+  defaultRetrospectiveTemplateId: string | null;
   householdId: string;
+  retrospectiveCadence: "weekly" | "monthly" | "quarterly" | "custom";
+  retrospectiveCadenceInterval: number;
   updatedAt: string;
 };
 
@@ -138,6 +142,212 @@ export type RecurringTemplate = {
   recurrenceInterval: number;
   title: string;
   updatedAt: string;
+};
+
+export type RetrospectiveRoundKind =
+  | "commitment_review"
+  | "task_lookback"
+  | "notes"
+  | "commitment_capture";
+export type RetrospectiveEntryPhase =
+  | "commitment_period"
+  | "retrospective"
+  | "both";
+export type RetrospectiveNoteWritePhase = "commitment_period" | "retrospective";
+export type RetrospectivePrivacy = "shared" | "private_until_round" | "private";
+export type RetrospectiveNoteVisibility =
+  | "shared"
+  | "private_until_round"
+  | "private"
+  | "revealed";
+export type CommitmentTrackingKind =
+  | "binary"
+  | "count_per_period"
+  | "checklist"
+  | "freeform";
+export type CommitmentTrackingInterval = "none" | "daily" | "weekly" | "monthly";
+export type CommitmentStatus = "active" | "reviewed" | "archived";
+export type CommitmentReviewRating =
+  | "met"
+  | "mostly_met"
+  | "partly_met"
+  | "missed"
+  | "skipped";
+
+export type RetrospectiveTemplateRound = {
+  configJson: string;
+  createdAt: string;
+  entryPhase: RetrospectiveEntryPhase | null;
+  id: string;
+  kind: RetrospectiveRoundKind;
+  privacy: RetrospectivePrivacy | null;
+  prompt: string;
+  sortOrder: number;
+  title: string;
+  updatedAt: string;
+};
+
+export type RetrospectiveTemplate = {
+  createdAt: string;
+  description: string;
+  id: string;
+  isSystem: boolean;
+  name: string;
+  rounds: RetrospectiveTemplateRound[];
+  updatedAt: string;
+};
+
+export type RetrospectiveTemplateRoundInput = {
+  configJson?: string;
+  entryPhase?: RetrospectiveEntryPhase | null;
+  kind: RetrospectiveRoundKind;
+  privacy?: RetrospectivePrivacy | null;
+  prompt?: string;
+  title: string;
+};
+
+export type RetrospectiveTemplateInput = {
+  description?: string;
+  name: string;
+  rounds: RetrospectiveTemplateRoundInput[];
+};
+
+export type CommitmentPeriod = {
+  closureOn: string;
+  createdAt: string;
+  householdId: string;
+  id: string;
+  openedByRetrospectiveId: string | null;
+  periodStartOn: string;
+  reviewedByRetrospectiveId: string | null;
+  status: "active" | "closed" | "reviewed";
+  updatedAt: string;
+};
+
+export type RetrospectiveRound = {
+  completedAt: string | null;
+  configJson: string;
+  createdAt: string;
+  entryPhase: RetrospectiveEntryPhase | null;
+  id: string;
+  kind: RetrospectiveRoundKind;
+  privacy: RetrospectivePrivacy | null;
+  prompt: string;
+  retrospectiveId: string;
+  sortOrder: number;
+  sourceTemplateRoundId: string | null;
+  startedAt: string | null;
+  summary: string;
+  title: string;
+  updatedAt: string;
+};
+
+export type Retrospective = {
+  commitmentPeriodId: string;
+  createdAt: string;
+  createdByUserId: string;
+  currentRoundId: string | null;
+  finalizedAt: string | null;
+  householdId: string;
+  id: string;
+  nextCommitmentPeriodClosureOn: string | null;
+  nextCommitmentPeriodStartOn: string | null;
+  rounds: RetrospectiveRound[];
+  startedAt: string | null;
+  status: "draft" | "active" | "finalized";
+  templateId: string;
+  title: string;
+  updatedAt: string;
+  updatedByUserId: string;
+};
+
+export type RetrospectiveNote = {
+  author: UserRef | null;
+  authorUserId: string;
+  body: string;
+  commitmentPeriodId: string;
+  createdAt: string;
+  entryPhase: RetrospectiveNoteWritePhase;
+  householdId: string;
+  id: string;
+  retrospectiveId: string | null;
+  revealedAt: string | null;
+  revealedInRetrospectiveId: string | null;
+  revealedInRoundId: string | null;
+  roundId: string | null;
+  sortOrder: number;
+  templateRoundId: string | null;
+  updatedAt: string;
+  visibilityState: RetrospectiveNoteVisibility;
+};
+
+export type Commitment = {
+  assignee: UserRef | null;
+  assigneeUserId: string | null;
+  checkins: Array<{
+    actor: UserRef | null;
+    amount: number;
+    checkinOn: string;
+    createdAt: string;
+    id: string;
+    note: string;
+    updatedAt: string;
+  }>;
+  checklistItems: Array<{
+    body: string;
+    createdAt: string;
+    id: string;
+    isCompleted: boolean;
+    sortOrder: number;
+    updatedAt: string;
+  }>;
+  commitmentPeriodId: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  createdByUserId: string;
+  createdInRetrospectiveId: string | null;
+  description: string;
+  householdId: string;
+  id: string;
+  status: CommitmentStatus;
+  targetCount: number | null;
+  title: string;
+  trackingInterval: CommitmentTrackingInterval;
+  trackingKind: CommitmentTrackingKind;
+  reviews: CommitmentReview[];
+  updatedAt: string;
+  updatedByUserId: string;
+};
+
+export type RetrospectiveHome = {
+  activePeriod: CommitmentPeriod | null;
+  commitments: Commitment[];
+  daysUntilClosure: number | null;
+  notes: RetrospectiveNote[];
+  openRetrospective: Retrospective | null;
+  recentRetrospectives: Retrospective[];
+  settings: Settings | null;
+};
+
+export type RetrospectiveDetail = Retrospective & {
+  commitments: Commitment[];
+  notes: RetrospectiveNote[];
+  period: CommitmentPeriod | null;
+  taskLookback: TaskListItem[];
+};
+
+export type CommitmentReview = {
+  commitmentId: string;
+  createdAt: string;
+  createdBy: UserRef | null;
+  createdByUserId: string;
+  id: string;
+  note: string;
+  rating: CommitmentReviewRating;
+  retrospectiveId: string;
+  roundId: string;
+  updatedAt: string;
+  updatedByUserId: string;
 };
 
 export type BootstrapContext = {
@@ -341,6 +551,129 @@ export const api = {
       method: "POST"
     });
   },
+  createCommitment(input: {
+    assigneeUserId: string;
+    checklistItems?: Array<{ body: string; isCompleted?: boolean }>;
+    commitmentPeriodId?: string | null;
+    createdInRetrospectiveId?: string | null;
+    description?: string;
+    targetCount?: number | null;
+    title: string;
+    trackingInterval?: CommitmentTrackingInterval;
+    trackingKind: CommitmentTrackingKind;
+  }) {
+    return request<{ item: Commitment }>("/api/v1/commitments", {
+      body: JSON.stringify(input),
+      headers: {
+        "content-type": "application/json"
+      },
+      method: "POST"
+    });
+  },
+  createCommitmentCheckin(
+    commitmentId: string,
+    input: { amount?: number; checkinOn: string; note?: string }
+  ) {
+    return request<{ item: { amount: number; checkinOn: string; id: string } }>(
+      `/api/v1/commitments/${commitmentId}/checkins`,
+      {
+        body: JSON.stringify(input),
+        headers: {
+          "content-type": "application/json"
+        },
+        method: "POST"
+      }
+    );
+  },
+  deleteCommitmentCheckin(checkinId: string) {
+    return request<{ item: { id: string } }>(
+      `/api/v1/commitment-checkins/${checkinId}`,
+      {
+        method: "DELETE"
+      }
+    );
+  },
+  createCommitmentReview(
+    commitmentId: string,
+    input: {
+      note?: string;
+      rating: CommitmentReviewRating;
+      retrospectiveId: string;
+      roundId: string;
+    }
+  ) {
+    return request<{ item: CommitmentReview }>(
+      `/api/v1/commitments/${commitmentId}/reviews`,
+      {
+        body: JSON.stringify(input),
+        headers: {
+          "content-type": "application/json"
+        },
+        method: "POST"
+      }
+    );
+  },
+  createRetrospective(input: {
+    closureOn?: string;
+    templateId?: string;
+    title?: string;
+  }) {
+    return request<{ item: RetrospectiveDetail }>("/api/v1/retrospectives", {
+      body: JSON.stringify(input),
+      headers: {
+        "content-type": "application/json"
+      },
+      method: "POST"
+    });
+  },
+  updateRetrospective(
+    retrospectiveId: string,
+    input: { closureOn?: string; templateId?: string }
+  ) {
+    return request<{ item: RetrospectiveDetail }>(
+      `/api/v1/retrospectives/${retrospectiveId}`,
+      {
+        body: JSON.stringify(input),
+        headers: {
+          "content-type": "application/json"
+        },
+        method: "PATCH"
+      }
+    );
+  },
+  createRetrospectiveTemplate(input: RetrospectiveTemplateInput) {
+    return request<{ item: RetrospectiveTemplate }>("/api/v1/retrospective-templates", {
+      body: JSON.stringify(input),
+      headers: {
+        "content-type": "application/json"
+      },
+      method: "POST"
+    });
+  },
+  createRetrospectiveNote(input: {
+    body: string;
+    commitmentPeriodId: string;
+    entryPhase: RetrospectiveNoteWritePhase;
+    retrospectiveId?: string | null;
+    roundId?: string | null;
+    templateRoundId?: string | null;
+  }) {
+    return request<{ item: RetrospectiveNote }>("/api/v1/retrospective-notes", {
+      body: JSON.stringify(input),
+      headers: {
+        "content-type": "application/json"
+      },
+      method: "POST"
+    });
+  },
+  deleteRetrospectiveNote(noteId: string) {
+    return request<{ item: { id: string } }>(
+      `/api/v1/retrospective-notes/${noteId}`,
+      {
+        method: "DELETE"
+      }
+    );
+  },
   createTask(input: {
     aiAssistanceEnabled: boolean;
     assigneeUserId: string | null;
@@ -392,6 +725,14 @@ export const api = {
   getSettings() {
     return request<{ settings: Settings }>("/api/v1/settings");
   },
+  getRetrospective(retrospectiveId: string) {
+    return request<{ item: RetrospectiveDetail }>(
+      `/api/v1/retrospectives/${retrospectiveId}`
+    );
+  },
+  getRetrospectiveHome() {
+    return request<RetrospectiveHome>("/api/v1/retrospective-home");
+  },
   getTask(taskId: string) {
     return request<{ item: TaskDetail }>(`/api/v1/tasks/${taskId}`);
   },
@@ -400,6 +741,32 @@ export const api = {
   },
   listRecurringTemplates() {
     return request<{ items: RecurringTemplate[] }>("/api/v1/recurring-templates");
+  },
+  listRetrospectiveTemplates() {
+    return request<{ items: RetrospectiveTemplate[] }>(
+      "/api/v1/retrospective-templates"
+    );
+  },
+  listRetrospectives(params: {
+    limit?: number;
+    offset?: number;
+    status?: Retrospective["status"];
+  } = {}) {
+    const url = new URL("/api/v1/retrospectives", window.location.origin);
+
+    if (params.limit) {
+      url.searchParams.set("limit", String(params.limit));
+    }
+
+    if (params.offset) {
+      url.searchParams.set("offset", String(params.offset));
+    }
+
+    if (params.status) {
+      url.searchParams.set("status", params.status);
+    }
+
+    return request<{ items: Retrospective[] }>(`${url.pathname}${url.search}`);
   },
   listTasks(params: {
     archived?: "exclude" | "include" | "only";
@@ -475,6 +842,38 @@ export const api = {
       method: "POST"
     });
   },
+  enterRetrospectiveRound(retrospectiveId: string, roundId: string) {
+    return request<{ item: RetrospectiveDetail }>(
+      `/api/v1/retrospectives/${retrospectiveId}/rounds/${roundId}/enter`,
+      {
+        method: "POST"
+      }
+    );
+  },
+  completeRetrospectiveRound(retrospectiveId: string, roundId: string) {
+    return request<{ item: RetrospectiveDetail }>(
+      `/api/v1/retrospectives/${retrospectiveId}/rounds/${roundId}/complete`,
+      {
+        method: "POST"
+      }
+    );
+  },
+  finalizeRetrospective(retrospectiveId: string) {
+    return request<{ item: RetrospectiveDetail }>(
+      `/api/v1/retrospectives/${retrospectiveId}/finalize`,
+      {
+        method: "POST"
+      }
+    );
+  },
+  startRetrospective(retrospectiveId: string) {
+    return request<{ item: RetrospectiveDetail }>(
+      `/api/v1/retrospectives/${retrospectiveId}/start`,
+      {
+        method: "POST"
+      }
+    );
+  },
   unarchiveTask(taskId: string, expectedRevision: number) {
     return request<{ item: TaskDetail }>(`/api/v1/tasks/${taskId}/unarchive`, {
       body: JSON.stringify({ expectedRevision }),
@@ -520,11 +919,30 @@ export const api = {
       }
     );
   },
+  updateRetrospectiveTemplate(
+    templateId: string,
+    input: RetrospectiveTemplateInput
+  ) {
+    return request<{ item: RetrospectiveTemplate }>(
+      `/api/v1/retrospective-templates/${templateId}`,
+      {
+        body: JSON.stringify(input),
+        headers: {
+          "content-type": "application/json"
+        },
+        method: "PATCH"
+      }
+    );
+  },
   updateSettings(input: {
     defaultCalendarExportKind?: "google" | "ics";
     defaultTimezone?: string;
     doneArchiveAfterDays?: number;
+    finalizedRetrospectiveEditPolicy?: "locked" | "editable";
     nearDueThresholdDays?: number;
+    retrospectiveCadence?: "weekly" | "monthly" | "quarterly" | "custom";
+    retrospectiveCadenceInterval?: number;
+    defaultRetrospectiveTemplateId?: string | null;
   }) {
     return request<{ settings: Settings }>("/api/v1/settings", {
       body: JSON.stringify(input),
@@ -533,6 +951,56 @@ export const api = {
       },
       method: "PATCH"
     });
+  },
+  updateCommitment(
+    commitmentId: string,
+    input: {
+      assigneeUserId?: string;
+      checklistItems?: Array<{ body: string; isCompleted?: boolean }>;
+      commitmentPeriodId?: string | null;
+      createdInRetrospectiveId?: string | null;
+      description?: string;
+      status?: CommitmentStatus;
+      targetCount?: number | null;
+      title: string;
+      trackingInterval?: CommitmentTrackingInterval;
+      trackingKind: CommitmentTrackingKind;
+    }
+  ) {
+    return request<{ item: Commitment }>(`/api/v1/commitments/${commitmentId}`, {
+      body: JSON.stringify(input),
+      headers: {
+        "content-type": "application/json"
+      },
+      method: "PATCH"
+    });
+  },
+  updateCommitmentReview(
+    reviewId: string,
+    input: { note?: string; rating: CommitmentReviewRating }
+  ) {
+    return request<{ item: CommitmentReview }>(
+      `/api/v1/commitment-reviews/${reviewId}`,
+      {
+        body: JSON.stringify(input),
+        headers: {
+          "content-type": "application/json"
+        },
+        method: "PATCH"
+      }
+    );
+  },
+  updateRetrospectiveNote(noteId: string, input: { body: string }) {
+    return request<{ item: RetrospectiveNote }>(
+      `/api/v1/retrospective-notes/${noteId}`,
+      {
+        body: JSON.stringify(input),
+        headers: {
+          "content-type": "application/json"
+        },
+        method: "PATCH"
+      }
+    );
   },
   updateUser(
     userId: string,

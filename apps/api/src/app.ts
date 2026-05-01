@@ -2,6 +2,18 @@ import type { Context } from "hono";
 import { Hono } from "hono";
 import { z } from "zod";
 import { taskStatuses } from "@swntd/shared/server/domain/tasks";
+import {
+  commitmentStatuses,
+  commitmentReviewRatings,
+  commitmentTrackingIntervals,
+  commitmentTrackingKinds,
+  finalizedRetrospectiveEditPolicies,
+  retrospectiveNoteEntryPhases,
+  retrospectiveNoteWriteEntryPhases,
+  retrospectiveCadences,
+  retrospectiveRoundKinds,
+  retrospectiveStatuses
+} from "@swntd/shared/server/domain/retrospectives";
 import type { AuthenticatedActor } from "@swntd/shared/server/domain/authorization";
 import type { DatabaseClient } from "./db/client";
 import { createDatabase } from "./db/client";
@@ -21,33 +33,56 @@ import {
   addCommentToTask,
   addUploadToTask,
   archiveTask,
+  completeRetrospectiveRound,
+  createCommitment,
+  createCommitmentCheckin,
+  createCommitmentReview,
   createHouseholdUser,
   createLabel,
   createRecurringTemplate,
+  createRetrospective,
+  createRetrospectiveNote,
+  createRetrospectiveTemplate,
   createTask,
   claimBootstrapOwnership,
   deleteArchivedTask,
   deleteChecklistItemFromTask,
+  deleteCommitmentCheckin,
   deleteLabel,
+  deleteRetrospectiveNote,
   getBootstrapContext,
   getCurrentActor,
   getRecurringTemplate,
+  getRetrospectiveDetail,
+  getRetrospectiveHome,
   getSettings,
   getTaskAttachmentDownload,
   getTaskDetail,
   issueServiceTokenForUser,
+  listCommitments,
   listHouseholdUsers,
   listLabels,
   listRecurringTemplates,
+  listRetrospectiveNotes,
+  listRetrospectives,
+  listRetrospectiveTemplates,
   listServiceTokensForUser,
   listTasks,
   removeHouseholdUser,
   reorderTask,
   revokeServiceToken,
   setChecklistItemCompletion,
+  enterRetrospectiveRound,
+  finalizeRetrospective,
+  startRetrospective,
   transitionTask,
   unarchiveTask,
+  updateCommitment,
+  updateCommitmentReview,
   updateLabel,
+  updateRetrospective,
+  updateRetrospectiveNote,
+  updateRetrospectiveTemplate,
   updateHouseholdUser,
   updateRecurringTemplate,
   updateSettings,
@@ -164,9 +199,15 @@ const issueServiceTokenSchema = z.object({
 const settingsSchema = z
   .object({
     defaultCalendarExportKind: z.enum(["google", "ics"]).optional(),
+    defaultRetrospectiveTemplateId: z.string().trim().min(1).nullable().optional(),
     defaultTimezone: z.string().trim().min(1).optional(),
     doneArchiveAfterDays: z.number().int().positive().optional(),
-    nearDueThresholdDays: z.number().int().positive().optional()
+    finalizedRetrospectiveEditPolicy: z
+      .enum(finalizedRetrospectiveEditPolicies)
+      .optional(),
+    nearDueThresholdDays: z.number().int().positive().optional(),
+    retrospectiveCadence: z.enum(retrospectiveCadences).optional(),
+    retrospectiveCadenceInterval: z.number().int().positive().optional()
   })
   .refine((value) => Object.keys(value).length > 0, {
     message: "At least one setting must be updated."
@@ -190,6 +231,123 @@ const recurringTemplateSchema = z.object({
   recurrenceCadence: z.enum(["daily", "weekly", "monthly"]),
   recurrenceInterval: z.number().int().positive(),
   title: z.string().trim().min(1)
+});
+
+const retrospectiveStatusSchema = z.enum(retrospectiveStatuses);
+const commitmentStatusSchema = z.enum(commitmentStatuses);
+const commitmentTrackingKindSchema = z.enum(commitmentTrackingKinds);
+const commitmentTrackingIntervalSchema = z.enum(commitmentTrackingIntervals);
+const commitmentReviewRatingSchema = z.enum(commitmentReviewRatings);
+const retrospectiveTemplateRoundKindSchema = z.enum(retrospectiveRoundKinds);
+const retrospectiveNoteEntryPhaseSchema = z.enum(retrospectiveNoteEntryPhases);
+const retrospectivePrivacySchema = z.enum([
+  "shared",
+  "private_until_round",
+  "private"
+]);
+const retrospectiveNoteWriteEntryPhaseSchema = z.enum(
+  retrospectiveNoteWriteEntryPhases
+);
+
+const retrospectiveListQuerySchema = z.object({
+  limit: z.coerce.number().int().positive().max(100).default(50),
+  offset: z.coerce.number().int().nonnegative().default(0),
+  status: retrospectiveStatusSchema.optional()
+});
+
+const createRetrospectiveSchema = z.object({
+  closureOn: isoDateSchema.optional(),
+  templateId: z.string().trim().min(1).optional(),
+  title: z.string().trim().min(1).optional()
+});
+
+const updateRetrospectiveSchema = z.object({
+  closureOn: isoDateSchema.optional(),
+  templateId: z.string().trim().min(1).optional()
+});
+
+const retrospectiveTemplateRoundSchema = z.object({
+  configJson: z.string().optional(),
+  entryPhase: retrospectiveNoteEntryPhaseSchema.nullable().optional(),
+  kind: retrospectiveTemplateRoundKindSchema,
+  privacy: retrospectivePrivacySchema.nullable().optional(),
+  prompt: z.string().optional(),
+  title: z.string().trim().min(1)
+});
+
+const retrospectiveTemplateSchema = z.object({
+  description: z.string().optional(),
+  name: z.string().trim().min(1),
+  rounds: z.array(retrospectiveTemplateRoundSchema).min(1)
+});
+
+const retrospectiveNoteListQuerySchema = z.object({
+  commitmentPeriodId: z.string().trim().min(1).optional(),
+  retrospectiveId: z.string().trim().min(1).optional(),
+  roundId: z.string().trim().min(1).optional(),
+  templateRoundId: z.string().trim().min(1).optional()
+});
+
+const createRetrospectiveNoteSchema = z.object({
+  body: z.string().trim().min(1),
+  commitmentPeriodId: z.string().trim().min(1),
+  entryPhase: retrospectiveNoteWriteEntryPhaseSchema,
+  retrospectiveId: z.string().trim().min(1).nullable().optional(),
+  roundId: z.string().trim().min(1).nullable().optional(),
+  templateRoundId: z.string().trim().min(1).nullable().optional()
+});
+
+const updateRetrospectiveNoteSchema = z.object({
+  body: z.string().trim().min(1)
+});
+
+const commitmentListQuerySchema = z.object({
+  assigneeUserId: z.string().trim().min(1).optional(),
+  commitmentPeriodId: z.string().trim().min(1).optional(),
+  status: commitmentStatusSchema.optional()
+});
+
+const commitmentBaseSchema = z.object({
+  checklistItems: z
+    .array(
+      z.object({
+        body: z.string().trim().min(1),
+        isCompleted: z.boolean().optional()
+      })
+    )
+    .optional(),
+  commitmentPeriodId: z.string().trim().min(1).nullable().optional(),
+  createdInRetrospectiveId: z.string().trim().min(1).nullable().optional(),
+  description: z.string().optional(),
+  status: commitmentStatusSchema.optional(),
+  targetCount: z.number().int().nonnegative().nullable().optional(),
+  title: z.string().trim().min(1),
+  trackingInterval: commitmentTrackingIntervalSchema.optional(),
+  trackingKind: commitmentTrackingKindSchema
+});
+const createCommitmentSchema = commitmentBaseSchema.extend({
+  assigneeUserId: z.string().trim().min(1)
+});
+const updateCommitmentSchema = commitmentBaseSchema.extend({
+  assigneeUserId: z.string().trim().min(1).optional()
+});
+
+const commitmentCheckinSchema = z.object({
+  amount: z.number().int().positive().optional(),
+  checkinOn: isoDateSchema,
+  note: z.string().optional()
+});
+
+const commitmentReviewSchema = z.object({
+  note: z.string().optional(),
+  rating: commitmentReviewRatingSchema,
+  retrospectiveId: z.string().trim().min(1),
+  roundId: z.string().trim().min(1)
+});
+
+const updateCommitmentReviewSchema = z.object({
+  note: z.string().optional(),
+  rating: commitmentReviewRatingSchema
 });
 
 const archiveSchema = z.object({
@@ -499,6 +657,247 @@ export function createApp() {
     );
   });
 
+  app.get("/api/v1/retrospective-home", async (c) =>
+    jsonOk(c, await getRetrospectiveHome(c.var.db, c.var.actor))
+  );
+
+  app.get("/api/v1/retrospective-templates", async (c) =>
+    jsonOk(c, await listRetrospectiveTemplates(c.var.db, c.var.actor))
+  );
+
+  app.post("/api/v1/retrospective-templates", async (c) => {
+    const input = await parseJsonBody(c, retrospectiveTemplateSchema);
+
+    return jsonOk(
+      c,
+      await createRetrospectiveTemplate(c.var.db, c.var.actor, input),
+      201
+    );
+  });
+
+  app.patch("/api/v1/retrospective-templates/:templateId", async (c) => {
+    const input = await parseJsonBody(c, retrospectiveTemplateSchema);
+
+    return jsonOk(
+      c,
+      await updateRetrospectiveTemplate(
+        c.var.db,
+        c.var.actor,
+        c.req.param("templateId"),
+        input
+      )
+    );
+  });
+
+  app.get("/api/v1/retrospectives", async (c) => {
+    const query = parseQuery(c, retrospectiveListQuerySchema);
+
+    return jsonOk(c, await listRetrospectives(c.var.db, c.var.actor, query));
+  });
+
+  app.post("/api/v1/retrospectives", async (c) => {
+    const input = await parseJsonBody(c, createRetrospectiveSchema);
+
+    return jsonOk(
+      c,
+      await createRetrospective(c.var.db, c.var.actor, input),
+      201
+    );
+  });
+
+  app.get("/api/v1/retrospectives/:retrospectiveId", async (c) =>
+    jsonOk(
+      c,
+      await getRetrospectiveDetail(
+        c.var.db,
+        c.var.actor,
+        c.req.param("retrospectiveId")
+      )
+    )
+  );
+
+  app.patch("/api/v1/retrospectives/:retrospectiveId", async (c) => {
+    const input = await parseJsonBody(c, updateRetrospectiveSchema);
+
+    return jsonOk(
+      c,
+      await updateRetrospective(
+        c.var.db,
+        c.var.actor,
+        c.req.param("retrospectiveId"),
+        input
+      )
+    );
+  });
+
+  app.post("/api/v1/retrospectives/:retrospectiveId/start", async (c) =>
+    jsonOk(
+      c,
+      await startRetrospective(
+        c.var.db,
+        c.var.actor,
+        c.req.param("retrospectiveId")
+      )
+    )
+  );
+
+  app.post("/api/v1/retrospectives/:retrospectiveId/rounds/:roundId/enter", async (c) =>
+    jsonOk(
+      c,
+      await enterRetrospectiveRound(
+        c.var.db,
+        c.var.actor,
+        c.req.param("retrospectiveId"),
+        c.req.param("roundId")
+      )
+    )
+  );
+
+  app.post("/api/v1/retrospectives/:retrospectiveId/rounds/:roundId/complete", async (c) =>
+    jsonOk(
+      c,
+      await completeRetrospectiveRound(
+        c.var.db,
+        c.var.actor,
+        c.req.param("retrospectiveId"),
+        c.req.param("roundId")
+      )
+    )
+  );
+
+  app.post("/api/v1/retrospectives/:retrospectiveId/finalize", async (c) =>
+    jsonOk(
+      c,
+      await finalizeRetrospective(
+        c.var.db,
+        c.var.actor,
+        c.req.param("retrospectiveId")
+      )
+    )
+  );
+
+  app.get("/api/v1/retrospective-notes", async (c) => {
+    const query = parseQuery(c, retrospectiveNoteListQuerySchema);
+
+    return jsonOk(c, await listRetrospectiveNotes(c.var.db, c.var.actor, query));
+  });
+
+  app.post("/api/v1/retrospective-notes", async (c) => {
+    const input = await parseJsonBody(c, createRetrospectiveNoteSchema);
+
+    return jsonOk(
+      c,
+      await createRetrospectiveNote(c.var.db, c.var.actor, input),
+      201
+    );
+  });
+
+  app.patch("/api/v1/retrospective-notes/:noteId", async (c) => {
+    const input = await parseJsonBody(c, updateRetrospectiveNoteSchema);
+
+    return jsonOk(
+      c,
+      await updateRetrospectiveNote(
+        c.var.db,
+        c.var.actor,
+        c.req.param("noteId"),
+        input
+      )
+    );
+  });
+
+  app.delete("/api/v1/retrospective-notes/:noteId", async (c) =>
+    jsonOk(
+      c,
+      await deleteRetrospectiveNote(
+        c.var.db,
+        c.var.actor,
+        c.req.param("noteId")
+      )
+    )
+  );
+
+  app.get("/api/v1/commitments", async (c) => {
+    const query = parseQuery(c, commitmentListQuerySchema);
+
+    return jsonOk(c, await listCommitments(c.var.db, c.var.actor, query));
+  });
+
+  app.post("/api/v1/commitments", async (c) => {
+    const input = await parseJsonBody(c, createCommitmentSchema);
+
+    return jsonOk(c, await createCommitment(c.var.db, c.var.actor, input), 201);
+  });
+
+  app.patch("/api/v1/commitments/:commitmentId", async (c) => {
+    const input = await parseJsonBody(c, updateCommitmentSchema);
+
+    return jsonOk(
+      c,
+      await updateCommitment(
+        c.var.db,
+        c.var.actor,
+        c.req.param("commitmentId"),
+        input
+      )
+    );
+  });
+
+  app.post("/api/v1/commitments/:commitmentId/checkins", async (c) => {
+    const input = await parseJsonBody(c, commitmentCheckinSchema);
+
+    return jsonOk(
+      c,
+      await createCommitmentCheckin(
+        c.var.db,
+        c.var.actor,
+        c.req.param("commitmentId"),
+        input
+      ),
+      201
+    );
+  });
+
+  app.delete("/api/v1/commitment-checkins/:checkinId", async (c) =>
+    jsonOk(
+      c,
+      await deleteCommitmentCheckin(
+        c.var.db,
+        c.var.actor,
+        c.req.param("checkinId")
+      )
+    )
+  );
+
+  app.post("/api/v1/commitments/:commitmentId/reviews", async (c) => {
+    const input = await parseJsonBody(c, commitmentReviewSchema);
+
+    return jsonOk(
+      c,
+      await createCommitmentReview(
+        c.var.db,
+        c.var.actor,
+        c.req.param("commitmentId"),
+        input
+      ),
+      201
+    );
+  });
+
+  app.patch("/api/v1/commitment-reviews/:reviewId", async (c) => {
+    const input = await parseJsonBody(c, updateCommitmentReviewSchema);
+
+    return jsonOk(
+      c,
+      await updateCommitmentReview(
+        c.var.db,
+        c.var.actor,
+        c.req.param("reviewId"),
+        input
+      )
+    );
+  });
+
   app.get("/api/v1/tasks", async (c) => {
     const query = parseQuery(c, taskListQuerySchema);
 
@@ -709,11 +1108,28 @@ export function createApp() {
       paths: {
         "/api/v1/bootstrap/claim": ["post"],
         "/api/v1/bootstrap/context": ["get"],
+        "/api/v1/commitments": ["get", "post"],
+        "/api/v1/commitments/{commitmentId}": ["patch"],
+        "/api/v1/commitments/{commitmentId}/checkins": ["post"],
+        "/api/v1/commitments/{commitmentId}/reviews": ["post"],
+        "/api/v1/commitment-checkins/{checkinId}": ["delete"],
+        "/api/v1/commitment-reviews/{reviewId}": ["patch"],
         "/api/v1/labels": ["get", "post"],
         "/api/v1/labels/:labelId": ["patch", "delete"],
         "/api/v1/me": ["get"],
         "/api/v1/recurring-templates": ["get", "post"],
         "/api/v1/recurring-templates/{templateId}": ["get", "patch"],
+        "/api/v1/retrospective-home": ["get"],
+        "/api/v1/retrospective-notes": ["get", "post"],
+        "/api/v1/retrospective-notes/{noteId}": ["patch", "delete"],
+        "/api/v1/retrospective-templates": ["get", "post"],
+        "/api/v1/retrospective-templates/{templateId}": ["patch"],
+        "/api/v1/retrospectives": ["get", "post"],
+        "/api/v1/retrospectives/{retrospectiveId}": ["get"],
+        "/api/v1/retrospectives/{retrospectiveId}/finalize": ["post"],
+        "/api/v1/retrospectives/{retrospectiveId}/rounds/{roundId}/complete": ["post"],
+        "/api/v1/retrospectives/{retrospectiveId}/rounds/{roundId}/enter": ["post"],
+        "/api/v1/retrospectives/{retrospectiveId}/start": ["post"],
         "/api/v1/settings": ["get", "patch"],
         "/api/v1/tasks": ["get", "post"],
         "/api/v1/tasks/{taskId}": ["get", "patch", "delete"],

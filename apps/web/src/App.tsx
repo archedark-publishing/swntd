@@ -40,9 +40,11 @@ import {
   Download,
   ExternalLink,
   FileImage,
+  Heart,
   Menu,
   Paperclip,
   Plus,
+  RefreshCw,
   SendHorizontal,
   Tag,
   Trash2,
@@ -83,6 +85,21 @@ import {
   type Actor,
   type Attachment,
   type Label,
+  type Commitment,
+  type CommitmentPeriod,
+  type CommitmentTrackingKind,
+  type RetrospectiveDetail,
+  type RetrospectiveEntryPhase,
+  type RetrospectiveHome,
+  type RetrospectiveNote,
+  type RetrospectiveNoteWritePhase,
+  type RetrospectivePrivacy,
+  type Retrospective,
+  type RetrospectiveRound,
+  type RetrospectiveRoundKind,
+  type RetrospectiveTemplate,
+  type RetrospectiveTemplateRound,
+  type RetrospectiveTemplateInput,
   type RecurringTemplate,
   type ServiceToken,
   type Settings,
@@ -101,8 +118,9 @@ import { applyOptimisticTaskPlacement } from "./task-ordering";
 import { toast } from "sonner";
 import "./styles.css";
 
-type ViewName = "archive" | "board" | "recurring" | "settings";
-type SettingsPage = "general" | "household" | "labels";
+type ViewName = "archive" | "board" | "recurring" | "retrospective" | "settings";
+type SettingsPage = "general" | "household" | "labels" | "retrospective";
+type ArchiveMode = "issues" | "retrospectives";
 type TaskDetailControlId = "assignee" | "due" | "labels" | "status";
 const maxLabelNameLength = 16;
 const dragMouseDistancePx = 8;
@@ -166,6 +184,22 @@ type TemplateDraft = {
   title: string;
 };
 
+type RetrospectiveTemplateRoundDraft = {
+  clientId: string;
+  configJson: string;
+  entryPhase: RetrospectiveEntryPhase;
+  kind: RetrospectiveRoundKind;
+  privacy: RetrospectivePrivacy;
+  prompt: string;
+  title: string;
+};
+
+type RetrospectiveTemplateDraft = {
+  description: string;
+  name: string;
+  rounds: RetrospectiveTemplateRoundDraft[];
+};
+
 type HouseholdUserDraft = {
   displayName: string;
   email: string;
@@ -176,6 +210,24 @@ type HouseholdUserDraft = {
 type LabelDraft = {
   color: string;
   name: string;
+};
+
+type RetrospectiveState = {
+  detail: RetrospectiveDetail | null;
+  errorMessage: string | null;
+  finalizedRetrospectives: Retrospective[];
+  home: RetrospectiveHome | null;
+  isLoading: boolean;
+  templates: RetrospectiveTemplate[];
+};
+
+type CommitmentDraft = {
+  assigneeUserId: string;
+  checklistItems: ChecklistDraftItem[];
+  targetCount: string;
+  title: string;
+  trackingInterval: "none" | "daily" | "weekly" | "monthly";
+  trackingKind: CommitmentTrackingKind;
 };
 
 type AppSnapshot = {
@@ -208,19 +260,27 @@ const emptySnapshot: AppSnapshot = {
 const navItems: Array<{ id: ViewName; label: string }> = [
   { id: "board", label: "Board" },
   { id: "recurring", label: "Recurring" },
+  { id: "retrospective", label: "Retrospective" },
   { id: "archive", label: "Archive" }
 ];
 const settingsNavItems: Array<{ id: SettingsPage; label: string }> = [
   { id: "general", label: "General" },
+  { id: "retrospective", label: "Retrospective" },
   { id: "household", label: "Household" },
   { id: "labels", label: "Labels" }
 ];
 
 function isSettingsPage(value: string | undefined): value is SettingsPage {
-  return value === "general" || value === "household" || value === "labels";
+  return (
+    value === "general" ||
+    value === "household" ||
+    value === "labels" ||
+    value === "retrospective"
+  );
 }
 
 function readRouteFromHash(): {
+  archiveMode: ArchiveMode;
   onlyMyTasks: boolean;
   settingsPage: SettingsPage;
   view: ViewName;
@@ -229,34 +289,81 @@ function readRouteFromHash(): {
   const [viewPart, subpagePart] = hash.split("/");
 
   if (viewPart === "my-tasks") {
-    return { onlyMyTasks: true, settingsPage: "general", view: "board" };
+    return {
+      archiveMode: "issues",
+      onlyMyTasks: true,
+      settingsPage: "general",
+      view: "board"
+    };
   }
 
   if (viewPart === "archive") {
-    return { onlyMyTasks: false, settingsPage: "general", view: "archive" };
+    return {
+      archiveMode: subpagePart === "retrospectives" ? "retrospectives" : "issues",
+      onlyMyTasks: false,
+      settingsPage: "general",
+      view: "archive"
+    };
   }
 
   if (viewPart === "recurring") {
-    return { onlyMyTasks: false, settingsPage: "general", view: "recurring" };
+    return {
+      archiveMode: "issues",
+      onlyMyTasks: false,
+      settingsPage: "general",
+      view: "recurring"
+    };
+  }
+
+  if (viewPart === "retrospective") {
+    return {
+      archiveMode: "issues",
+      onlyMyTasks: false,
+      settingsPage: "general",
+      view: "retrospective"
+    };
   }
 
   if (viewPart === "settings") {
     if (subpagePart === "recurring") {
-      return { onlyMyTasks: false, settingsPage: "general", view: "recurring" };
+      return {
+        archiveMode: "issues",
+        onlyMyTasks: false,
+        settingsPage: "general",
+        view: "recurring"
+      };
     }
 
     return {
+      archiveMode: "issues",
       onlyMyTasks: false,
       settingsPage: isSettingsPage(subpagePart) ? subpagePart : "general",
       view: "settings"
     };
   }
 
-  return { onlyMyTasks: false, settingsPage: "general", view: "board" };
+  return {
+    archiveMode: "issues",
+    onlyMyTasks: false,
+    settingsPage: "general",
+    view: "board"
+  };
 }
 
-function buildHashForRoute(view: ViewName, settingsPage: SettingsPage) {
-  return view === "settings" ? `settings/${settingsPage}` : view;
+function buildHashForRoute(
+  view: ViewName,
+  settingsPage: SettingsPage,
+  archiveMode: ArchiveMode = "issues"
+) {
+  if (view === "settings") {
+    return `settings/${settingsPage}`;
+  }
+
+  if (view === "archive" && archiveMode === "retrospectives") {
+    return "archive/retrospectives";
+  }
+
+  return view;
 }
 
 function createChecklistDraft(items: Array<{ body: string; isCompleted: boolean }>) {
@@ -384,6 +491,77 @@ function createTemplateDraft(template?: RecurringTemplate | null): TemplateDraft
   };
 }
 
+function createRetrospectiveTemplateDraft(
+  template?: RetrospectiveTemplate | null
+): RetrospectiveTemplateDraft {
+  if (!template) {
+    return {
+      description: "",
+      name: "",
+      rounds: [
+        createRetrospectiveTemplateRoundDraft("commitment_review", "Commitments"),
+        createRetrospectiveTemplateRoundDraft("task_lookback", "Lookback"),
+        createRetrospectiveTemplateRoundDraft("notes", "Topics", {
+          entryPhase: "both",
+          privacy: "shared"
+        }),
+        createRetrospectiveTemplateRoundDraft(
+          "commitment_capture",
+          "Next commitments"
+        )
+      ]
+    };
+  }
+
+  return {
+    description: template.description,
+    name: template.name,
+    rounds: template.rounds.map((round) =>
+      createRetrospectiveTemplateRoundDraft(round.kind, round.title, {
+        configJson: round.configJson,
+        entryPhase: round.entryPhase ?? "retrospective",
+        privacy: round.privacy ?? "shared",
+        prompt: round.prompt
+      })
+    )
+  };
+}
+
+function createRetrospectiveTemplateRoundDraft(
+  kind: RetrospectiveRoundKind = "notes",
+  title = "",
+  overrides: Partial<Omit<RetrospectiveTemplateRoundDraft, "clientId" | "kind" | "title">> = {}
+): RetrospectiveTemplateRoundDraft {
+  return {
+    clientId: crypto.randomUUID(),
+    configJson: overrides.configJson ?? "{}",
+    entryPhase: overrides.entryPhase ?? "retrospective",
+    kind,
+    privacy: overrides.privacy ?? "shared",
+    prompt: overrides.prompt ?? "",
+    title
+  };
+}
+
+function toRetrospectiveTemplateInput(
+  draft: RetrospectiveTemplateDraft
+): RetrospectiveTemplateInput {
+  return {
+    description: draft.description.trim(),
+    name: draft.name.trim(),
+    rounds: draft.rounds
+      .filter((round) => round.title.trim())
+      .map((round) => ({
+        configJson: round.configJson.trim() || "{}",
+        entryPhase: round.kind === "notes" ? round.entryPhase : null,
+        kind: round.kind,
+        privacy: round.kind === "notes" ? round.privacy : null,
+        prompt: round.prompt.trim(),
+        title: round.title.trim()
+      }))
+  };
+}
+
 function createHouseholdUserDraft(
   user?: UserRef | null,
   mode: "admin" | "service" = "admin"
@@ -433,9 +611,13 @@ function serializeLabelDraft(draft: LabelDraft) {
 function normalizeSettingsDraft(settings: Settings) {
   return {
     defaultCalendarExportKind: settings.defaultCalendarExportKind,
+    defaultRetrospectiveTemplateId: settings.defaultRetrospectiveTemplateId,
     defaultTimezone: settings.defaultTimezone.trim(),
     doneArchiveAfterDays: settings.doneArchiveAfterDays,
-    nearDueThresholdDays: settings.nearDueThresholdDays
+    finalizedRetrospectiveEditPolicy: settings.finalizedRetrospectiveEditPolicy,
+    nearDueThresholdDays: settings.nearDueThresholdDays,
+    retrospectiveCadence: settings.retrospectiveCadence,
+    retrospectiveCadenceInterval: settings.retrospectiveCadenceInterval
   };
 }
 
@@ -656,6 +838,84 @@ function showErrorToast(message: string, toastId?: string) {
   toast.error(message, { id: toastId ?? `error:${message}` });
 }
 
+function formatIsoDate(value: string | null | undefined) {
+  if (!value) {
+    return "Unscheduled";
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeZone: "UTC"
+  }).format(new Date(`${value}T00:00:00.000Z`));
+}
+
+function formatCommitmentIntervalLabel(
+  interval: Commitment["trackingInterval"]
+) {
+  switch (interval) {
+    case "daily":
+      return "day";
+    case "weekly":
+      return "week";
+    case "monthly":
+      return "month";
+    case "none":
+      return "period";
+  }
+}
+
+function getCommitmentProgressLabel(commitment: Commitment) {
+  if (commitment.trackingKind === "count_per_period") {
+    const total = commitment.checkins.reduce((sum, checkin) => sum + checkin.amount, 0);
+
+    return `${total}${commitment.targetCount ? ` / ${commitment.targetCount}` : ""} this ${formatCommitmentIntervalLabel(commitment.trackingInterval)}`;
+  }
+
+  if (commitment.trackingKind === "checklist") {
+    const completed = commitment.checklistItems.filter((item) => item.isCompleted).length;
+
+    return `${completed} / ${commitment.checklistItems.length} done`;
+  }
+
+  if (commitment.trackingKind === "binary") {
+    return commitment.checkins.length > 0 ? "Finished" : "Not finished";
+  }
+
+  return commitment.status;
+}
+
+function getInclusiveDayCount(startOn: string, endOn: string) {
+  const start = new Date(`${startOn}T00:00:00.000Z`).getTime();
+  const end = new Date(`${endOn}T00:00:00.000Z`).getTime();
+
+  return Math.max(1, Math.floor((end - start) / 86_400_000) + 1);
+}
+
+function getCommitmentGridRows(
+  commitment: Commitment,
+  period: CommitmentPeriod | null
+) {
+  if (!period || commitment.trackingKind !== "count_per_period") {
+    return 1;
+  }
+
+  const dayCount = getInclusiveDayCount(period.periodStartOn, period.closureOn);
+
+  if (commitment.trackingInterval === "daily") {
+    return dayCount;
+  }
+
+  if (commitment.trackingInterval === "monthly") {
+    return Math.max(1, Math.floor(dayCount / 30));
+  }
+
+  if (commitment.trackingInterval === "weekly") {
+    return Math.max(1, Math.floor(dayCount / 7));
+  }
+
+  return 1;
+}
+
 function buildExeDevLoginUrl() {
   const redirect = `${window.location.pathname}${window.location.search}${window.location.hash}`;
   const url = new URL("/__exe.dev/login", window.location.origin);
@@ -690,6 +950,9 @@ export function App() {
   const initialRoute = readRouteFromHash();
   const [view, setView] = useState<ViewName>(initialRoute.view);
   const [onlyMyTasks, setOnlyMyTasks] = useState(initialRoute.onlyMyTasks);
+  const [archiveMode, setArchiveMode] = useState<ArchiveMode>(
+    initialRoute.archiveMode
+  );
   const [settingsPage, setSettingsPage] = useState<SettingsPage>(initialRoute.settingsPage);
   const [accessState, setAccessState] = useState<AccessState | null>(null);
   const [snapshot, setSnapshot] = useState<AppSnapshot>(emptySnapshot);
@@ -700,11 +963,23 @@ export function App() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [selectedTask, setSelectedTask] = useState<TaskDetail | null>(null);
   const [isTaskSheetOpen, setIsTaskSheetOpen] = useState(false);
+  const [archiveRetrospectiveDetail, setArchiveRetrospectiveDetail] =
+    useState<RetrospectiveDetail | null>(null);
   const [isCreatingTask, setIsCreatingTask] = useState(false);
   const [editingTemplateKey, setEditingTemplateKey] = useState<string | "new" | null>(null);
+  const [editingRetrospectiveTemplateKey, setEditingRetrospectiveTemplateKey] =
+    useState<string | "new" | null>(null);
   const [editingLabelKey, setEditingLabelKey] = useState<string | "new" | null>(null);
   const [editingUserKey, setEditingUserKey] = useState<string | "new-admin" | "new-service" | null>(null);
   const [archiveSearch, setArchiveSearch] = useState("");
+  const [retrospectiveState, setRetrospectiveState] = useState<RetrospectiveState>({
+    detail: null,
+    errorMessage: null,
+    finalizedRetrospectives: [],
+    home: null,
+    isLoading: false,
+    templates: []
+  });
   const deferredArchiveSearch = useDeferredValue(archiveSearch);
   const hasLoadedRef = useRef(false);
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
@@ -715,6 +990,7 @@ export function App() {
 
       setView(nextRoute.view);
       setOnlyMyTasks(nextRoute.onlyMyTasks);
+      setArchiveMode(nextRoute.archiveMode);
       setSettingsPage(nextRoute.settingsPage);
     };
 
@@ -726,7 +1002,12 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (!isNavOpen && !isTaskSheetOpen && editingTemplateKey === null) {
+    if (
+      !isNavOpen &&
+      !isTaskSheetOpen &&
+      !archiveRetrospectiveDetail &&
+      editingTemplateKey === null
+    ) {
       return;
     }
 
@@ -736,7 +1017,7 @@ export function App() {
     return () => {
       document.body.style.overflow = previousOverflow;
     };
-  }, [editingTemplateKey, isNavOpen, isTaskSheetOpen]);
+  }, [archiveRetrospectiveDetail, editingTemplateKey, isNavOpen, isTaskSheetOpen]);
 
   const loadTaskDetail = useEffectEvent(async (taskId: string | null) => {
     if (!taskId) {
@@ -780,11 +1061,12 @@ export function App() {
           setAccessState(null);
 
           if (me.actor.role === "admin") {
-            const [users, labels, settings, recurringTemplates] = await Promise.all([
+            const [users, labels, settings, recurringTemplates, retrospectiveTemplates] = await Promise.all([
               api.listUsers(),
               api.listLabels(),
               api.getSettings(),
-              api.listRecurringTemplates()
+              api.listRecurringTemplates(),
+              api.listRetrospectiveTemplates()
             ]);
             const serviceTokensEntries = await Promise.all(
               users.items
@@ -805,6 +1087,10 @@ export function App() {
               serviceTokensByUserId: Object.fromEntries(serviceTokensEntries),
               users: users.items
             });
+            setRetrospectiveState((current) => ({
+              ...current,
+              templates: retrospectiveTemplates.items
+            }));
           } else {
             setSnapshot({
               activeTasks: activeTasks.items,
@@ -848,6 +1134,44 @@ export function App() {
     }
   );
 
+  const refreshRetrospective = useEffectEvent(async () => {
+    if (!snapshot.actor || snapshot.actor.role !== "admin") {
+      return;
+    }
+
+    setRetrospectiveState((current) => ({ ...current, isLoading: true }));
+
+    try {
+      const [home, templates, finalizedRetrospectives] = await Promise.all([
+        api.getRetrospectiveHome(),
+        api.listRetrospectiveTemplates(),
+        api.listRetrospectives({ limit: 100, status: "finalized" })
+      ]);
+      const openRetrospectiveId = home.openRetrospective?.id ?? null;
+      const detail = openRetrospectiveId
+        ? (await api.getRetrospective(openRetrospectiveId)).item
+        : null;
+
+      setRetrospectiveState({
+        detail,
+        errorMessage: null,
+        finalizedRetrospectives: finalizedRetrospectives.items,
+        home,
+        isLoading: false,
+        templates: templates.items
+      });
+    } catch (error) {
+      const message = buildFlashMessage(error);
+
+      setRetrospectiveState((current) => ({
+        ...current,
+        errorMessage: message,
+        isLoading: false
+      }));
+      showErrorToast(message, "retrospective-refresh-error");
+    }
+  });
+
   useEffect(() => {
     startTransition(() => {
       void refreshApp();
@@ -877,6 +1201,26 @@ export function App() {
   useEffect(() => {
     void loadTaskDetail(selectedTaskId);
   }, [selectedTaskId]);
+
+  useEffect(() => {
+    if (
+      !snapshot.actor ||
+      (view !== "retrospective" &&
+        !(view === "archive" && archiveMode === "retrospectives"))
+    ) {
+      return;
+    }
+
+    void refreshRetrospective();
+  }, [archiveMode, snapshot.actor, view]);
+
+  useEffect(() => {
+    if (view !== "settings" || settingsPage !== "retrospective" || !snapshot.actor) {
+      return;
+    }
+
+    void refreshRetrospective();
+  }, [settingsPage, snapshot.actor, view]);
 
   const activeTasks = snapshot.activeTasks.slice().sort((left, right) => {
     if (left.status !== right.status) {
@@ -935,6 +1279,29 @@ export function App() {
     }
   }
 
+  async function runRetrospectiveMutation<T>(
+    action: () => Promise<T>,
+    successMessage: string
+  ) {
+    const result = await runMutation(action, successMessage, {
+      skipRefresh: true
+    });
+
+    await refreshRetrospective();
+
+    return result;
+  }
+
+  async function openArchivedRetrospectiveDetail(retrospectiveId: string) {
+    try {
+      const detail = await api.getRetrospective(retrospectiveId);
+
+      setArchiveRetrospectiveDetail(detail.item);
+    } catch (error) {
+      showErrorToast(buildFlashMessage(error), "retrospective-artifact-error");
+    }
+  }
+
   function handleViewChange(nextView: ViewName) {
     setView(nextView);
     setOnlyMyTasks(false);
@@ -943,7 +1310,11 @@ export function App() {
       setEditingTemplateKey(null);
     }
 
-    const nextHash = buildHashForRoute(nextView, settingsPage);
+    if (nextView !== "settings") {
+      setEditingRetrospectiveTemplateKey(null);
+    }
+
+    const nextHash = buildHashForRoute(nextView, settingsPage, archiveMode);
 
     if (window.location.hash !== `#${nextHash}`) {
       window.location.hash = nextHash;
@@ -952,10 +1323,20 @@ export function App() {
     setIsNavOpen(false);
   }
 
+  function handleArchiveModeChange(nextMode: ArchiveMode) {
+    setArchiveMode(nextMode);
+    const nextHash = buildHashForRoute("archive", settingsPage, nextMode);
+
+    if (window.location.hash !== `#${nextHash}`) {
+      window.location.hash = nextHash;
+    }
+  }
+
   function handleSettingsPageChange(nextPage: SettingsPage) {
     setView("settings");
     setSettingsPage(nextPage);
-    const nextHash = buildHashForRoute("settings", nextPage);
+    setEditingRetrospectiveTemplateKey(null);
+    const nextHash = buildHashForRoute("settings", nextPage, archiveMode);
 
     if (window.location.hash !== `#${nextHash}`) {
       window.location.hash = nextHash;
@@ -1293,9 +1674,14 @@ export function App() {
       () =>
         api.updateSettings({
           defaultCalendarExportKind: nextSettings.defaultCalendarExportKind,
+          defaultRetrospectiveTemplateId: nextSettings.defaultRetrospectiveTemplateId,
           defaultTimezone: nextSettings.defaultTimezone,
           doneArchiveAfterDays: nextSettings.doneArchiveAfterDays,
-          nearDueThresholdDays: nextSettings.nearDueThresholdDays
+          finalizedRetrospectiveEditPolicy:
+            nextSettings.finalizedRetrospectiveEditPolicy,
+          nearDueThresholdDays: nextSettings.nearDueThresholdDays,
+          retrospectiveCadence: nextSettings.retrospectiveCadence,
+          retrospectiveCadenceInterval: nextSettings.retrospectiveCadenceInterval
         }),
       "Household settings saved.",
       { silentSuccess: true }
@@ -1374,6 +1760,41 @@ export function App() {
 
       if (created) {
         setEditingTemplateKey(created.item.id);
+      }
+    }
+  }
+
+  async function handleRetrospectiveTemplateSave(draft: RetrospectiveTemplateDraft) {
+    const payload = toRetrospectiveTemplateInput(draft);
+
+    if (!payload.name || payload.rounds.length === 0) {
+      return;
+    }
+
+    if (editingRetrospectiveTemplateKey && editingRetrospectiveTemplateKey !== "new") {
+      const updated = await runMutation(
+        () =>
+          api.updateRetrospectiveTemplate(
+            editingRetrospectiveTemplateKey,
+            payload
+          ),
+        "Retrospective template updated.",
+        { skipRefresh: true }
+      );
+
+      if (updated) {
+        await refreshRetrospective();
+      }
+    } else {
+      const created = await runMutation(
+        () => api.createRetrospectiveTemplate(payload),
+        "Retrospective template added.",
+        { skipRefresh: true }
+      );
+
+      if (created) {
+        setEditingRetrospectiveTemplateKey(created.item.id);
+        await refreshRetrospective();
       }
     }
   }
@@ -1517,6 +1938,12 @@ export function App() {
     editingLabelKey && editingLabelKey !== "new"
       ? snapshot.labels.find((label) => label.id === editingLabelKey) ?? null
       : null;
+  const selectedRetrospectiveTemplate =
+    editingRetrospectiveTemplateKey && editingRetrospectiveTemplateKey !== "new"
+      ? retrospectiveState.templates.find(
+          (template) => template.id === editingRetrospectiveTemplateKey
+        ) ?? null
+      : null;
 
   return (
     <main className="app-shell">
@@ -1582,32 +2009,20 @@ export function App() {
               ) : null}
 
               {!isBooting && view === "archive" ? (
-                <section className="panel-stack">
-                  <SectionHeading
-                    actions={
-                      <SearchField
-                        label="Search archive"
-                        onChange={setArchiveSearch}
-                        placeholder="Search titles or notes"
-                        value={archiveSearch}
-                      />
-                    }
-                    eyebrow="History"
-                    title="Archive"
-                  />
-                  <TaskListView
-                    aiAssistanceLabel={getAiAssistanceLabel(snapshot.users)}
-                    description="A place for finished errands, closed loops, and things you only need to remember once in a while."
-                    emptyMessage="Nothing has been archived yet."
-                    onOpenTask={openTask}
-                    onQuickMove={() => Promise.resolve()}
-                    onReorder={() => Promise.resolve()}
-                    settings={snapshot.settings}
-                    showHeader={false}
-                    tasks={archivedTasks}
-                    title="Archive"
-                  />
-                </section>
+                <ArchiveView
+                  actor={snapshot.actor}
+                  aiAssistanceLabel={getAiAssistanceLabel(snapshot.users)}
+                  archiveMode={archiveMode}
+                  archiveSearch={archiveSearch}
+                  isRetrospectiveLoading={retrospectiveState.isLoading}
+                  onArchiveModeChange={handleArchiveModeChange}
+                  onArchiveSearchChange={setArchiveSearch}
+                  onOpenRetrospective={openArchivedRetrospectiveDetail}
+                  onOpenTask={openTask}
+                  retrospectives={retrospectiveState.finalizedRetrospectives}
+                  settings={snapshot.settings}
+                  tasks={archivedTasks}
+                />
               ) : null}
 
               {!isBooting && view === "recurring" ? (
@@ -1632,6 +2047,131 @@ export function App() {
                 />
               ) : null}
 
+              {!isBooting && view === "retrospective" ? (
+                <RetrospectiveView
+                  actor={snapshot.actor}
+                  state={retrospectiveState}
+                  users={snapshot.users}
+                  onAddCheckin={(commitmentId) =>
+                    runRetrospectiveMutation(
+                      () =>
+                        api.createCommitmentCheckin(commitmentId, {
+                          checkinOn: new Date().toISOString().slice(0, 10)
+                        }),
+                      "Progress marked."
+                    )
+                  }
+                  onDeleteCheckin={(checkinId) =>
+                    runRetrospectiveMutation(
+                      () => api.deleteCommitmentCheckin(checkinId),
+                      "Progress removed."
+                    )
+                  }
+                  onUpdateCommitmentChecklist={(commitment, checklistItems) =>
+                    runRetrospectiveMutation(
+                      () =>
+                        api.updateCommitment(commitment.id, {
+                          ...(commitment.assigneeUserId
+                            ? { assigneeUserId: commitment.assigneeUserId }
+                            : {}),
+                          checklistItems,
+                          commitmentPeriodId: commitment.commitmentPeriodId,
+                          createdInRetrospectiveId:
+                            commitment.createdInRetrospectiveId,
+                          description: commitment.description,
+                          status: commitment.status,
+                          targetCount: commitment.targetCount,
+                          title: commitment.title,
+                          trackingInterval: commitment.trackingInterval,
+                          trackingKind: commitment.trackingKind
+                        }),
+                      "Checklist updated."
+                    )
+                  }
+                  onCreateCommitment={(retrospectiveId, draft) =>
+                    runRetrospectiveMutation(
+                      () =>
+                        api.createCommitment({
+                          assigneeUserId: draft.assigneeUserId,
+                          createdInRetrospectiveId: retrospectiveId,
+                          ...(draft.trackingKind === "checklist"
+                            ? {
+                                checklistItems: draft.checklistItems
+                                  .map((item) => ({
+                                    body: item.body.trim(),
+                                    isCompleted: item.isCompleted
+                                  }))
+                                  .filter((item) => item.body)
+                              }
+                            : {}),
+                          targetCount:
+                            draft.trackingKind !== "checklist" && draft.targetCount
+                              ? Number(draft.targetCount)
+                              : null,
+                          title: draft.title,
+                          trackingInterval: draft.trackingInterval,
+                          trackingKind: draft.trackingKind
+                        }),
+                      "Commitment added."
+                    )
+                  }
+                  onCreateNote={(input) =>
+                    runRetrospectiveMutation(
+                      () => api.createRetrospectiveNote(input),
+                      "Note added."
+                    )
+                  }
+                  onDeleteNote={(noteId) =>
+                    runRetrospectiveMutation(
+                      () => api.deleteRetrospectiveNote(noteId),
+                      "Note deleted."
+                    )
+                  }
+                  onCreateRetrospective={(input) =>
+                    runRetrospectiveMutation(
+                      () => api.createRetrospective(input),
+                      "Retrospective created."
+                    )
+                  }
+                  onEnterRound={(retrospectiveId, roundId) =>
+                    runRetrospectiveMutation(
+                      () => api.enterRetrospectiveRound(retrospectiveId, roundId),
+                      "Round opened."
+                    )
+                  }
+                  onFinalize={(retrospectiveId) =>
+                    runRetrospectiveMutation(
+                      () => api.finalizeRetrospective(retrospectiveId),
+                      "Retrospective finalized."
+                    )
+                  }
+                  onUpdateRetrospectiveClosure={(retrospectiveId, closureOn) =>
+                    runRetrospectiveMutation(
+                      () => api.updateRetrospective(retrospectiveId, { closureOn }),
+                      "Retrospective end date updated."
+                    )
+                  }
+                  onUpdateRetrospectiveTemplate={(retrospectiveId, templateId) =>
+                    runRetrospectiveMutation(
+                      () => api.updateRetrospective(retrospectiveId, { templateId }),
+                      "Retrospective template updated."
+                    )
+                  }
+                  onRefresh={refreshRetrospective}
+                  onReviewCommitment={(commitmentId, retrospectiveId, roundId, rating) =>
+                    runRetrospectiveMutation(
+                      () =>
+                        api.createCommitmentReview(commitmentId, {
+                          rating,
+                          retrospectiveId,
+                          roundId
+                        }),
+                      "Commitment reviewed."
+                    )
+                  }
+                />
+              ) : null}
+
               {!isBooting && view === "settings" ? (
                 <SettingsView
                   activePage={settingsPage}
@@ -1643,10 +2183,12 @@ export function App() {
                   onRemoveUser={handleHouseholdUserRemove}
                   onRevokeServiceToken={handleServiceTokenRevoke}
                   onSaveLabel={handleLabelSave}
+                  onSaveRetrospectiveTemplate={handleRetrospectiveTemplateSave}
                   onSaveSettings={handleSettingsSave}
                   onSaveUser={handleHouseholdUserSave}
                   onSelectLabel={setEditingLabelKey}
                   onSelectPage={handleSettingsPageChange}
+                  onSelectRetrospectiveTemplate={setEditingRetrospectiveTemplateKey}
                   onSelectUser={(userKey) => {
                     setEditingUserKey(userKey);
                     setSettingsPage("household");
@@ -1655,6 +2197,9 @@ export function App() {
                   selectedLabelKey={editingLabelKey}
                   isUserEditorOpen={editingUserKey !== null}
                   selectedUser={selectedHouseholdUser}
+                  selectedRetrospectiveTemplate={selectedRetrospectiveTemplate}
+                  selectedRetrospectiveTemplateKey={editingRetrospectiveTemplateKey}
+                  retrospectiveTemplates={retrospectiveState.templates}
                   serviceTokensByUserId={snapshot.serviceTokensByUserId}
                   settings={snapshot.settings}
                   userEditorMode={householdUserEditorMode}
@@ -1712,6 +2257,11 @@ export function App() {
             task={selectedTask}
             users={snapshot.users}
             variant={isCreatingTask ? "create" : "detail"}
+          />
+
+          <RetrospectiveArtifactSheet
+            detail={archiveRetrospectiveDetail}
+            onClose={() => setArchiveRetrospectiveDetail(null)}
           />
         </>
       )}
@@ -3993,13 +4543,20 @@ function SettingsView(props: {
   onRemoveUser: (userId: string) => Promise<boolean>;
   onRevokeServiceToken: (tokenId: string) => Promise<void>;
   onSaveLabel: (labelId: string | null, draft: LabelDraft) => Promise<Label | null>;
+  onSaveRetrospectiveTemplate: (
+    draft: RetrospectiveTemplateDraft
+  ) => Promise<void>;
   onSaveSettings: (settings: Settings) => Promise<boolean>;
   onSaveUser: (userId: string | null, draft: HouseholdUserDraft) => Promise<boolean>;
   onSelectLabel: (labelId: string | "new" | null) => void;
   onSelectPage: (page: SettingsPage) => void;
+  onSelectRetrospectiveTemplate: (templateId: string | "new" | null) => void;
   onSelectUser: (userKey: string | "new-admin" | "new-service" | null) => void;
+  retrospectiveTemplates: RetrospectiveTemplate[];
   selectedLabel: Label | null;
   selectedLabelKey: string | "new" | null;
+  selectedRetrospectiveTemplate: RetrospectiveTemplate | null;
+  selectedRetrospectiveTemplateKey: string | "new" | null;
   selectedUser: UserRef | null;
   serviceTokensByUserId: Record<string, ServiceToken[]>;
   settings: Settings | null;
@@ -4007,6 +4564,10 @@ function SettingsView(props: {
   users: UserRef[];
 }) {
   const [labelDraft, setLabelDraft] = useState<LabelDraft>(createLabelDraft(props.selectedLabel));
+  const [retrospectiveTemplateDraft, setRetrospectiveTemplateDraft] =
+    useState<RetrospectiveTemplateDraft>(
+      createRetrospectiveTemplateDraft(props.selectedRetrospectiveTemplate)
+    );
   const [settingsDraft, setSettingsDraft] = useState<Settings | null>(props.settings);
   const [userDraft, setUserDraft] = useState<HouseholdUserDraft>(
     createHouseholdUserDraft(props.selectedUser, props.userEditorMode)
@@ -4023,6 +4584,8 @@ function SettingsView(props: {
   const [isUserRemovePending, setIsUserRemovePending] = useState(false);
   const [isUserSavePending, setIsUserSavePending] = useState(false);
   const [isSettingsSavePending, setIsSettingsSavePending] = useState(false);
+  const [isRetrospectiveTemplateSavePending, setIsRetrospectiveTemplateSavePending] =
+    useState(false);
   const lastSavedLabelDraftRef = useRef(serializeLabelDraft(createLabelDraft(props.selectedLabel)));
   const lastSavedSettingsDraftRef = useRef(
     props.settings ? serializeSettingsDraft(props.settings) : null
@@ -4080,18 +4643,38 @@ function SettingsView(props: {
     setIsUserSavePending(false);
   }, [props.selectedUser, props.userEditorMode]);
 
+  useEffect(() => {
+    if (
+      props.selectedRetrospectiveTemplateKey &&
+      props.selectedRetrospectiveTemplateKey !== "new" &&
+      !props.selectedRetrospectiveTemplate
+    ) {
+      return;
+    }
+
+    setRetrospectiveTemplateDraft(
+      createRetrospectiveTemplateDraft(props.selectedRetrospectiveTemplate)
+    );
+    setIsRetrospectiveTemplateSavePending(false);
+  }, [props.selectedRetrospectiveTemplate, props.selectedRetrospectiveTemplateKey]);
+
   const submitSettingsAutosave = useEffectEvent(async (nextSettings: Settings) => {
     const normalized = normalizeSettingsDraft(nextSettings);
 
     if (
       !normalized.defaultTimezone ||
       !Number.isFinite(normalized.doneArchiveAfterDays) ||
-      !Number.isFinite(normalized.nearDueThresholdDays)
+      !Number.isFinite(normalized.nearDueThresholdDays) ||
+      !Number.isFinite(normalized.retrospectiveCadenceInterval)
     ) {
       return;
     }
 
-    if (normalized.doneArchiveAfterDays < 1 || normalized.nearDueThresholdDays < 1) {
+    if (
+      normalized.doneArchiveAfterDays < 1 ||
+      normalized.nearDueThresholdDays < 1 ||
+      normalized.retrospectiveCadenceInterval < 1
+    ) {
       return;
     }
 
@@ -4142,12 +4725,17 @@ function SettingsView(props: {
     if (
       !normalized.defaultTimezone ||
       !Number.isFinite(normalized.doneArchiveAfterDays) ||
-      !Number.isFinite(normalized.nearDueThresholdDays)
+      !Number.isFinite(normalized.nearDueThresholdDays) ||
+      !Number.isFinite(normalized.retrospectiveCadenceInterval)
     ) {
       return;
     }
 
-    if (normalized.doneArchiveAfterDays < 1 || normalized.nearDueThresholdDays < 1) {
+    if (
+      normalized.doneArchiveAfterDays < 1 ||
+      normalized.nearDueThresholdDays < 1 ||
+      normalized.retrospectiveCadenceInterval < 1
+    ) {
       return;
     }
 
@@ -4298,6 +4886,134 @@ function SettingsView(props: {
               />
             </div>
           </SurfaceCard>
+        ) : null}
+
+        {props.activePage === "retrospective" ? (
+          <>
+            <SurfaceCard className="settings-card gap-0 py-0">
+              <SectionHeading
+                description="Set the default rhythm and template for household retrospectives."
+                eyebrow="Review Rhythm"
+                title="Retrospective Settings"
+              />
+              <div className="form-grid">
+                <FormSelect
+                  label="Cadence"
+                  onValueChange={(value) =>
+                    setSettingsDraft({
+                      ...settingsDraft,
+                      retrospectiveCadence: value as Settings["retrospectiveCadence"]
+                    })
+                  }
+                  options={[
+                    { label: "Weekly", value: "weekly" },
+                    { label: "Monthly", value: "monthly" },
+                    { label: "Quarterly", value: "quarterly" },
+                    { label: "Custom", value: "custom" }
+                  ]}
+                  value={settingsDraft.retrospectiveCadence}
+                />
+                <FormField label="Cadence interval">
+                  <FormInput
+                    min={1}
+                    onChange={(event) =>
+                      setSettingsDraft({
+                        ...settingsDraft,
+                        retrospectiveCadenceInterval: Number(event.target.value)
+                      })
+                    }
+                    type="number"
+                    value={settingsDraft.retrospectiveCadenceInterval}
+                  />
+                </FormField>
+                <FormSelect
+                  allowEmptyOption
+                  label="Default template"
+                  onValueChange={(value) =>
+                    setSettingsDraft({
+                      ...settingsDraft,
+                      defaultRetrospectiveTemplateId: value || null
+                    })
+                  }
+                  options={props.retrospectiveTemplates.map((template) => ({
+                    label: template.name,
+                    value: template.id
+                  }))}
+                  placeholder="No template selected"
+                  value={settingsDraft.defaultRetrospectiveTemplateId ?? ""}
+                />
+                <FormSelect
+                  label="Finalized retros"
+                  onValueChange={(value) =>
+                    setSettingsDraft({
+                      ...settingsDraft,
+                      finalizedRetrospectiveEditPolicy:
+                        value as Settings["finalizedRetrospectiveEditPolicy"]
+                    })
+                  }
+                  options={[
+                    { label: "Locked", value: "locked" },
+                    { label: "Editable", value: "editable" }
+                  ]}
+                  value={settingsDraft.finalizedRetrospectiveEditPolicy}
+                />
+              </div>
+            </SurfaceCard>
+
+            <SurfaceCard className="settings-card gap-0 py-0">
+              <SectionHeading
+                actions={
+                  <Button
+                    onClick={() => props.onSelectRetrospectiveTemplate("new")}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    <Plus className="size-4" />
+                    New Template
+                  </Button>
+                }
+                description="Compose the rounds that make up a retro. Notes rounds can accept period notes, live retro notes, or both."
+                eyebrow="Templates"
+                title="Retrospective Templates"
+              />
+              <div className="template-grid">
+                <div className="template-list">
+                  {props.retrospectiveTemplates.length === 0 ? (
+                    <EmptyStateCard message="No retrospective templates yet." />
+                  ) : null}
+                  {props.retrospectiveTemplates.map((template) => (
+                    <SelectionListButton
+                      active={props.selectedRetrospectiveTemplate?.id === template.id}
+                      key={template.id}
+                      label={template.name}
+                      meta={`${template.rounds.length} rounds`}
+                      onClick={() => props.onSelectRetrospectiveTemplate(template.id)}
+                    />
+                  ))}
+                </div>
+                <div className="template-editor">
+                  {props.selectedRetrospectiveTemplateKey ? (
+                    <RetrospectiveTemplateForm
+                      draft={retrospectiveTemplateDraft}
+                      isSaving={isRetrospectiveTemplateSavePending}
+                      onChange={setRetrospectiveTemplateDraft}
+                      onSubmit={async () => {
+                        setIsRetrospectiveTemplateSavePending(true);
+                        await props.onSaveRetrospectiveTemplate(
+                          retrospectiveTemplateDraft
+                        );
+                        setIsRetrospectiveTemplateSavePending(false);
+                      }}
+                      selectedTemplate={props.selectedRetrospectiveTemplate}
+                    />
+                  ) : (
+                    <EmptyStateCard message="Choose a template or create a new one." />
+                  )}
+                </div>
+              </div>
+            </SurfaceCard>
+          </>
         ) : null}
 
         {props.activePage === "household" ? (
@@ -4777,6 +5493,1712 @@ function SettingsView(props: {
 
       </div>
     </section>
+  );
+}
+
+function RetrospectiveTemplateForm(props: {
+  draft: RetrospectiveTemplateDraft;
+  isSaving: boolean;
+  onChange: (draft: RetrospectiveTemplateDraft) => void;
+  onSubmit: () => void;
+  selectedTemplate: RetrospectiveTemplate | null;
+}) {
+  const validRounds = props.draft.rounds.filter((round) => round.title.trim());
+  const canSave = props.draft.name.trim() && validRounds.length > 0;
+  const updateRound = (
+    clientId: string,
+    patch: Partial<RetrospectiveTemplateRoundDraft>
+  ) => {
+    props.onChange({
+      ...props.draft,
+      rounds: props.draft.rounds.map((round) =>
+        round.clientId === clientId ? { ...round, ...patch } : round
+      )
+    });
+  };
+
+  return (
+    <div className="form-grid retrospective-template-editor">
+      <FormField className="wide" label="Name">
+        <FormInput
+          onChange={(event) =>
+            props.onChange({
+              ...props.draft,
+              name: event.target.value
+            })
+          }
+          placeholder="Monthly retrospective"
+          value={props.draft.name}
+        />
+      </FormField>
+      <FormField className="wide" label="Description">
+        <FormTextarea
+          onChange={(event) =>
+            props.onChange({
+              ...props.draft,
+              description: event.target.value
+            })
+          }
+          rows={3}
+          value={props.draft.description}
+        />
+      </FormField>
+
+      <div className="sheet-section wide retrospective-template-rounds">
+        <SectionHeading
+          actions={
+            <Button
+              onClick={() =>
+                props.onChange({
+                  ...props.draft,
+                  rounds: [
+                    ...props.draft.rounds,
+                    createRetrospectiveTemplateRoundDraft("notes", "New round")
+                  ]
+                })
+              }
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              <Plus className="size-4" />
+              Add Round
+            </Button>
+          }
+          compact
+          eyebrow="Flow"
+          title="Rounds"
+          titleAs="h3"
+        />
+        <div className="retrospective-template-round-list">
+          {props.draft.rounds.map((round, index) => (
+            <div className="retrospective-template-round" key={round.clientId}>
+              <div className="retrospective-template-round-header">
+                <strong>Round {index + 1}</strong>
+                <Button
+                  disabled={props.draft.rounds.length === 1}
+                  onClick={() =>
+                    props.onChange({
+                      ...props.draft,
+                      rounds: props.draft.rounds.filter(
+                        (item) => item.clientId !== round.clientId
+                      )
+                    })
+                  }
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  <Trash2 className="size-4" />
+                  Remove
+                </Button>
+              </div>
+              <div className="retrospective-form-grid">
+                <FormField label="Title">
+                  <FormInput
+                    onChange={(event) =>
+                      updateRound(round.clientId, { title: event.target.value })
+                    }
+                    value={round.title}
+                  />
+                </FormField>
+                <FormSelect
+                  label="Kind"
+                  onValueChange={(value) =>
+                    updateRound(round.clientId, {
+                      kind: value as RetrospectiveRoundKind
+                    })
+                  }
+                  options={[
+                    { label: "Commitment review", value: "commitment_review" },
+                    { label: "Task lookback", value: "task_lookback" },
+                    { label: "Notes", value: "notes" },
+                    { label: "Commitment capture", value: "commitment_capture" }
+                  ]}
+                  value={round.kind}
+                />
+                {round.kind === "notes" ? (
+                  <>
+                    <FormSelect
+                      label="Entry"
+                      onValueChange={(value) =>
+                        updateRound(round.clientId, {
+                          entryPhase: value as RetrospectiveEntryPhase
+                        })
+                      }
+                      options={[
+                        { label: "During period", value: "commitment_period" },
+                        { label: "During retro", value: "retrospective" },
+                        { label: "Both", value: "both" }
+                      ]}
+                      value={round.entryPhase}
+                    />
+                    <FormSelect
+                      label="Privacy"
+                      onValueChange={(value) =>
+                        updateRound(round.clientId, {
+                          privacy: value as RetrospectivePrivacy
+                        })
+                      }
+                      options={[
+                        { label: "Shared", value: "shared" },
+                        { label: "Private until round", value: "private_until_round" },
+                        { label: "Private", value: "private" }
+                      ]}
+                      value={round.privacy}
+                    />
+                  </>
+                ) : null}
+                <FormField className="wide" label="Prompt">
+                  <FormTextarea
+                    onChange={(event) =>
+                      updateRound(round.clientId, { prompt: event.target.value })
+                    }
+                    rows={2}
+                    value={round.prompt}
+                  />
+                </FormField>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="sheet-actions wide">
+        <Button
+          disabled={!canSave || props.isSaving}
+          onClick={props.onSubmit}
+          type="button"
+        >
+          {props.isSaving
+            ? "Saving..."
+            : props.selectedTemplate
+              ? "Save Template"
+              : "Create Template"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function ArchiveView(props: {
+  actor: Actor | null;
+  aiAssistanceLabel: string;
+  archiveMode: ArchiveMode;
+  archiveSearch: string;
+  isRetrospectiveLoading: boolean;
+  onArchiveModeChange: (mode: ArchiveMode) => void;
+  onArchiveSearchChange: (value: string) => void;
+  onOpenRetrospective: (retrospectiveId: string) => Promise<void>;
+  onOpenTask: (taskId: string) => void;
+  retrospectives: Retrospective[];
+  settings: Settings | null;
+  tasks: TaskListItem[];
+}) {
+  return (
+    <section className="panel-stack">
+      <SectionHeading
+        actions={
+          props.archiveMode === "issues" ? (
+            <SearchField
+              label="Search archive"
+              onChange={props.onArchiveSearchChange}
+              placeholder="Search titles or notes"
+              value={props.archiveSearch}
+            />
+          ) : null
+        }
+        eyebrow="History"
+        title="Archive"
+      />
+      <div className="archive-mode-toggle" role="group" aria-label="Archive kind">
+        <Button
+          aria-pressed={props.archiveMode === "issues"}
+          onClick={() => props.onArchiveModeChange("issues")}
+          size="sm"
+          type="button"
+          variant={props.archiveMode === "issues" ? "default" : "outline"}
+        >
+          Issues
+        </Button>
+        <Button
+          aria-pressed={props.archiveMode === "retrospectives"}
+          onClick={() => props.onArchiveModeChange("retrospectives")}
+          size="sm"
+          type="button"
+          variant={props.archiveMode === "retrospectives" ? "default" : "outline"}
+        >
+          Retrospectives
+        </Button>
+      </div>
+
+      {props.archiveMode === "issues" ? (
+        <TaskListView
+          aiAssistanceLabel={props.aiAssistanceLabel}
+          description="A place for finished errands, closed loops, and things you only need to remember once in a while."
+          emptyMessage="Nothing has been archived yet."
+          onOpenTask={props.onOpenTask}
+          onQuickMove={() => Promise.resolve()}
+          onReorder={() => Promise.resolve()}
+          settings={props.settings}
+          showHeader={false}
+          tasks={props.tasks}
+          title="Archive"
+        />
+      ) : (
+        <RetrospectiveArchiveList
+          actor={props.actor}
+          isLoading={props.isRetrospectiveLoading}
+          onOpenRetrospective={props.onOpenRetrospective}
+          retrospectives={props.retrospectives}
+        />
+      )}
+    </section>
+  );
+}
+
+function RetrospectiveArchiveList(props: {
+  actor: Actor | null;
+  isLoading: boolean;
+  onOpenRetrospective: (retrospectiveId: string) => Promise<void>;
+  retrospectives: Retrospective[];
+}) {
+  if (props.actor?.role !== "admin") {
+    return (
+      <StatusMessageCard
+        description="Retrospectives include household-private notes, so only admins can open this archive."
+        title="Retrospective archive is for household admins."
+      />
+    );
+  }
+
+  if (props.isLoading && props.retrospectives.length === 0) {
+    return (
+      <StatusMessageCard
+        description="Gathering finalized retrospectives."
+        title="Opening retrospective archive..."
+      />
+    );
+  }
+
+  return (
+    <SurfaceCard className="retrospective-card">
+      <SectionHeading
+        compact
+        description="Finalized retrospective sessions live here once the current cycle has moved on."
+        eyebrow="Retrospectives"
+        title="Past retrospectives"
+      />
+      {props.retrospectives.length === 0 ? (
+        <EmptyStateCard message="No finalized retrospectives yet." />
+      ) : (
+        <div className="retrospective-list">
+          {props.retrospectives.map((retrospective) => (
+            <div className="retrospective-row" key={retrospective.id}>
+              <span>
+                <strong>{retrospective.title}</strong>
+                <span>
+                  {retrospective.finalizedAt
+                    ? `Finalized ${formatTimestamp(retrospective.finalizedAt)}`
+                    : retrospective.status}
+                </span>
+              </span>
+              <Button
+                onClick={() => void props.onOpenRetrospective(retrospective.id)}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                Open
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+    </SurfaceCard>
+  );
+}
+
+function RetrospectiveArtifactSheet(props: {
+  detail: RetrospectiveDetail | null;
+  onClose: () => void;
+}) {
+  if (!props.detail) {
+    return null;
+  }
+
+  const detail = props.detail;
+  const periodLabel = detail.period
+    ? `${formatIsoDate(detail.period.periodStartOn)} to ${formatIsoDate(detail.period.closureOn)}`
+    : "No period attached";
+  const capturedCommitments = detail.commitments.filter(
+    (commitment) => commitment.createdInRetrospectiveId === detail.id
+  );
+  const reviewedCommitments = detail.commitments.filter(
+    (commitment) =>
+      commitment.commitmentPeriodId === detail.commitmentPeriodId &&
+      commitment.createdInRetrospectiveId !== detail.id
+  );
+
+  return (
+    <div className="sheet-backdrop" role="presentation">
+      <aside
+        aria-label="Archived retrospective"
+        className="sheet-panel retrospective-artifact-panel"
+      >
+        <header className="sheet-header">
+          <div className="sheet-header-copy">
+            <p className="eyebrow">Archived Retro</p>
+            <h2>{detail.title}</h2>
+            <p className="section-copy">
+              {periodLabel}
+              {detail.finalizedAt
+                ? ` · Finalized ${formatTimestamp(detail.finalizedAt)}`
+                : ""}
+            </p>
+          </div>
+          <Button
+            className="rounded-full"
+            onClick={props.onClose}
+            size="icon"
+            type="button"
+            variant="outline"
+          >
+            <X className="size-4" />
+            <span className="sr-only">Close archived retrospective</span>
+          </Button>
+        </header>
+
+        <div className="sheet-body">
+          <section className="sheet-section retrospective-artifact-summary">
+            <InfoRow>
+              <div>
+                <strong>Status</strong>
+                <span>{detail.status}</span>
+              </div>
+            </InfoRow>
+            <InfoRow>
+              <div>
+                <strong>Rounds</strong>
+                <span>{detail.rounds.length}</span>
+              </div>
+            </InfoRow>
+            <InfoRow>
+              <div>
+                <strong>Commitments</strong>
+                <span>
+                  {reviewedCommitments.length} reviewed · {capturedCommitments.length} new
+                </span>
+              </div>
+            </InfoRow>
+          </section>
+
+          <section className="sheet-section">
+            <SectionHeading
+              compact
+              eyebrow="Artifact"
+              title="Rounds"
+              titleAs="h3"
+            />
+            <div className="retrospective-artifact-rounds">
+              {detail.rounds.map((round) => (
+                <SurfaceCard className="retrospective-artifact-round" key={round.id}>
+                  <SectionHeading
+                    compact
+                    eyebrow={formatRetrospectiveRoundKind(round.kind)}
+                    title={round.title}
+                    titleAs="h3"
+                    {...(round.prompt ? { description: round.prompt } : {})}
+                  />
+                  <RetrospectiveArtifactRoundBody
+                    capturedCommitments={capturedCommitments}
+                    detail={detail}
+                    notes={detail.notes.filter((note) => note.roundId === round.id)}
+                    reviewedCommitments={reviewedCommitments}
+                    round={round}
+                  />
+                </SurfaceCard>
+              ))}
+            </div>
+          </section>
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+function RetrospectiveArtifactRoundBody(props: {
+  capturedCommitments: Commitment[];
+  detail: RetrospectiveDetail;
+  notes: RetrospectiveNote[];
+  reviewedCommitments: Commitment[];
+  round: RetrospectiveRound;
+}) {
+  if (props.round.kind === "task_lookback") {
+    return (
+      <div className="retrospective-list">
+        {props.detail.taskLookback.length === 0 ? (
+          <EmptyStateCard message="No completed tasks landed in this period." />
+        ) : null}
+        {props.detail.taskLookback.map((task) => (
+          <div className="retrospective-row" key={task.id}>
+            <strong>{task.title}</strong>
+            <span>{task.completedAt ? formatTimestamp(task.completedAt) : ""}</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (props.round.kind === "notes") {
+    return <RetrospectiveNoteList notes={props.notes} />;
+  }
+
+  if (props.round.kind === "commitment_capture") {
+    return (
+      <RetrospectiveCommitmentArtifactList
+        commitments={props.capturedCommitments}
+        emptyMessage="No new commitments were captured in this round."
+      />
+    );
+  }
+
+  return (
+    <RetrospectiveCommitmentArtifactList
+      commitments={props.reviewedCommitments}
+      emptyMessage="No commitments were reviewed in this round."
+    />
+  );
+}
+
+function RetrospectiveCommitmentArtifactList(props: {
+  commitments: Commitment[];
+  emptyMessage: string;
+}) {
+  if (props.commitments.length === 0) {
+    return <EmptyStateCard message={props.emptyMessage} />;
+  }
+
+  return (
+    <div className="retrospective-list">
+      {props.commitments.map((commitment) => (
+        <div className="retrospective-row" key={commitment.id}>
+          <span>
+            <strong>{commitment.title}</strong>
+            <span>{getCommitmentProgressLabel(commitment)}</span>
+            {commitment.description ? <span>{commitment.description}</span> : null}
+          </span>
+          <Badge variant="outline">{commitment.status}</Badge>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function formatRetrospectiveRoundKind(kind: RetrospectiveRound["kind"]) {
+  switch (kind) {
+    case "commitment_capture":
+      return "Commitment Capture";
+    case "commitment_review":
+      return "Commitment Review";
+    case "task_lookback":
+      return "Task Lookback";
+    case "notes":
+      return "Notes";
+  }
+}
+
+function RetrospectiveView(props: {
+  actor: Actor | null;
+  onAddCheckin: (commitmentId: string) => Promise<unknown>;
+  onCreateCommitment: (
+    retrospectiveId: string,
+    draft: CommitmentDraft
+  ) => Promise<unknown>;
+  onUpdateCommitmentChecklist: (
+    commitment: Commitment,
+    checklistItems: Array<{ body: string; isCompleted?: boolean }>
+  ) => Promise<unknown>;
+  onCreateNote: (input: {
+    body: string;
+    commitmentPeriodId: string;
+    entryPhase: RetrospectiveNoteWritePhase;
+    retrospectiveId?: string | null;
+    roundId?: string | null;
+    templateRoundId?: string | null;
+  }) => Promise<unknown>;
+  onDeleteCheckin: (checkinId: string) => Promise<unknown>;
+  onDeleteNote: (noteId: string) => Promise<unknown>;
+  onCreateRetrospective: (input: {
+    templateId?: string;
+  }) => Promise<unknown>;
+  onEnterRound: (retrospectiveId: string, roundId: string) => Promise<unknown>;
+  onFinalize: (retrospectiveId: string) => Promise<unknown>;
+  onUpdateRetrospectiveClosure: (
+    retrospectiveId: string,
+    closureOn: string
+  ) => Promise<unknown>;
+  onUpdateRetrospectiveTemplate: (
+    retrospectiveId: string,
+    templateId: string
+  ) => Promise<unknown>;
+  onRefresh: () => Promise<void>;
+  onReviewCommitment: (
+    commitmentId: string,
+    retrospectiveId: string,
+    roundId: string,
+    rating: "met" | "mostly_met" | "partly_met" | "missed" | "skipped"
+  ) => Promise<unknown>;
+  state: RetrospectiveState;
+  users: UserRef[];
+}) {
+  const [selectedTemplateId, setSelectedTemplateId] = useState("");
+  const home = props.state.home;
+  const detail = props.state.detail;
+  const activePeriod = home?.activePeriod ?? detail?.period ?? null;
+  const defaultTemplateId =
+    selectedTemplateId ||
+    home?.settings?.defaultRetrospectiveTemplateId ||
+    props.state.templates[0]?.id ||
+    "";
+  const defaultTemplate = props.state.templates.find(
+    (template) => template.id === defaultTemplateId
+  );
+  const periodNoteRounds =
+    defaultTemplate?.rounds.filter(
+      (round) =>
+        round.kind === "notes" &&
+        (round.entryPhase === "commitment_period" || round.entryPhase === "both")
+    ) ?? [];
+
+  if (props.actor?.role !== "admin") {
+    return (
+      <StatusMessageCard
+        description="Retrospectives include household-private notes, so only admins can open this view."
+        title="Retrospective is for household admins."
+      />
+    );
+  }
+
+  if (props.state.isLoading && !home) {
+    return (
+      <StatusMessageCard
+        description="Gathering commitment periods, notes, templates, and recent sessions."
+        title="Opening retrospective..."
+      />
+    );
+  }
+
+  if (!home) {
+    return (
+      <section className="panel-stack">
+        <StatusMessageCard
+          description={
+            props.state.errorMessage ??
+            "The retrospective data did not load."
+          }
+          title="Retrospective is unavailable."
+        />
+        <Button onClick={() => void props.onRefresh()} type="button" variant="outline">
+          <RefreshCw className="size-4" />
+          Retry
+        </Button>
+      </section>
+    );
+  }
+
+  const handleCreateRetrospective = () => {
+    if (!home.activePeriod) {
+      return;
+    }
+
+    const daysUntilClosure = home.daysUntilClosure ?? 0;
+
+    if (
+      daysUntilClosure > 0 &&
+      !window.confirm(
+        `This commitment period has ${daysUntilClosure} day${
+          daysUntilClosure === 1 ? "" : "s"
+        } left. Creating a retrospective now will end it early and start a new retrospective.`
+      )
+    ) {
+      return;
+    }
+
+    void props.onCreateRetrospective({
+      ...(defaultTemplateId ? { templateId: defaultTemplateId } : {})
+    });
+  };
+  const showCreateControls = !detail;
+
+  return (
+    <section className="retrospective-shell panel-stack">
+      <SectionHeading
+        actions={
+          showCreateControls ? (
+            <div className="header-action-row">
+              {props.state.templates.length > 1 ? (
+                <div className="retrospective-header-template">
+                  <FormSelect
+                    label="Template"
+                    onValueChange={setSelectedTemplateId}
+                    options={props.state.templates.map((template) => ({
+                      label: template.name,
+                      value: template.id
+                    }))}
+                    value={defaultTemplateId}
+                  />
+                </div>
+              ) : null}
+              <Button
+                disabled={!home.activePeriod || !defaultTemplateId}
+                onClick={handleCreateRetrospective}
+                type="button"
+              >
+                <Plus className="size-4" />
+                Create Retro
+              </Button>
+            </div>
+          ) : null
+        }
+        description={
+          activePeriod
+            ? `${formatIsoDate(activePeriod.periodStartOn)} to ${formatIsoDate(activePeriod.closureOn)}`
+            : "No commitment period has been opened yet."
+        }
+        eyebrow="Retrospective"
+        title={
+          detail
+            ? detail.title
+            : home.daysUntilClosure === 0
+              ? "Ready for review"
+              : `${home.daysUntilClosure ?? 0} days until closure`
+        }
+      />
+
+      {detail ? (
+        <ActiveRetrospectivePanel
+          detail={detail}
+          onCreateCommitment={props.onCreateCommitment}
+          onCreateNote={props.onCreateNote}
+          onDeleteNote={props.onDeleteNote}
+          onEnterRound={props.onEnterRound}
+          onFinalize={props.onFinalize}
+          onReviewCommitment={props.onReviewCommitment}
+          onUpdateTemplate={props.onUpdateRetrospectiveTemplate}
+          onUpdateClosureOn={props.onUpdateRetrospectiveClosure}
+          actor={props.actor}
+          templates={props.state.templates}
+          users={props.users}
+        />
+      ) : null}
+
+        <CommitmentTracker
+          commitments={detail?.commitments ?? home.commitments}
+          onAddCheckin={props.onAddCheckin}
+          onDeleteCheckin={props.onDeleteCheckin}
+          onUpdateChecklist={props.onUpdateCommitmentChecklist}
+          actor={props.actor}
+          period={activePeriod}
+        />
+
+      {activePeriod && !detail ? (
+        <SurfaceCard className="retrospective-card">
+          <p className="eyebrow">Notes for next retro</p>
+          <div className="retrospective-note-grid">
+            {periodNoteRounds.length === 0 ? (
+              <EmptyStateCard message="This template has no period note rounds." />
+            ) : null}
+            {periodNoteRounds.map((round) => (
+              <div className="retrospective-period-note-panel" key={round.id}>
+                <RetrospectiveNoteList
+                  emptyMessage="No visible notes for this prompt yet."
+                  notes={home.notes.filter((note) => note.templateRoundId === round.id)}
+                  onDeleteNote={props.onDeleteNote}
+                />
+                <RetrospectiveNoteComposer
+                  commitmentPeriodId={activePeriod.id}
+                  entryPhase="commitment_period"
+                  onCreateNote={props.onCreateNote}
+                  round={round}
+                />
+              </div>
+            ))}
+          </div>
+        </SurfaceCard>
+      ) : null}
+    </section>
+  );
+}
+
+function ActiveRetrospectivePanel(props: {
+  actor: Actor | null;
+  detail: RetrospectiveDetail;
+  onCreateCommitment: (
+    retrospectiveId: string,
+    draft: CommitmentDraft
+  ) => Promise<unknown>;
+  onCreateNote: (input: {
+    body: string;
+    commitmentPeriodId: string;
+    entryPhase: RetrospectiveNoteWritePhase;
+    retrospectiveId?: string | null;
+    roundId?: string | null;
+    templateRoundId?: string | null;
+  }) => Promise<unknown>;
+  onDeleteNote: (noteId: string) => Promise<unknown>;
+  onEnterRound: (retrospectiveId: string, roundId: string) => Promise<unknown>;
+  onFinalize: (retrospectiveId: string) => Promise<unknown>;
+  onReviewCommitment: (
+    commitmentId: string,
+    retrospectiveId: string,
+    roundId: string,
+    rating: "met" | "mostly_met" | "partly_met" | "missed" | "skipped"
+  ) => Promise<unknown>;
+  onUpdateClosureOn: (retrospectiveId: string, closureOn: string) => Promise<unknown>;
+  onUpdateTemplate: (retrospectiveId: string, templateId: string) => Promise<unknown>;
+  templates: RetrospectiveTemplate[];
+  users: UserRef[];
+}) {
+  const [closureOnDraft, setClosureOnDraft] = useState(
+    props.detail.nextCommitmentPeriodClosureOn ?? ""
+  );
+  const currentRound =
+    props.detail.rounds.find((round) => round.id === props.detail.currentRoundId) ??
+    props.detail.rounds[0] ??
+    null;
+  const lastRound = props.detail.rounds[props.detail.rounds.length - 1] ?? null;
+  const nextCommitmentPeriodStartOn =
+    props.detail.nextCommitmentPeriodStartOn ?? props.detail.period?.closureOn ?? "";
+  const canEditClosureOn =
+    props.detail.status !== "finalized" && nextCommitmentPeriodStartOn !== "";
+
+  useEffect(() => {
+    setClosureOnDraft(props.detail.nextCommitmentPeriodClosureOn ?? "");
+  }, [props.detail.id, props.detail.nextCommitmentPeriodClosureOn]);
+
+  const handleClosureOnChange = (value: string) => {
+    setClosureOnDraft(value);
+
+    if (
+      !props.detail.period ||
+      props.detail.status === "finalized" ||
+      !value ||
+      value < nextCommitmentPeriodStartOn ||
+      value === props.detail.nextCommitmentPeriodClosureOn
+    ) {
+      return;
+    }
+
+    void props.onUpdateClosureOn(props.detail.id, value);
+  };
+
+  const handleTemplateChange = (templateId: string) => {
+    if (
+      props.detail.status === "finalized" ||
+      !templateId ||
+      templateId === props.detail.templateId
+    ) {
+      return;
+    }
+
+    if (
+      !window.confirm(
+        "Changing templates will replace this retro's rounds. Notes from the old rounds may no longer appear in the step-by-step flow."
+      )
+    ) {
+      return;
+    }
+
+    void props.onUpdateTemplate(props.detail.id, templateId);
+  };
+
+  return (
+    <SurfaceCard className="retrospective-card">
+      <SectionHeading
+        compact
+        description={
+          props.detail.period
+            ? `${formatIsoDate(props.detail.period.periodStartOn)} to ${formatIsoDate(props.detail.period.closureOn)}`
+            : ""
+        }
+        eyebrow={props.detail.status}
+        title={currentRound?.title ?? "Retrospective"}
+      />
+
+      <div className="retrospective-active-controls">
+        {props.templates.length > 1 ? (
+          <FormSelect
+            disabled={props.detail.status === "finalized"}
+            label="Template"
+            onValueChange={handleTemplateChange}
+            options={props.templates.map((template) => ({
+              label: template.name,
+              value: template.id
+            }))}
+            value={props.detail.templateId}
+          />
+        ) : null}
+        {nextCommitmentPeriodStartOn ? (
+          <FormField label="Ends on">
+            <FormInput
+              disabled={!canEditClosureOn}
+              min={nextCommitmentPeriodStartOn}
+              onChange={(event) => handleClosureOnChange(event.target.value)}
+              type="date"
+              value={closureOnDraft}
+            />
+          </FormField>
+        ) : null}
+        {lastRound && currentRound?.id === lastRound.id ? (
+          <Button
+            className="bg-black text-white hover:bg-black/80"
+            disabled={props.detail.status === "finalized"}
+            onClick={() => void props.onFinalize(props.detail.id)}
+            size="sm"
+            type="button"
+          >
+            Finalize
+          </Button>
+        ) : null}
+      </div>
+
+      <div className="retrospective-round-tabs">
+        {props.detail.rounds.map((round) => (
+          <Button
+            key={round.id}
+            onClick={() => void props.onEnterRound(props.detail.id, round.id)}
+            size="sm"
+            type="button"
+            variant={round.id === currentRound?.id ? "default" : "outline"}
+          >
+            {round.title}
+          </Button>
+        ))}
+      </div>
+
+      {currentRound ? (
+        <RetrospectiveRoundBody
+          commitments={props.detail.commitments}
+          detail={props.detail}
+          notes={props.detail.notes.filter((note) => note.roundId === currentRound.id)}
+          onCreateCommitment={props.onCreateCommitment}
+          onCreateNote={props.onCreateNote}
+          onDeleteNote={props.onDeleteNote}
+          onReviewCommitment={props.onReviewCommitment}
+          actor={props.actor}
+          round={currentRound}
+          users={props.users}
+        />
+      ) : null}
+
+    </SurfaceCard>
+  );
+}
+
+function RetrospectiveRoundBody(props: {
+  actor: Actor | null;
+  commitments: Commitment[];
+  detail: RetrospectiveDetail;
+  notes: RetrospectiveNote[];
+  onCreateCommitment: (
+    retrospectiveId: string,
+    draft: CommitmentDraft
+  ) => Promise<unknown>;
+  onCreateNote: (input: {
+    body: string;
+    commitmentPeriodId: string;
+    entryPhase: RetrospectiveNoteWritePhase;
+    retrospectiveId?: string | null;
+    roundId?: string | null;
+    templateRoundId?: string | null;
+  }) => Promise<unknown>;
+  onDeleteNote: (noteId: string) => Promise<unknown>;
+  onReviewCommitment: (
+    commitmentId: string,
+    retrospectiveId: string,
+    roundId: string,
+    rating: "met" | "mostly_met" | "partly_met" | "missed" | "skipped"
+  ) => Promise<unknown>;
+  round: RetrospectiveRound;
+  users: UserRef[];
+}) {
+  if (props.round.kind === "commitment_capture") {
+    return (
+      <CommitmentCaptureForm
+        actor={props.actor}
+        onSubmit={(draft) => props.onCreateCommitment(props.detail.id, draft)}
+        users={props.users}
+      />
+    );
+  }
+
+  if (props.round.kind === "task_lookback") {
+    return (
+      <div className="retrospective-list">
+        {props.detail.taskLookback.length === 0 ? (
+          <EmptyStateCard message="No completed tasks landed in this period." />
+        ) : null}
+        {props.detail.taskLookback.map((task) => (
+          <div className="retrospective-row" key={task.id}>
+            <strong>{task.title}</strong>
+            <span>{task.completedAt ? new Date(task.completedAt).toLocaleDateString() : ""}</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (props.round.kind === "notes") {
+    return (
+      <div className="retrospective-note-grid">
+        <RetrospectiveNoteList
+          notes={props.notes}
+          onDeleteNote={props.onDeleteNote}
+        />
+        {props.round.entryPhase === "retrospective" || props.round.entryPhase === "both" ? (
+          <RetrospectiveNoteComposer
+            commitmentPeriodId={props.detail.commitmentPeriodId}
+            entryPhase="retrospective"
+            onCreateNote={props.onCreateNote}
+            retrospectiveId={props.detail.id}
+            round={props.round}
+            roundId={props.round.id}
+          />
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <div className="retrospective-list">
+      {props.commitments.length === 0 ? (
+        <EmptyStateCard message="No commitments are ready for review." />
+      ) : null}
+      {props.commitments.map((commitment) => {
+        const currentReview = commitment.reviews.find(
+          (review) => review.retrospectiveId === props.detail.id
+        );
+        const canMutateCommitment =
+          commitment.assigneeUserId !== null && commitment.assigneeUserId === props.actor?.id;
+
+        return (
+          <div className="retrospective-row" key={commitment.id}>
+            <span>
+              <strong>{commitment.title}</strong>
+              <span>
+                {commitment.assignee?.displayName ?? "Unassigned"} ·{" "}
+                {getCommitmentProgressLabel(commitment)}
+              </span>
+            </span>
+            <div className="retrospective-rating-row">
+              {[
+                ["met", "Met"],
+                ["mostly_met", "Mostly"],
+                ["partly_met", "Partly"],
+                ["missed", "Missed"],
+                ["skipped", "Skip"]
+              ].map(([rating, label]) => {
+                const isSelected = currentReview?.rating === rating;
+
+                return (
+                  <Button
+                    className={
+                      isSelected ? "bg-black text-white hover:bg-black/80" : undefined
+                    }
+                    disabled={!canMutateCommitment}
+                    key={rating}
+                    onClick={() =>
+                      void props.onReviewCommitment(
+                        commitment.id,
+                        props.detail.id,
+                        props.round.id,
+                        rating as
+                          | "met"
+                          | "mostly_met"
+                          | "partly_met"
+                          | "missed"
+                          | "skipped"
+                      )
+                    }
+                    size="sm"
+                    type="button"
+                    variant={isSelected ? "default" : "ghost"}
+                  >
+                    {label}
+                  </Button>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function RetrospectiveNoteList(props: {
+  emptyMessage?: string;
+  notes: RetrospectiveNote[];
+  onDeleteNote?: (noteId: string) => Promise<unknown>;
+}) {
+  if (props.notes.length === 0) {
+    return <EmptyStateCard message={props.emptyMessage ?? "No notes for this round yet."} />;
+  }
+
+  return (
+    <div className="retrospective-list">
+      {props.notes.map((note) => (
+        <div
+          className={cn(
+            "retrospective-row retrospective-note-row",
+            note.visibilityState === "private" && "retrospective-note-row-private",
+            note.visibilityState === "private_until_round" &&
+              "retrospective-note-row-private-until"
+          )}
+          key={note.id}
+        >
+          <span>
+            <strong>{note.author?.displayName ?? "Someone"}</strong>
+            <span>{note.body}</span>
+          </span>
+          <div className="retrospective-note-actions">
+            <Badge variant="outline">{getRetrospectiveNoteVisibilityLabel(note)}</Badge>
+            {props.onDeleteNote ? (
+              <Button
+                className="rounded-full"
+                onClick={() => {
+                  void props.onDeleteNote?.(note.id);
+                }}
+                size="icon"
+                type="button"
+                variant="ghost"
+              >
+                <Trash2 className="size-4" />
+                <span className="sr-only">Delete note</span>
+              </Button>
+            ) : null}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function getRetrospectiveNoteVisibilityLabel(note: RetrospectiveNote) {
+  switch (note.visibilityState) {
+    case "private":
+      return "Private to you";
+    case "private_until_round":
+      return "Private until round";
+    case "revealed":
+      return "Revealed";
+    case "shared":
+      return "Shared";
+  }
+}
+
+function RetrospectiveNoteComposer(props: {
+  commitmentPeriodId: string;
+  entryPhase: RetrospectiveNoteWritePhase;
+  onCreateNote: (input: {
+    body: string;
+    commitmentPeriodId: string;
+    entryPhase: RetrospectiveNoteWritePhase;
+    retrospectiveId?: string | null;
+    roundId?: string | null;
+    templateRoundId?: string | null;
+  }) => Promise<unknown>;
+  retrospectiveId?: string;
+  round: RetrospectiveRound | RetrospectiveTemplateRound;
+  roundId?: string;
+}) {
+  const [body, setBody] = useState("");
+  const templateRoundId =
+    "sourceTemplateRoundId" in props.round
+      ? props.round.sourceTemplateRoundId
+      : props.round.id;
+
+  return (
+    <form
+      className="retrospective-composer"
+      onSubmit={(event) => {
+        event.preventDefault();
+
+        if (!body.trim()) {
+          return;
+        }
+
+        void props
+          .onCreateNote({
+            body,
+            commitmentPeriodId: props.commitmentPeriodId,
+            entryPhase: props.entryPhase,
+            retrospectiveId: props.retrospectiveId ?? null,
+            roundId: props.roundId ?? null,
+            templateRoundId
+          })
+          .then(() => setBody(""));
+      }}
+    >
+      <FormField label={props.round.title}>
+        <FormTextarea
+          onChange={(event) => setBody(event.target.value)}
+          placeholder={
+            props.round.privacy === "private_until_round"
+              ? "Private until this round opens"
+              : props.round.privacy === "private"
+                ? "Private to you"
+                : "Shared with the household"
+          }
+          value={body}
+        />
+      </FormField>
+      <Button size="sm" type="submit">
+        <Heart className="size-4" />
+        Add Note
+      </Button>
+    </form>
+  );
+}
+
+function CommitmentCaptureForm(props: {
+  actor: Actor | null;
+  onSubmit: (draft: CommitmentDraft) => Promise<unknown>;
+  users: UserRef[];
+}) {
+  const assignableUsers = useMemo(
+    () => props.users.filter((user) => user.role === "admin"),
+    [props.users]
+  );
+  const [draft, setDraft] = useState<CommitmentDraft>({
+    assigneeUserId:
+      assignableUsers.find((user) => user.id === props.actor?.id)?.id ??
+      assignableUsers[0]?.id ??
+      "",
+    checklistItems: [],
+    targetCount: "",
+    title: "",
+    trackingInterval: "none",
+    trackingKind: "binary"
+  });
+  const [checklistComposerValue, setChecklistComposerValue] = useState("");
+
+  useEffect(() => {
+    if (draft.assigneeUserId || assignableUsers.length === 0) {
+      return;
+    }
+
+    setDraft((current) => ({
+      ...current,
+      assigneeUserId:
+        assignableUsers.find((user) => user.id === props.actor?.id)?.id ??
+        assignableUsers[0]?.id ??
+        ""
+    }));
+  }, [assignableUsers, draft.assigneeUserId, props.actor?.id]);
+
+  const resetDraft = () => {
+    setDraft({
+      assigneeUserId:
+        assignableUsers.find((user) => user.id === props.actor?.id)?.id ??
+        assignableUsers[0]?.id ??
+        "",
+      checklistItems: [],
+      targetCount: "",
+      title: "",
+      trackingInterval: "none",
+      trackingKind: "binary"
+    });
+    setChecklistComposerValue("");
+  };
+  const addChecklistItem = () => {
+    const body = checklistComposerValue.trim();
+
+    if (!body) {
+      return;
+    }
+
+    setDraft((current) => ({
+      ...current,
+      checklistItems: [
+        ...current.checklistItems,
+        {
+          body,
+          clientId: crypto.randomUUID(),
+          isCompleted: false
+        }
+      ]
+    }));
+    setChecklistComposerValue("");
+  };
+  const canSubmit =
+    Boolean(draft.assigneeUserId) &&
+    Boolean(draft.title.trim()) &&
+    (draft.trackingKind !== "checklist" ||
+      draft.checklistItems.some((item) => item.body.trim()) ||
+      Boolean(checklistComposerValue.trim()));
+
+  return (
+    <form
+      className="retrospective-composer"
+      onSubmit={(event) => {
+        event.preventDefault();
+
+        if (!canSubmit) {
+          return;
+        }
+
+        const pendingChecklistItem = checklistComposerValue.trim();
+        const submitDraft =
+          draft.trackingKind === "checklist" && pendingChecklistItem
+            ? {
+                ...draft,
+                checklistItems: [
+                  ...draft.checklistItems,
+                  {
+                    body: pendingChecklistItem,
+                    clientId: crypto.randomUUID(),
+                    isCompleted: false
+                  }
+                ]
+              }
+            : draft;
+
+        void props.onSubmit(submitDraft).then(resetDraft);
+      }}
+    >
+      <FormField label="Commitment">
+        <FormInput
+          onChange={(event) => setDraft({ ...draft, title: event.target.value })}
+          placeholder="Read 3x/week"
+          value={draft.title}
+        />
+      </FormField>
+      <div className="retrospective-form-grid">
+        <FormSelect
+          label="Assignee"
+          onValueChange={(value) =>
+            setDraft({
+              ...draft,
+              assigneeUserId: value
+            })
+          }
+          options={assignableUsers.map((user) => ({
+            label: user.displayName,
+            value: user.id
+          }))}
+          value={draft.assigneeUserId}
+        />
+        <FormSelect
+          label="Tracking"
+          onValueChange={(value) =>
+            setDraft({
+              ...draft,
+              targetCount: value === "checklist" ? "" : draft.targetCount,
+              trackingKind: value as CommitmentTrackingKind
+            })
+          }
+          options={[
+            { label: "Binary", value: "binary" },
+            { label: "Count per period", value: "count_per_period" },
+            { label: "Checklist", value: "checklist" }
+          ]}
+          value={draft.trackingKind}
+        />
+        <FormSelect
+          label="Interval"
+          onValueChange={(value) =>
+            setDraft({
+              ...draft,
+              trackingInterval: value as CommitmentDraft["trackingInterval"]
+            })
+          }
+          options={[
+            { label: "None", value: "none" },
+            { label: "Daily", value: "daily" },
+            { label: "Weekly", value: "weekly" },
+            { label: "Monthly", value: "monthly" }
+          ]}
+          value={draft.trackingInterval}
+        />
+        {draft.trackingKind !== "checklist" ? (
+          <FormField label="Target">
+            <FormInput
+              min={0}
+              onChange={(event) =>
+                setDraft({ ...draft, targetCount: event.target.value })
+              }
+              placeholder="3"
+              type="number"
+              value={draft.targetCount}
+            />
+          </FormField>
+        ) : null}
+      </div>
+      {draft.trackingKind === "checklist" ? (
+        <div className="commitment-checklist-editor">
+          {draft.checklistItems.map((item) => (
+            <div className="commitment-checklist-edit-row" key={item.clientId}>
+              <FormInput
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    checklistItems: current.checklistItems.map((entry) =>
+                      entry.clientId === item.clientId
+                        ? { ...entry, body: event.target.value }
+                        : entry
+                    )
+                  }))
+                }
+                value={item.body}
+              />
+              <Button
+                onClick={() =>
+                  setDraft((current) => ({
+                    ...current,
+                    checklistItems: current.checklistItems.filter(
+                      (entry) => entry.clientId !== item.clientId
+                    )
+                  }))
+                }
+                size="icon"
+                type="button"
+                variant="ghost"
+              >
+                <Trash2 className="size-4" />
+                <span className="sr-only">Remove checklist item</span>
+              </Button>
+            </div>
+          ))}
+          <div className="commitment-checklist-edit-row">
+            <FormInput
+              onChange={(event) => setChecklistComposerValue(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  addChecklistItem();
+                }
+              }}
+              placeholder="Checklist item"
+              value={checklistComposerValue}
+            />
+            <Button
+              disabled={!checklistComposerValue.trim()}
+              onClick={addChecklistItem}
+              size="icon"
+              type="button"
+              variant="outline"
+            >
+              <Plus className="size-4" />
+              <span className="sr-only">Add checklist item</span>
+            </Button>
+          </div>
+        </div>
+      ) : null}
+      <Button disabled={!canSubmit} type="submit">
+        <Plus className="size-4" />
+        Add Commitment
+      </Button>
+    </form>
+  );
+}
+
+function CommitmentTracker(props: {
+  actor: Actor | null;
+  commitments: Commitment[];
+  onAddCheckin: (commitmentId: string) => Promise<unknown>;
+  onDeleteCheckin: (checkinId: string) => Promise<unknown>;
+  onUpdateChecklist: (
+    commitment: Commitment,
+    checklistItems: Array<{ body: string; isCompleted?: boolean }>
+  ) => Promise<unknown>;
+  period: CommitmentPeriod | null;
+}) {
+  const groups = groupCommitmentsByAssignee(props.commitments);
+
+  return (
+    <SurfaceCard className="retrospective-card">
+      <p className="eyebrow">Commitments</p>
+      {props.commitments.length === 0 ? (
+        <EmptyStateCard message="No active commitments yet." />
+      ) : (
+        <div className="commitment-assignee-groups">
+          {groups.map((group) => (
+            <div className="commitment-assignee-group" key={group.key}>
+              <div className="commitment-assignee-heading">
+                <strong>{group.label}</strong>
+                <span>
+                  {group.commitments.length} commitment
+                  {group.commitments.length === 1 ? "" : "s"}
+                </span>
+              </div>
+              <div className="retrospective-list">
+                {group.commitments.map((commitment) => (
+                  <CommitmentTrackerRow
+                    actor={props.actor}
+                    commitment={commitment}
+                    key={commitment.id}
+                    onAddCheckin={props.onAddCheckin}
+                    onDeleteCheckin={props.onDeleteCheckin}
+                    onUpdateChecklist={props.onUpdateChecklist}
+                    period={props.period}
+                  />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </SurfaceCard>
+  );
+}
+
+function groupCommitmentsByAssignee(commitments: Commitment[]) {
+  const groups = new Map<
+    string,
+    { commitments: Commitment[]; key: string; label: string }
+  >();
+
+  for (const commitment of commitments) {
+    const key = commitment.assigneeUserId ?? "unassigned";
+    const label = commitment.assignee?.displayName ?? "Unassigned";
+    const group = groups.get(key) ?? { commitments: [], key, label };
+
+    group.commitments.push(commitment);
+    groups.set(key, group);
+  }
+
+  return [...groups.values()].sort((left, right) =>
+    left.label.localeCompare(right.label)
+  );
+}
+
+function CommitmentTrackerRow(props: {
+  actor: Actor | null;
+  commitment: Commitment;
+  onAddCheckin: (commitmentId: string) => Promise<unknown>;
+  onDeleteCheckin: (checkinId: string) => Promise<unknown>;
+  onUpdateChecklist: (
+    commitment: Commitment,
+    checklistItems: Array<{ body: string; isCompleted?: boolean }>
+  ) => Promise<unknown>;
+  period: CommitmentPeriod | null;
+}) {
+  const [checklistComposerValue, setChecklistComposerValue] = useState("");
+  const sortedCheckins = props.commitment.checkins
+    .slice()
+    .sort((left, right) =>
+      left.checkinOn === right.checkinOn
+        ? left.createdAt.localeCompare(right.createdAt)
+        : left.checkinOn.localeCompare(right.checkinOn)
+    );
+  const latestCheckin = sortedCheckins[sortedCheckins.length - 1] ?? null;
+  const isCountGrid = props.commitment.trackingKind === "count_per_period";
+  const isChecklist = props.commitment.trackingKind === "checklist";
+  const targetCount = Math.max(1, props.commitment.targetCount ?? 1);
+  const rowCount = isCountGrid
+    ? getCommitmentGridRows(props.commitment, props.period)
+    : 0;
+  const slotCount = rowCount * targetCount;
+  const filledCount = Math.min(
+    slotCount,
+    sortedCheckins.reduce((sum, checkin) => sum + checkin.amount, 0)
+  );
+  const canMutate =
+    props.commitment.status === "active" &&
+    props.commitment.assigneeUserId !== null &&
+    props.commitment.assigneeUserId === props.actor?.id;
+  const isBinaryFinished =
+    props.commitment.trackingKind === "binary" && latestCheckin !== null;
+  const updateChecklist = (
+    items: Array<{ body: string; isCompleted?: boolean }>
+  ) => {
+    void props.onUpdateChecklist(
+      props.commitment,
+      items
+        .map((item) => ({
+          body: item.body.trim(),
+          isCompleted: item.isCompleted ?? false
+        }))
+        .filter((item) => item.body)
+    );
+  };
+  const addChecklistItem = () => {
+    const body = checklistComposerValue.trim();
+
+    if (!body) {
+      return;
+    }
+
+    updateChecklist([
+      ...props.commitment.checklistItems.map((item) => ({
+        body: item.body,
+        isCompleted: item.isCompleted
+      })),
+      { body, isCompleted: false }
+    ]);
+    setChecklistComposerValue("");
+  };
+
+  return (
+    <div className="retrospective-row commitment-tracker-row">
+      <span>
+        <strong>{props.commitment.title}</strong>
+        <span>
+          {canMutate ? "Yours" : (props.commitment.assignee?.displayName ?? "Unassigned")} ·{" "}
+          {getCommitmentProgressLabel(props.commitment)}
+        </span>
+      </span>
+      {isCountGrid ? (
+        <div className="commitment-grid-wrap">
+          <div
+            className="commitment-check-grid"
+            style={{ gridTemplateColumns: `repeat(${targetCount}, minmax(0, 1fr))` }}
+          >
+            {Array.from({ length: slotCount }, (_, index) => (
+              <span
+                aria-label={index < filledCount ? "Completed slot" : "Open slot"}
+                className={cn(
+                  "commitment-check-cell",
+                  index < filledCount && "commitment-check-cell-filled"
+                )}
+                key={index}
+                role="img"
+              />
+            ))}
+          </div>
+          <div className="commitment-stepper">
+            <Button
+              disabled={!canMutate || filledCount >= slotCount}
+              onClick={() => void props.onAddCheckin(props.commitment.id)}
+              size="icon"
+              type="button"
+              variant="outline"
+            >
+              <Plus className="size-4" />
+              <span className="sr-only">Add progress</span>
+            </Button>
+            <Button
+              disabled={!canMutate || !latestCheckin}
+              onClick={() => latestCheckin && void props.onDeleteCheckin(latestCheckin.id)}
+              size="icon"
+              type="button"
+              variant="outline"
+            >
+              <span aria-hidden="true">-</span>
+              <span className="sr-only">Remove progress</span>
+            </Button>
+          </div>
+        </div>
+      ) : isChecklist ? (
+        <div className="commitment-checklist-track">
+          {props.commitment.checklistItems.length === 0 ? (
+            <span className="muted-text">No checklist items yet.</span>
+          ) : null}
+          {props.commitment.checklistItems.map((item) => (
+            <div className="commitment-checklist-item" key={item.id}>
+              <Checkbox
+                checked={item.isCompleted}
+                disabled={!canMutate}
+                onCheckedChange={(checked) =>
+                  updateChecklist(
+                    props.commitment.checklistItems.map((entry) => ({
+                      body: entry.body,
+                      isCompleted:
+                        entry.id === item.id ? checked === true : entry.isCompleted
+                    }))
+                  )
+                }
+              />
+              <FormInput
+                defaultValue={item.body}
+                disabled={!canMutate}
+                onBlur={(event) => {
+                  const body = event.target.value.trim();
+
+                  if (body && body !== item.body) {
+                    updateChecklist(
+                      props.commitment.checklistItems.map((entry) => ({
+                        body: entry.id === item.id ? body : entry.body,
+                        isCompleted: entry.isCompleted
+                      }))
+                    );
+                  }
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.currentTarget.blur();
+                  }
+                }}
+              />
+              <Button
+                disabled={!canMutate}
+                onClick={() =>
+                  updateChecklist(
+                    props.commitment.checklistItems
+                      .filter((entry) => entry.id !== item.id)
+                      .map((entry) => ({
+                        body: entry.body,
+                        isCompleted: entry.isCompleted
+                      }))
+                  )
+                }
+                size="icon"
+                type="button"
+                variant="ghost"
+              >
+                <Trash2 className="size-4" />
+                <span className="sr-only">Remove checklist item</span>
+              </Button>
+            </div>
+          ))}
+          {canMutate ? (
+            <div className="commitment-checklist-add-row">
+              <FormInput
+                onChange={(event) => setChecklistComposerValue(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    addChecklistItem();
+                  }
+                }}
+                placeholder="Add checklist item"
+                value={checklistComposerValue}
+              />
+              <Button
+                disabled={!checklistComposerValue.trim()}
+                onClick={addChecklistItem}
+                size="icon"
+                type="button"
+                variant="outline"
+              >
+                <Plus className="size-4" />
+                <span className="sr-only">Add checklist item</span>
+              </Button>
+            </div>
+          ) : null}
+        </div>
+      ) : (
+        <Button
+          disabled={!canMutate}
+          className={
+            isBinaryFinished ? undefined : "bg-black text-white hover:bg-black/80"
+          }
+          onClick={() =>
+            isBinaryFinished && latestCheckin
+              ? void props.onDeleteCheckin(latestCheckin.id)
+              : void props.onAddCheckin(props.commitment.id)
+          }
+          size="sm"
+          type="button"
+          variant={isBinaryFinished ? "outline" : "default"}
+        >
+          <Check className="size-4" />
+          {isBinaryFinished ? "Unmark" : "Finish"}
+        </Button>
+      )}
+    </div>
   );
 }
 

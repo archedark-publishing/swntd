@@ -330,6 +330,379 @@ export const attachments = sqliteTable(
   (table) => [index("attachments_task_id_idx").on(table.taskId)]
 );
 
+export const retrospectiveTemplates = sqliteTable(
+  "retrospective_templates",
+  {
+    id: text("id").primaryKey().$defaultFn(createId),
+    householdId: text("household_id")
+      .notNull()
+      .references(() => households.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    isSystem: integer("is_system", { mode: "boolean" }).notNull().default(false),
+    createdByUserId: text("created_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    updatedByUserId: text("updated_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(now),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(now)
+  },
+  (table) => [index("retrospective_templates_household_id_idx").on(table.householdId)]
+);
+
+export const retrospectiveTemplateRounds = sqliteTable(
+  "retrospective_template_rounds",
+  {
+    id: text("id").primaryKey().$defaultFn(createId),
+    templateId: text("template_id")
+      .notNull()
+      .references(() => retrospectiveTemplates.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    kind: text("kind", {
+      enum: ["commitment_review", "task_lookback", "notes", "commitment_capture"]
+    }).notNull(),
+    prompt: text("prompt").notNull().default(""),
+    sortOrder: integer("sort_order").notNull().default(0),
+    entryPhase: text("entry_phase", {
+      enum: ["commitment_period", "retrospective", "both"]
+    }),
+    privacy: text("privacy", {
+      enum: ["shared", "private_until_round", "private"]
+    }),
+    configJson: text("config_json").notNull().default("{}"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(now),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(now)
+  },
+  (table) => [
+    index("retrospective_template_rounds_template_id_idx").on(table.templateId)
+  ]
+);
+
+export const commitmentPeriods = sqliteTable(
+  "commitment_periods",
+  {
+    id: text("id").primaryKey().$defaultFn(createId),
+    householdId: text("household_id")
+      .notNull()
+      .references(() => households.id, { onDelete: "cascade" }),
+    openedByRetrospectiveId: text("opened_by_retrospective_id"),
+    reviewedByRetrospectiveId: text("reviewed_by_retrospective_id"),
+    status: text("status", { enum: ["active", "closed", "reviewed"] })
+      .notNull()
+      .default("active"),
+    periodStartOn: text("period_start_on").notNull(),
+    closureOn: text("closure_on").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(now),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(now)
+  },
+  (table) => [
+    index("commitment_periods_household_status_idx").on(table.householdId, table.status),
+    index("commitment_periods_household_closure_idx").on(table.householdId, table.closureOn)
+  ]
+);
+
+export const retrospectives = sqliteTable(
+  "retrospectives",
+  {
+    id: text("id").primaryKey().$defaultFn(createId),
+    householdId: text("household_id")
+      .notNull()
+      .references(() => households.id, { onDelete: "cascade" }),
+    templateId: text("template_id")
+      .notNull()
+      .references(() => retrospectiveTemplates.id, { onDelete: "restrict" }),
+    commitmentPeriodId: text("commitment_period_id")
+      .notNull()
+      .references(() => commitmentPeriods.id, { onDelete: "restrict" }),
+    title: text("title").notNull(),
+    status: text("status", { enum: ["draft", "active", "finalized"] })
+      .notNull()
+      .default("draft"),
+    currentRoundId: text("current_round_id"),
+    createdByUserId: text("created_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    updatedByUserId: text("updated_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    startedAt: integer("started_at", { mode: "timestamp_ms" }),
+    finalizedAt: integer("finalized_at", { mode: "timestamp_ms" }),
+    nextCommitmentPeriodStartOn: text("next_commitment_period_start_on"),
+    nextCommitmentPeriodClosureOn: text("next_commitment_period_closure_on"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(now),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(now)
+  },
+  (table) => [
+    index("retrospectives_household_status_idx").on(table.householdId, table.status),
+    index("retrospectives_commitment_period_idx").on(table.commitmentPeriodId)
+  ]
+);
+
+export const retrospectiveRounds = sqliteTable(
+  "retrospective_rounds",
+  {
+    id: text("id").primaryKey().$defaultFn(createId),
+    retrospectiveId: text("retrospective_id")
+      .notNull()
+      .references(() => retrospectives.id, { onDelete: "cascade" }),
+    sourceTemplateRoundId: text("source_template_round_id").references(
+      () => retrospectiveTemplateRounds.id,
+      { onDelete: "set null" }
+    ),
+    title: text("title").notNull(),
+    kind: text("kind", {
+      enum: ["commitment_review", "task_lookback", "notes", "commitment_capture"]
+    }).notNull(),
+    prompt: text("prompt").notNull().default(""),
+    sortOrder: integer("sort_order").notNull().default(0),
+    entryPhase: text("entry_phase", {
+      enum: ["commitment_period", "retrospective", "both"]
+    }),
+    privacy: text("privacy", {
+      enum: ["shared", "private_until_round", "private"]
+    }),
+    configJson: text("config_json").notNull().default("{}"),
+    startedAt: integer("started_at", { mode: "timestamp_ms" }),
+    completedAt: integer("completed_at", { mode: "timestamp_ms" }),
+    summary: text("summary").notNull().default(""),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(now),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(now)
+  },
+  (table) => [
+    index("retrospective_rounds_retrospective_id_idx").on(table.retrospectiveId)
+  ]
+);
+
+export const retrospectiveNotes = sqliteTable(
+  "retrospective_notes",
+  {
+    id: text("id").primaryKey().$defaultFn(createId),
+    householdId: text("household_id")
+      .notNull()
+      .references(() => households.id, { onDelete: "cascade" }),
+    commitmentPeriodId: text("commitment_period_id")
+      .notNull()
+      .references(() => commitmentPeriods.id, { onDelete: "cascade" }),
+    templateRoundId: text("template_round_id").references(
+      () => retrospectiveTemplateRounds.id,
+      { onDelete: "set null" }
+    ),
+    retrospectiveId: text("retrospective_id").references(() => retrospectives.id, {
+      onDelete: "set null"
+    }),
+    roundId: text("round_id").references(() => retrospectiveRounds.id, {
+      onDelete: "set null"
+    }),
+    authorUserId: text("author_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    body: text("body").notNull(),
+    entryPhase: text("entry_phase", {
+      enum: ["commitment_period", "retrospective"]
+    }).notNull(),
+    visibilityState: text("visibility_state", {
+      enum: ["shared", "private_until_round", "private", "revealed"]
+    }).notNull(),
+    revealedInRetrospectiveId: text("revealed_in_retrospective_id").references(
+      () => retrospectives.id,
+      { onDelete: "set null" }
+    ),
+    revealedInRoundId: text("revealed_in_round_id").references(
+      () => retrospectiveRounds.id,
+      { onDelete: "set null" }
+    ),
+    revealedAt: integer("revealed_at", { mode: "timestamp_ms" }),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(now),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(now)
+  },
+  (table) => [
+    index("retrospective_notes_household_author_idx").on(
+      table.householdId,
+      table.authorUserId
+    ),
+    index("retrospective_notes_period_idx").on(table.commitmentPeriodId),
+    index("retrospective_notes_round_idx").on(table.roundId),
+    index("retrospective_notes_revealed_retrospective_idx").on(
+      table.revealedInRetrospectiveId
+    )
+  ]
+);
+
+export const commitments = sqliteTable(
+  "commitments",
+  {
+    id: text("id").primaryKey().$defaultFn(createId),
+    householdId: text("household_id")
+      .notNull()
+      .references(() => households.id, { onDelete: "cascade" }),
+    commitmentPeriodId: text("commitment_period_id").references(
+      () => commitmentPeriods.id,
+      { onDelete: "set null" }
+    ),
+    createdInRetrospectiveId: text("created_in_retrospective_id").references(
+      () => retrospectives.id,
+      { onDelete: "set null" }
+    ),
+    title: text("title").notNull(),
+    description: text("description").notNull().default(""),
+    assigneeUserId: text("assignee_user_id").references(() => users.id, {
+      onDelete: "set null"
+    }),
+    trackingKind: text("tracking_kind", {
+      enum: ["binary", "count_per_period", "checklist", "freeform"]
+    }).notNull(),
+    trackingInterval: text("tracking_interval", {
+      enum: ["none", "daily", "weekly", "monthly"]
+    })
+      .notNull()
+      .default("none"),
+    targetCount: integer("target_count"),
+    status: text("status", { enum: ["active", "reviewed", "archived"] })
+      .notNull()
+      .default("active"),
+    createdByUserId: text("created_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    updatedByUserId: text("updated_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    completedAt: integer("completed_at", { mode: "timestamp_ms" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(now),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(now)
+  },
+  (table) => [
+    index("commitments_household_status_idx").on(table.householdId, table.status),
+    index("commitments_period_idx").on(table.commitmentPeriodId),
+    index("commitments_created_in_retrospective_idx").on(
+      table.createdInRetrospectiveId
+    )
+  ]
+);
+
+export const commitmentCheckins = sqliteTable(
+  "commitment_checkins",
+  {
+    id: text("id").primaryKey().$defaultFn(createId),
+    commitmentId: text("commitment_id")
+      .notNull()
+      .references(() => commitments.id, { onDelete: "cascade" }),
+    actorUserId: text("actor_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    checkinOn: text("checkin_on").notNull(),
+    amount: integer("amount").notNull().default(1),
+    note: text("note").notNull().default(""),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(now),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(now)
+  },
+  (table) => [
+    index("commitment_checkins_commitment_id_idx").on(table.commitmentId),
+    index("commitment_checkins_commitment_date_idx").on(
+      table.commitmentId,
+      table.checkinOn
+    )
+  ]
+);
+
+export const commitmentChecklistItems = sqliteTable(
+  "commitment_checklist_items",
+  {
+    id: text("id").primaryKey().$defaultFn(createId),
+    commitmentId: text("commitment_id")
+      .notNull()
+      .references(() => commitments.id, { onDelete: "cascade" }),
+    body: text("body").notNull(),
+    isCompleted: integer("is_completed", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(now),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(now)
+  },
+  (table) => [
+    index("commitment_checklist_items_commitment_id_idx").on(table.commitmentId)
+  ]
+);
+
+export const commitmentReviews = sqliteTable(
+  "commitment_reviews",
+  {
+    id: text("id").primaryKey().$defaultFn(createId),
+    commitmentId: text("commitment_id")
+      .notNull()
+      .references(() => commitments.id, { onDelete: "cascade" }),
+    retrospectiveId: text("retrospective_id")
+      .notNull()
+      .references(() => retrospectives.id, { onDelete: "cascade" }),
+    roundId: text("round_id")
+      .notNull()
+      .references(() => retrospectiveRounds.id, { onDelete: "cascade" }),
+    rating: text("rating", {
+      enum: ["met", "mostly_met", "partly_met", "missed", "skipped"]
+    }).notNull(),
+    note: text("note").notNull().default(""),
+    createdByUserId: text("created_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    updatedByUserId: text("updated_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(now),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(now)
+  },
+  (table) => [
+    index("commitment_reviews_commitment_id_idx").on(table.commitmentId),
+    index("commitment_reviews_retrospective_id_idx").on(table.retrospectiveId),
+    uniqueIndex("commitment_reviews_commitment_retrospective_idx").on(
+      table.commitmentId,
+      table.retrospectiveId
+    )
+  ]
+);
+
 export const householdSettings = sqliteTable("household_settings", {
   householdId: text("household_id")
     .primaryKey()
@@ -342,6 +715,23 @@ export const householdSettings = sqliteTable("household_settings", {
   })
     .notNull()
     .default("google"),
+  retrospectiveCadence: text("retrospective_cadence", {
+    enum: ["weekly", "monthly", "quarterly", "custom"]
+  })
+    .notNull()
+    .default("monthly"),
+  retrospectiveCadenceInterval: integer("retrospective_cadence_interval")
+    .notNull()
+    .default(1),
+  defaultRetrospectiveTemplateId: text("default_retrospective_template_id").references(
+    () => retrospectiveTemplates.id,
+    { onDelete: "set null" }
+  ),
+  finalizedRetrospectiveEditPolicy: text("finalized_retrospective_edit_policy", {
+    enum: ["locked", "editable"]
+  })
+    .notNull()
+    .default("locked"),
   createdAt: integer("created_at", { mode: "timestamp_ms" })
     .notNull()
     .$defaultFn(now),
@@ -377,5 +767,17 @@ export type Label = typeof labels.$inferSelect;
 export type ChecklistItem = typeof checklistItems.$inferSelect;
 export type Comment = typeof comments.$inferSelect;
 export type Attachment = typeof attachments.$inferSelect;
+export type RetrospectiveTemplate = typeof retrospectiveTemplates.$inferSelect;
+export type RetrospectiveTemplateRound =
+  typeof retrospectiveTemplateRounds.$inferSelect;
+export type CommitmentPeriod = typeof commitmentPeriods.$inferSelect;
+export type Retrospective = typeof retrospectives.$inferSelect;
+export type RetrospectiveRound = typeof retrospectiveRounds.$inferSelect;
+export type RetrospectiveNote = typeof retrospectiveNotes.$inferSelect;
+export type Commitment = typeof commitments.$inferSelect;
+export type CommitmentCheckin = typeof commitmentCheckins.$inferSelect;
+export type CommitmentChecklistItem =
+  typeof commitmentChecklistItems.$inferSelect;
+export type CommitmentReview = typeof commitmentReviews.$inferSelect;
 export type HouseholdSettings = typeof householdSettings.$inferSelect;
 export type TaskEvent = typeof taskEvents.$inferSelect;

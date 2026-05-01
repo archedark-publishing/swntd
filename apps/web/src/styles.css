@@ -552,6 +552,7 @@ a {
 .section-heading-copy {
   display: grid;
   gap: 0.45rem;
+  min-width: 0;
 }
 
 .sheet-header-copy {
@@ -707,6 +708,247 @@ a {
 .panel-stack {
   max-width: 95rem;
   margin: 0 auto;
+}
+
+.retrospective-shell {
+  align-content: start;
+}
+
+.retrospective-card {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+}
+
+.retrospective-header-template {
+  width: min(18rem, 100%);
+}
+
+.retrospective-active-controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  align-items: end;
+  gap: 0.75rem;
+}
+
+.retrospective-active-controls button {
+  justify-self: start;
+}
+
+.retrospective-round-tabs,
+.retrospective-form-grid,
+.retrospective-note-grid {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.retrospective-round-tabs {
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+}
+
+.archive-mode-toggle {
+  display: inline-flex;
+  width: fit-content;
+  gap: 0.35rem;
+  padding: 0.3rem;
+  border: 1px solid rgb(86 58 30 / 0.12);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.58);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.68);
+}
+
+.retrospective-form-grid {
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+}
+
+.retrospective-list,
+.retrospective-composer {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.retrospective-period-note-panel {
+  display: grid;
+  gap: 0.75rem;
+  align-content: start;
+}
+
+.retrospective-template-editor {
+  align-content: start;
+}
+
+.retrospective-template-rounds,
+.retrospective-template-round-list,
+.retrospective-template-round {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.retrospective-template-round {
+  padding: 0.85rem;
+  border: 1px solid rgb(86 58 30 / 0.12);
+  border-radius: 1rem;
+  background: rgb(255 255 255 / 0.48);
+}
+
+.retrospective-template-round-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.retrospective-artifact-summary,
+.retrospective-artifact-rounds {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.retrospective-artifact-round {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+}
+
+.retrospective-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid rgb(86 58 30 / 0.12);
+  border-radius: 1rem;
+  background: rgb(255 255 255 / 0.58);
+}
+
+.retrospective-note-row {
+  align-items: flex-start;
+}
+
+.retrospective-note-row-private {
+  border-color: rgb(41 77 67 / 0.24);
+  background: rgb(232 242 238 / 0.72);
+}
+
+.retrospective-note-row-private-until {
+  border-color: rgb(155 107 47 / 0.28);
+  background: rgb(255 248 229 / 0.78);
+}
+
+.retrospective-row > span {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+  color: rgb(47 33 22 / 0.72);
+}
+
+.retrospective-rating-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.4rem;
+}
+
+.retrospective-note-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.4rem;
+  flex: 0 0 auto;
+}
+
+.retrospective-row strong,
+.retrospective-row span {
+  overflow-wrap: anywhere;
+}
+
+.commitment-tracker-row {
+  align-items: flex-start;
+}
+
+.commitment-assignee-groups,
+.commitment-assignee-group {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.commitment-assignee-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-inline: 0.15rem;
+  color: rgb(47 33 22 / 0.76);
+}
+
+.commitment-assignee-heading strong {
+  font-size: 0.95rem;
+}
+
+.commitment-assignee-heading span {
+  font-size: 0.82rem;
+}
+
+.commitment-grid-wrap {
+  display: grid;
+  grid-template-columns: minmax(0, auto) auto;
+  align-items: center;
+  gap: 0.6rem;
+  max-width: min(22rem, 100%);
+}
+
+.commitment-check-grid {
+  display: grid;
+  gap: 0.22rem;
+  width: fit-content;
+}
+
+.commitment-check-cell {
+  width: 0.88rem;
+  aspect-ratio: 1;
+  border: 1px solid rgb(41 77 67 / 0.28);
+  border-radius: 0.22rem;
+  background: rgb(255 255 255 / 0.82);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.72);
+}
+
+.commitment-check-cell-filled {
+  background: rgb(41 77 67 / 0.88);
+  border-color: rgb(41 77 67 / 0.88);
+}
+
+.commitment-stepper {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 0.35rem;
+}
+
+.commitment-checklist-editor,
+.commitment-checklist-track {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.commitment-checklist-edit-row,
+.commitment-checklist-add-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.commitment-checklist-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 14rem) auto;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.9rem;
+  color: rgb(47 33 22 / 0.78);
+}
+
+.muted-text {
+  color: rgb(47 33 22 / 0.58);
+  font-size: 0.86rem;
 }
 
 .task-sortable-shell {
@@ -1029,18 +1271,25 @@ a {
 }
 
 @media (max-width: 40rem) {
+  .section-heading-actions,
   .header-action-row,
   .sheet-actions,
   .cast-row {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
+    width: 100%;
   }
 
+  .section-heading-actions > *,
   .header-action-row > *,
   .sheet-actions > *,
   .cast-row > * {
     width: 100%;
     min-width: 0;
+  }
+
+  .retrospective-header-template {
+    width: 100%;
   }
 
   .sheet-actions button,
@@ -1395,6 +1644,10 @@ a {
   width: min(100%, 52rem);
 }
 
+.retrospective-artifact-panel {
+  width: min(100%, 58rem);
+}
+
 .sheet-header {
   position: sticky;
   top: 0;
@@ -1670,7 +1923,6 @@ a {
 }
 
 .settings-page-stack > * {
-  height: 100%;
   width: 100%;
 }
 
@@ -1846,9 +2098,9 @@ a {
 }
 
 .settings-card {
-  min-height: 100%;
+  min-height: 0;
   width: 100%;
-  overflow: auto;
+  overflow: visible;
   overscroll-behavior: contain;
 }
 
