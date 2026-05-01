@@ -869,10 +869,6 @@ function getInclusiveDayCount(startOn: string, endOn: string) {
   return Math.max(1, Math.floor((end - start) / 86_400_000) + 1);
 }
 
-function todayIsoDate() {
-  return new Date().toISOString().slice(0, 10);
-}
-
 function getCommitmentGridRows(
   commitment: Commitment,
   period: CommitmentPeriod | null
@@ -6177,7 +6173,6 @@ function ActiveRetrospectivePanel(props: {
     props.detail.rounds[0] ??
     null;
   const lastRound = props.detail.rounds[props.detail.rounds.length - 1] ?? null;
-  const latestAllowedClosureOn = todayIsoDate();
   const canEditClosureOn =
     props.detail.status !== "finalized" && props.detail.period !== null;
 
@@ -6193,7 +6188,6 @@ function ActiveRetrospectivePanel(props: {
       props.detail.status === "finalized" ||
       !value ||
       value < props.detail.period.periodStartOn ||
-      value > latestAllowedClosureOn ||
       value === props.detail.period.closureOn
     ) {
       return;
@@ -6212,7 +6206,6 @@ function ActiveRetrospectivePanel(props: {
                 <FormField label="Ends on">
                   <FormInput
                     disabled={!canEditClosureOn}
-                    max={latestAllowedClosureOn}
                     min={props.detail.period.periodStartOn}
                     onChange={(event) => handleClosureOnChange(event.target.value)}
                     type="date"

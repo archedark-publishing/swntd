@@ -1008,11 +1008,27 @@ describe("Phase 3 API", () => {
     );
     expect(updatedRetrospective.item.period.closureOn).toBe(todayIsoDate());
 
-    const invalidClosureResponse = await app.request(
+    const futureClosureResponse = await app.request(
       `/api/v1/retrospectives/${earlyRetrospective.item.id}`,
       jsonRequest({
         body: {
           closureOn: "2999-02-01"
+        },
+        headers: adminHeaders,
+        method: "PATCH"
+      })
+    );
+    expect(futureClosureResponse.status).toBe(200);
+    const futureRetrospective = await parseJson<RetrospectiveResponse>(
+      futureClosureResponse
+    );
+    expect(futureRetrospective.item.period.closureOn).toBe("2999-02-01");
+
+    const invalidClosureResponse = await app.request(
+      `/api/v1/retrospectives/${earlyRetrospective.item.id}`,
+      jsonRequest({
+        body: {
+          closureOn: "1900-01-01"
         },
         headers: adminHeaders,
         method: "PATCH"

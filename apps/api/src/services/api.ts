@@ -1848,13 +1848,11 @@ export async function updateRetrospective(
       );
     }
 
-    const today = todayIsoDate();
-
-    if (input.closureOn < period.periodStartOn || input.closureOn > today) {
+    if (input.closureOn < period.periodStartOn) {
       throw new ApiError(
         400,
         "retrospective_closure_on_invalid",
-        "The retrospective end date must be within the commitment period and cannot be in the future."
+        "The retrospective end date cannot be before the commitment period starts."
       );
     }
 
