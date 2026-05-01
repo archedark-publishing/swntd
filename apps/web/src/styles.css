@@ -719,6 +719,10 @@ a {
   padding: 1rem;
 }
 
+.retrospective-header-template {
+  width: min(18rem, 100%);
+}
+
 .retrospective-round-tabs,
 .retrospective-form-grid,
 .retrospective-note-grid {

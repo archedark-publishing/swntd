@@ -5994,10 +5994,31 @@ function RetrospectiveView(props: {
     <section className="retrospective-shell panel-stack">
       <SectionHeading
         actions={
-          <Button onClick={() => void props.onRefresh()} size="sm" type="button" variant="outline">
-            <RefreshCw className="size-4" />
-            Refresh
-          </Button>
+          !detail ? (
+            <div className="header-action-row">
+              {props.state.templates.length > 1 ? (
+                <div className="retrospective-header-template">
+                  <FormSelect
+                    label="Template"
+                    onValueChange={setSelectedTemplateId}
+                    options={props.state.templates.map((template) => ({
+                      label: template.name,
+                      value: template.id
+                    }))}
+                    value={defaultTemplateId}
+                  />
+                </div>
+              ) : null}
+              <Button
+                disabled={!activePeriod || (home.daysUntilClosure ?? 1) > 0}
+                onClick={() => void props.onCreateRetrospective(defaultTemplateId)}
+                type="button"
+              >
+                <Plus className="size-4" />
+                Create Retro
+              </Button>
+            </div>
+          ) : null
         }
         description={
           activePeriod
@@ -6026,46 +6047,16 @@ function RetrospectiveView(props: {
           onReviewCommitment={props.onReviewCommitment}
           onStart={props.onStart}
         />
-      ) : (
-        <SurfaceCard className="retrospective-card">
-          <SectionHeading
-            actions={
-              <Button
-                disabled={!activePeriod || (home.daysUntilClosure ?? 1) > 0}
-                onClick={() => void props.onCreateRetrospective(defaultTemplateId)}
-                type="button"
-              >
-                <Plus className="size-4" />
-                Create Retro
-              </Button>
-            }
-            compact
-            description="When the period closes, create the next retrospective and walk through the rounds."
-            eyebrow="Current Period"
-            title={activePeriod ? "Commitment period" : "No active period"}
-          />
-          {props.state.templates.length > 1 ? (
-            <FormSelect
-              label="Template"
-              onValueChange={setSelectedTemplateId}
-              options={props.state.templates.map((template) => ({
-                label: template.name,
-                value: template.id
-              }))}
-              value={defaultTemplateId}
-            />
-          ) : null}
-        </SurfaceCard>
-      )}
+      ) : null}
+
+      <CommitmentTracker
+        commitments={detail?.commitments ?? home.commitments}
+        onAddCheckin={props.onAddCheckin}
+      />
 
       {activePeriod && !detail ? (
         <SurfaceCard className="retrospective-card">
-          <SectionHeading
-            compact
-            description="Jot down thoughts during the period. Privacy follows each round's template setting."
-            eyebrow="Period Notes"
-            title="Notes for next retro"
-          />
+          <p className="eyebrow">Notes for next retro</p>
           <div className="retrospective-note-grid">
             {periodNoteRounds.length === 0 ? (
               <EmptyStateCard message="This template has no period note rounds." />
@@ -6088,11 +6079,6 @@ function RetrospectiveView(props: {
           </div>
         </SurfaceCard>
       ) : null}
-
-      <CommitmentTracker
-        commitments={detail?.commitments ?? home.commitments}
-        onAddCheckin={props.onAddCheckin}
-      />
     </section>
   );
 }
@@ -6539,7 +6525,7 @@ function CommitmentTracker(props: {
 }) {
   return (
     <SurfaceCard className="retrospective-card">
-      <SectionHeading compact eyebrow="Commitments" title="Current tracking" />
+      <p className="eyebrow">Commitments</p>
       {props.commitments.length === 0 ? (
         <EmptyStateCard message="No active commitments yet." />
       ) : (
