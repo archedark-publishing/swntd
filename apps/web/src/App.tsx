@@ -6030,35 +6030,54 @@ function RetrospectiveView(props: {
     );
   }
 
+  const handleCreateRetrospective = () => {
+    if (!home.activePeriod) {
+      return;
+    }
+
+    const daysUntilClosure = home.daysUntilClosure ?? 0;
+
+    if (
+      daysUntilClosure > 0 &&
+      !window.confirm(
+        `This commitment period has ${daysUntilClosure} day${
+          daysUntilClosure === 1 ? "" : "s"
+        } left. Creating a retrospective now will end it early and start a new retrospective.`
+      )
+    ) {
+      return;
+    }
+
+    void props.onCreateRetrospective(defaultTemplateId);
+  };
+
   return (
     <section className="retrospective-shell panel-stack">
       <SectionHeading
         actions={
-          !detail ? (
-            <div className="header-action-row">
-              {props.state.templates.length > 1 ? (
-                <div className="retrospective-header-template">
-                  <FormSelect
-                    label="Template"
-                    onValueChange={setSelectedTemplateId}
-                    options={props.state.templates.map((template) => ({
-                      label: template.name,
-                      value: template.id
-                    }))}
-                    value={defaultTemplateId}
-                  />
-                </div>
-              ) : null}
-              <Button
-                disabled={!activePeriod || (home.daysUntilClosure ?? 1) > 0}
-                onClick={() => void props.onCreateRetrospective(defaultTemplateId)}
-                type="button"
-              >
-                <Plus className="size-4" />
-                Create Retro
-              </Button>
-            </div>
-          ) : null
+          <div className="header-action-row">
+            {props.state.templates.length > 1 ? (
+              <div className="retrospective-header-template">
+                <FormSelect
+                  label="Template"
+                  onValueChange={setSelectedTemplateId}
+                  options={props.state.templates.map((template) => ({
+                    label: template.name,
+                    value: template.id
+                  }))}
+                  value={defaultTemplateId}
+                />
+              </div>
+            ) : null}
+            <Button
+              disabled={!home.activePeriod || !defaultTemplateId}
+              onClick={handleCreateRetrospective}
+              type="button"
+            >
+              <Plus className="size-4" />
+              Create Retro
+            </Button>
+          </div>
         }
         description={
           activePeriod

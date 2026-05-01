@@ -1653,6 +1653,7 @@ export async function getRetrospectiveHome(
         or(eq(retrospectives.status, "draft"), eq(retrospectives.status, "active"))!
       )
     )
+    .orderBy(desc(retrospectives.createdAt))
     .limit(1);
 
   if (!activePeriod && !openRetrospective) {
@@ -1821,27 +1822,6 @@ export async function createRetrospective(
   await ensureDefaultRetrospectiveTemplate(db, actor);
 
   const retrospectiveId = await db.transaction(async (tx) => {
-    const [existingOpenRetrospective] = await tx
-      .select({
-        id: retrospectives.id
-      })
-      .from(retrospectives)
-      .where(
-        and(
-          eq(retrospectives.householdId, actor.householdId),
-          or(eq(retrospectives.status, "draft"), eq(retrospectives.status, "active"))!
-        )
-      )
-      .limit(1);
-
-    if (existingOpenRetrospective) {
-      throw new ApiError(
-        409,
-        "retrospective_already_open",
-        "A draft or active retrospective already exists."
-      );
-    }
-
     const [settings] = await tx
       .select()
       .from(householdSettings)
@@ -1888,6 +1868,30 @@ export async function createRetrospective(
       .limit(1);
 
     if (!period) {
+      const [existingOpenRetrospective] = await tx
+        .select({
+          id: retrospectives.id
+        })
+        .from(retrospectives)
+        .where(
+          and(
+            eq(retrospectives.householdId, actor.householdId),
+            or(
+              eq(retrospectives.status, "draft"),
+              eq(retrospectives.status, "active")
+            )!
+          )
+        )
+        .limit(1);
+
+      if (existingOpenRetrospective) {
+        throw new ApiError(
+          409,
+          "commitment_period_not_active",
+          "No active commitment period is available for a new retrospective."
+        );
+      }
+
       const initialPeriod = computeInitialCommitmentPeriodDates(settings);
       const [createdPeriod] = await tx
         .insert(commitmentPeriods)
@@ -1904,13 +1908,8 @@ export async function createRetrospective(
       );
     }
 
-    if (period.closureOn > todayIsoDate()) {
-      throw new ApiError(
-        409,
-        "commitment_period_not_ready",
-        "The active commitment period has not reached closure yet."
-      );
-    }
+    const today = todayIsoDate();
+    const closureOn = period.closureOn > today ? today : period.closureOn;
 
     const [created] = await tx
       .insert(retrospectives)
@@ -1921,7 +1920,7 @@ export async function createRetrospective(
         templateId: template.id,
         title:
           input.title?.trim() ||
-          `Retrospective for ${period.periodStartOn} to ${period.closureOn}`,
+          `Retrospective for ${period.periodStartOn} to ${closureOn}`,
         updatedByUserId: actor.id
       })
       .returning();
@@ -1967,6 +1966,7 @@ export async function createRetrospective(
     await tx
       .update(commitmentPeriods)
       .set({
+        closureOn,
         status: "closed",
         updatedAt: new Date()
       })

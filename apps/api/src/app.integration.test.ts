@@ -3,7 +3,8 @@ import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   commitmentPeriods,
-  retrospectiveTemplateRounds
+  retrospectiveTemplateRounds,
+  users
 } from "@swntd/shared/server/db/schema";
 import { createDatabase } from "./db/client";
 import {
@@ -186,6 +187,7 @@ type RetrospectiveResponse = {
     currentRoundId: string | null;
     id: string;
     period: {
+      closureOn: string;
       id: string;
       status: string;
     };
@@ -238,6 +240,10 @@ async function parseJson<T>(response: Response) {
   return (await response.json()) as T;
 }
 
+function todayIsoDate() {
+  return new Date().toISOString().slice(0, 10);
+}
+
 async function forceActiveCommitmentPeriodClosed(closureOn: string) {
   const { client, db } = await createDatabase();
 
@@ -249,6 +255,32 @@ async function forceActiveCommitmentPeriodClosed(closureOn: string) {
         updatedAt: new Date()
       })
       .where(eq(commitmentPeriods.status, "active"));
+  } finally {
+    client.close();
+  }
+}
+
+async function createActiveCommitmentPeriod(periodStartOn: string, closureOn: string) {
+  const { client, db } = await createDatabase();
+
+  try {
+    const [admin] = await db
+      .select({
+        householdId: users.householdId
+      })
+      .from(users)
+      .where(eq(users.email, "admin1@example.com"))
+      .limit(1);
+
+    if (!admin) {
+      throw new Error("Admin user was not seeded.");
+    }
+
+    await db.insert(commitmentPeriods).values({
+      closureOn,
+      householdId: admin.householdId,
+      periodStartOn
+    });
   } finally {
     client.close();
   }
@@ -913,6 +945,54 @@ describe("Phase 3 API", () => {
     expect(retrospectiveCreateResponse.status).toBe(201);
   });
 
+  it("allows early retrospective creation when a period is still active", async () => {
+    const adminHeaders = trustedHeader("admin1@example.com");
+
+    const homeResponse = await app.request("/api/v1/retrospective-home", {
+      headers: adminHeaders
+    });
+    expect(homeResponse.status).toBe(200);
+
+    await forceActiveCommitmentPeriodClosed("2999-01-31");
+
+    const earlyRetrospectiveResponse = await app.request(
+      "/api/v1/retrospectives",
+      jsonRequest({
+        body: {
+          title: "Early retro"
+        },
+        headers: adminHeaders,
+        method: "POST"
+      })
+    );
+    expect(earlyRetrospectiveResponse.status).toBe(201);
+    const earlyRetrospective = await parseJson<RetrospectiveResponse>(
+      earlyRetrospectiveResponse
+    );
+    expect(earlyRetrospective.item.period.closureOn).toBe(todayIsoDate());
+    expect(earlyRetrospective.item.period.status).toBe("closed");
+
+    await createActiveCommitmentPeriod(todayIsoDate(), "2999-02-28");
+
+    const concurrentRetrospectiveResponse = await app.request(
+      "/api/v1/retrospectives",
+      jsonRequest({
+        body: {
+          title: "Concurrent retro"
+        },
+        headers: adminHeaders,
+        method: "POST"
+      })
+    );
+    expect(concurrentRetrospectiveResponse.status).toBe(201);
+    const concurrentRetrospective = await parseJson<RetrospectiveResponse>(
+      concurrentRetrospectiveResponse
+    );
+    expect(concurrentRetrospective.item.id).not.toBe(earlyRetrospective.item.id);
+    expect(concurrentRetrospective.item.period.closureOn).toBe(todayIsoDate());
+    expect(concurrentRetrospective.item.period.status).toBe("closed");
+  });
+
   it("creates and updates retrospective templates", async () => {
     const adminHeaders = trustedHeader("admin1@example.com");
 
@@ -1079,18 +1159,6 @@ describe("Phase 3 API", () => {
     expect(otherDeletePrivateNoteResponse.status).toBe(403);
 
     await forceActiveCommitmentPeriodClosed("2999-01-31");
-
-    const earlyRetrospectiveResponse = await app.request(
-      "/api/v1/retrospectives",
-      jsonRequest({
-        body: {
-          title: "Too early"
-        },
-        headers: adminHeaders,
-        method: "POST"
-      })
-    );
-    expect(earlyRetrospectiveResponse.status).toBe(409);
 
     await setTemplateRoundPrivacy("Planning", "private");
     await forceActiveCommitmentPeriodClosed("2026-01-31");
