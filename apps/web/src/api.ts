@@ -623,6 +623,18 @@ export const api = {
       method: "POST"
     });
   },
+  updateRetrospective(retrospectiveId: string, input: { closureOn?: string }) {
+    return request<{ item: RetrospectiveDetail }>(
+      `/api/v1/retrospectives/${retrospectiveId}`,
+      {
+        body: JSON.stringify(input),
+        headers: {
+          "content-type": "application/json"
+        },
+        method: "PATCH"
+      }
+    );
+  },
   createRetrospectiveTemplate(input: RetrospectiveTemplateInput) {
     return request<{ item: RetrospectiveTemplate }>("/api/v1/retrospective-templates", {
       body: JSON.stringify(input),

@@ -80,6 +80,7 @@ import {
   updateCommitment,
   updateCommitmentReview,
   updateLabel,
+  updateRetrospective,
   updateRetrospectiveNote,
   updateRetrospectiveTemplate,
   updateHouseholdUser,
@@ -258,6 +259,10 @@ const createRetrospectiveSchema = z.object({
   closureOn: isoDateSchema.optional(),
   templateId: z.string().trim().min(1).optional(),
   title: z.string().trim().min(1).optional()
+});
+
+const updateRetrospectiveSchema = z.object({
+  closureOn: isoDateSchema.optional()
 });
 
 const retrospectiveTemplateRoundSchema = z.object({
@@ -704,6 +709,20 @@ export function createApp() {
       )
     )
   );
+
+  app.patch("/api/v1/retrospectives/:retrospectiveId", async (c) => {
+    const input = await parseJsonBody(c, updateRetrospectiveSchema);
+
+    return jsonOk(
+      c,
+      await updateRetrospective(
+        c.var.db,
+        c.var.actor,
+        c.req.param("retrospectiveId"),
+        input
+      )
+    );
+  });
 
   app.post("/api/v1/retrospectives/:retrospectiveId/start", async (c) =>
     jsonOk(

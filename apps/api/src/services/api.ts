@@ -330,6 +330,10 @@ export type CreateRetrospectiveInput = {
   title?: string | undefined;
 };
 
+export type UpdateRetrospectiveInput = {
+  closureOn?: string | undefined;
+};
+
 export type RetrospectiveTemplateRoundInput = {
   configJson?: string | undefined;
   entryPhase?: "commitment_period" | "retrospective" | "both" | null | undefined;
@@ -1812,6 +1816,66 @@ export async function getRetrospectiveDetail(
       taskLookback
     }
   };
+}
+
+export async function updateRetrospective(
+  db: DatabaseClient,
+  actor: AuthenticatedActor,
+  retrospectiveId: string,
+  input: UpdateRetrospectiveInput
+) {
+  const retrospective = await getRetrospectiveOrThrow(db, actor, retrospectiveId);
+
+  if (retrospective.status === "finalized") {
+    throw new ApiError(
+      409,
+      "retrospective_finalized",
+      "Finalized retrospectives cannot be updated."
+    );
+  }
+
+  if (input.closureOn) {
+    const [period] = await db
+      .select()
+      .from(commitmentPeriods)
+      .where(eq(commitmentPeriods.id, retrospective.commitmentPeriodId));
+
+    if (!period) {
+      throw new ApiError(
+        404,
+        "commitment_period_not_found",
+        "Retrospective commitment period not found."
+      );
+    }
+
+    const today = todayIsoDate();
+
+    if (input.closureOn < period.periodStartOn || input.closureOn > today) {
+      throw new ApiError(
+        400,
+        "retrospective_closure_on_invalid",
+        "The retrospective end date must be within the commitment period and cannot be in the future."
+      );
+    }
+
+    await db
+      .update(commitmentPeriods)
+      .set({
+        closureOn: input.closureOn,
+        updatedAt: new Date()
+      })
+      .where(eq(commitmentPeriods.id, period.id));
+  }
+
+  await db
+    .update(retrospectives)
+    .set({
+      updatedAt: new Date(),
+      updatedByUserId: actor.id
+    })
+    .where(eq(retrospectives.id, retrospective.id));
+
+  return getRetrospectiveDetail(db, actor, retrospective.id);
 }
 
 export async function createRetrospective(

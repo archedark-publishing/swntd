@@ -869,19 +869,8 @@ function getInclusiveDayCount(startOn: string, endOn: string) {
   return Math.max(1, Math.floor((end - start) / 86_400_000) + 1);
 }
 
-function getDayDistance(startOn: string, endOn: string) {
-  const start = new Date(`${startOn}T00:00:00.000Z`).getTime();
-  const end = new Date(`${endOn}T00:00:00.000Z`).getTime();
-
-  return Math.max(0, Math.floor((end - start) / 86_400_000));
-}
-
 function todayIsoDate() {
   return new Date().toISOString().slice(0, 10);
-}
-
-function minIsoDate(left: string, right: string) {
-  return left < right ? left : right;
 }
 
 function getCommitmentGridRows(
@@ -2094,6 +2083,12 @@ export function App() {
                     runRetrospectiveMutation(
                       () => api.finalizeRetrospective(retrospectiveId),
                       "Retrospective finalized."
+                    )
+                  }
+                  onUpdateRetrospectiveClosure={(retrospectiveId, closureOn) =>
+                    runRetrospectiveMutation(
+                      () => api.updateRetrospective(retrospectiveId, { closureOn }),
+                      "Retrospective end date updated."
                     )
                   }
                   onRefresh={refreshRetrospective}
@@ -5965,11 +5960,14 @@ function RetrospectiveView(props: {
   onDeleteCheckin: (checkinId: string) => Promise<unknown>;
   onDeleteNote: (noteId: string) => Promise<unknown>;
   onCreateRetrospective: (input: {
-    closureOn?: string;
     templateId?: string;
   }) => Promise<unknown>;
   onEnterRound: (retrospectiveId: string, roundId: string) => Promise<unknown>;
   onFinalize: (retrospectiveId: string) => Promise<unknown>;
+  onUpdateRetrospectiveClosure: (
+    retrospectiveId: string,
+    closureOn: string
+  ) => Promise<unknown>;
   onRefresh: () => Promise<void>;
   onReviewCommitment: (
     commitmentId: string,
@@ -5980,13 +5978,9 @@ function RetrospectiveView(props: {
   state: RetrospectiveState;
 }) {
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
-  const [selectedClosureOn, setSelectedClosureOn] = useState("");
   const home = props.state.home;
   const detail = props.state.detail;
   const activePeriod = home?.activePeriod ?? detail?.period ?? null;
-  const latestAllowedClosureOn = home?.activePeriod
-    ? minIsoDate(todayIsoDate(), home.activePeriod.closureOn)
-    : "";
   const defaultTemplateId =
     selectedTemplateId ||
     home?.settings?.defaultRetrospectiveTemplateId ||
@@ -6001,10 +5995,6 @@ function RetrospectiveView(props: {
         round.kind === "notes" &&
         (round.entryPhase === "commitment_period" || round.entryPhase === "both")
     ) ?? [];
-
-  useEffect(() => {
-    setSelectedClosureOn(latestAllowedClosureOn);
-  }, [home?.activePeriod?.id, latestAllowedClosureOn]);
 
   if (props.actor?.role !== "admin") {
     return (
@@ -6044,8 +6034,7 @@ function RetrospectiveView(props: {
       return;
     }
 
-    const closureOn = selectedClosureOn || latestAllowedClosureOn;
-    const daysUntilClosure = getDayDistance(closureOn, home.activePeriod.closureOn);
+    const daysUntilClosure = home.daysUntilClosure ?? 0;
 
     if (
       daysUntilClosure > 0 &&
@@ -6059,7 +6048,6 @@ function RetrospectiveView(props: {
     }
 
     void props.onCreateRetrospective({
-      closureOn,
       ...(defaultTemplateId ? { templateId: defaultTemplateId } : {})
     });
   };
@@ -6082,27 +6070,8 @@ function RetrospectiveView(props: {
                 />
               </div>
             ) : null}
-            {home.activePeriod ? (
-              <div className="retrospective-header-template">
-                <FormField label="Ends on">
-                  <FormInput
-                    max={latestAllowedClosureOn}
-                    min={home.activePeriod.periodStartOn}
-                    onChange={(event) => setSelectedClosureOn(event.target.value)}
-                    type="date"
-                    value={selectedClosureOn}
-                  />
-                </FormField>
-              </div>
-            ) : null}
             <Button
-              disabled={
-                !home.activePeriod ||
-                !defaultTemplateId ||
-                !selectedClosureOn ||
-                selectedClosureOn < home.activePeriod.periodStartOn ||
-                selectedClosureOn > latestAllowedClosureOn
-              }
+              disabled={!home.activePeriod || !defaultTemplateId}
               onClick={handleCreateRetrospective}
               type="button"
             >
@@ -6135,6 +6104,7 @@ function RetrospectiveView(props: {
           onEnterRound={props.onEnterRound}
           onFinalize={props.onFinalize}
           onReviewCommitment={props.onReviewCommitment}
+          onUpdateClosureOn={props.onUpdateRetrospectiveClosure}
         />
       ) : null}
 
@@ -6197,28 +6167,72 @@ function ActiveRetrospectivePanel(props: {
     roundId: string,
     rating: "met" | "mostly_met" | "partly_met" | "missed" | "skipped"
   ) => Promise<unknown>;
+  onUpdateClosureOn: (retrospectiveId: string, closureOn: string) => Promise<unknown>;
 }) {
+  const [closureOnDraft, setClosureOnDraft] = useState(
+    props.detail.period?.closureOn ?? ""
+  );
   const currentRound =
     props.detail.rounds.find((round) => round.id === props.detail.currentRoundId) ??
     props.detail.rounds[0] ??
     null;
   const lastRound = props.detail.rounds[props.detail.rounds.length - 1] ?? null;
+  const latestAllowedClosureOn = todayIsoDate();
+  const canEditClosureOn =
+    props.detail.status !== "finalized" && props.detail.period !== null;
+
+  useEffect(() => {
+    setClosureOnDraft(props.detail.period?.closureOn ?? "");
+  }, [props.detail.period?.id, props.detail.period?.closureOn]);
+
+  const handleClosureOnChange = (value: string) => {
+    setClosureOnDraft(value);
+
+    if (
+      !props.detail.period ||
+      props.detail.status === "finalized" ||
+      !value ||
+      value < props.detail.period.periodStartOn ||
+      value > latestAllowedClosureOn ||
+      value === props.detail.period.closureOn
+    ) {
+      return;
+    }
+
+    void props.onUpdateClosureOn(props.detail.id, value);
+  };
 
   return (
     <SurfaceCard className="retrospective-card">
       <SectionHeading
         actions={
-          lastRound && currentRound?.id === lastRound.id ? (
-            <Button
-              disabled={props.detail.status === "finalized"}
-              onClick={() => void props.onFinalize(props.detail.id)}
-              size="sm"
-              type="button"
-              variant="outline"
-            >
-              Finalize
-            </Button>
-          ) : null
+          <div className="header-action-row">
+            {props.detail.period ? (
+              <div className="retrospective-header-template">
+                <FormField label="Ends on">
+                  <FormInput
+                    disabled={!canEditClosureOn}
+                    max={latestAllowedClosureOn}
+                    min={props.detail.period.periodStartOn}
+                    onChange={(event) => handleClosureOnChange(event.target.value)}
+                    type="date"
+                    value={closureOnDraft}
+                  />
+                </FormField>
+              </div>
+            ) : null}
+            {lastRound && currentRound?.id === lastRound.id ? (
+              <Button
+                className="bg-black text-white hover:bg-black/80"
+                disabled={props.detail.status === "finalized"}
+                onClick={() => void props.onFinalize(props.detail.id)}
+                size="sm"
+                type="button"
+              >
+                Finalize
+              </Button>
+            ) : null}
+          </div>
         }
         compact
         description={
