@@ -6063,13 +6063,18 @@ function RetrospectiveView(props: {
               <EmptyStateCard message="This template has no period note rounds." />
             ) : null}
             {periodNoteRounds.map((round) => (
-              <RetrospectiveNoteComposer
-                commitmentPeriodId={activePeriod.id}
-                entryPhase="commitment_period"
-                key={round.id}
-                onCreateNote={props.onCreateNote}
-                round={round}
-              />
+              <div className="retrospective-period-note-panel" key={round.id}>
+                <RetrospectiveNoteList
+                  emptyMessage="No visible notes for this prompt yet."
+                  notes={home.notes.filter((note) => note.templateRoundId === round.id)}
+                />
+                <RetrospectiveNoteComposer
+                  commitmentPeriodId={activePeriod.id}
+                  entryPhase="commitment_period"
+                  onCreateNote={props.onCreateNote}
+                  round={round}
+                />
+              </div>
             ))}
           </div>
         </SurfaceCard>
@@ -6301,21 +6306,48 @@ function RetrospectiveRoundBody(props: {
   );
 }
 
-function RetrospectiveNoteList(props: { notes: RetrospectiveNote[] }) {
+function RetrospectiveNoteList(props: {
+  emptyMessage?: string;
+  notes: RetrospectiveNote[];
+}) {
   if (props.notes.length === 0) {
-    return <EmptyStateCard message="No notes for this round yet." />;
+    return <EmptyStateCard message={props.emptyMessage ?? "No notes for this round yet."} />;
   }
 
   return (
     <div className="retrospective-list">
       {props.notes.map((note) => (
-        <div className="retrospective-row" key={note.id}>
-          <strong>{note.author?.displayName ?? "Someone"}</strong>
-          <span>{note.body}</span>
+        <div
+          className={cn(
+            "retrospective-row retrospective-note-row",
+            note.visibilityState === "private" && "retrospective-note-row-private",
+            note.visibilityState === "private_until_round" &&
+              "retrospective-note-row-private-until"
+          )}
+          key={note.id}
+        >
+          <span>
+            <strong>{note.author?.displayName ?? "Someone"}</strong>
+            <span>{note.body}</span>
+          </span>
+          <Badge variant="outline">{getRetrospectiveNoteVisibilityLabel(note)}</Badge>
         </div>
       ))}
     </div>
   );
+}
+
+function getRetrospectiveNoteVisibilityLabel(note: RetrospectiveNote) {
+  switch (note.visibilityState) {
+    case "private":
+      return "Private to you";
+    case "private_until_round":
+      return "Private until round";
+    case "revealed":
+      return "Revealed";
+    case "shared":
+      return "Shared";
+  }
 }
 
 function RetrospectiveNoteComposer(props: {

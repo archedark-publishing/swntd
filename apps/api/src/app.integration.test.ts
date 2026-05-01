@@ -1040,6 +1040,23 @@ describe("Phase 3 API", () => {
     const privateNote = await parseJson<RetrospectiveNoteResponse>(noteResponse);
     expect(privateNote.item.visibilityState).toBe("private_until_round");
 
+    const authorVisibleNotesResponse = await app.request(
+      `/api/v1/retrospective-notes?commitmentPeriodId=${home.activePeriod.id}`,
+      {
+        headers: adminHeaders
+      }
+    );
+    expect(authorVisibleNotesResponse.status).toBe(200);
+    const authorVisibleNotes = await parseJson<RetrospectiveNotesResponse>(
+      authorVisibleNotesResponse
+    );
+    expect(authorVisibleNotes.items).toEqual([
+      expect.objectContaining({
+        id: privateNote.item.id,
+        visibilityState: "private_until_round"
+      })
+    ]);
+
     const hiddenNotesResponse = await app.request(
       `/api/v1/retrospective-notes?commitmentPeriodId=${home.activePeriod.id}`,
       {

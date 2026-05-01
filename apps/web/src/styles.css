@@ -751,6 +751,12 @@ a {
   gap: 0.75rem;
 }
 
+.retrospective-period-note-panel {
+  display: grid;
+  gap: 0.75rem;
+  align-content: start;
+}
+
 .retrospective-template-editor {
   align-content: start;
 }
@@ -797,6 +803,20 @@ a {
   border: 1px solid rgb(86 58 30 / 0.12);
   border-radius: 1rem;
   background: rgb(255 255 255 / 0.58);
+}
+
+.retrospective-note-row {
+  align-items: flex-start;
+}
+
+.retrospective-note-row-private {
+  border-color: rgb(41 77 67 / 0.24);
+  background: rgb(232 242 238 / 0.72);
+}
+
+.retrospective-note-row-private-until {
+  border-color: rgb(155 107 47 / 0.28);
+  background: rgb(255 248 229 / 0.78);
 }
 
 .retrospective-row > span {
