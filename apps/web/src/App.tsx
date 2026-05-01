@@ -93,6 +93,7 @@ import {
   type RetrospectiveNote,
   type RetrospectiveNoteWritePhase,
   type RetrospectivePrivacy,
+  type Retrospective,
   type RetrospectiveRound,
   type RetrospectiveRoundKind,
   type RetrospectiveTemplate,
@@ -118,6 +119,7 @@ import "./styles.css";
 
 type ViewName = "archive" | "board" | "recurring" | "retrospective" | "settings";
 type SettingsPage = "general" | "household" | "labels" | "retrospective";
+type ArchiveMode = "issues" | "retrospectives";
 type TaskDetailControlId = "assignee" | "due" | "labels" | "status";
 const maxLabelNameLength = 16;
 const dragMouseDistancePx = 8;
@@ -211,6 +213,7 @@ type LabelDraft = {
 
 type RetrospectiveState = {
   detail: RetrospectiveDetail | null;
+  finalizedRetrospectives: Retrospective[];
   home: RetrospectiveHome | null;
   isLoading: boolean;
   templates: RetrospectiveTemplate[];
@@ -273,6 +276,7 @@ function isSettingsPage(value: string | undefined): value is SettingsPage {
 }
 
 function readRouteFromHash(): {
+  archiveMode: ArchiveMode;
   onlyMyTasks: boolean;
   settingsPage: SettingsPage;
   view: ViewName;
@@ -281,38 +285,81 @@ function readRouteFromHash(): {
   const [viewPart, subpagePart] = hash.split("/");
 
   if (viewPart === "my-tasks") {
-    return { onlyMyTasks: true, settingsPage: "general", view: "board" };
+    return {
+      archiveMode: "issues",
+      onlyMyTasks: true,
+      settingsPage: "general",
+      view: "board"
+    };
   }
 
   if (viewPart === "archive") {
-    return { onlyMyTasks: false, settingsPage: "general", view: "archive" };
+    return {
+      archiveMode: subpagePart === "retrospectives" ? "retrospectives" : "issues",
+      onlyMyTasks: false,
+      settingsPage: "general",
+      view: "archive"
+    };
   }
 
   if (viewPart === "recurring") {
-    return { onlyMyTasks: false, settingsPage: "general", view: "recurring" };
+    return {
+      archiveMode: "issues",
+      onlyMyTasks: false,
+      settingsPage: "general",
+      view: "recurring"
+    };
   }
 
   if (viewPart === "retrospective") {
-    return { onlyMyTasks: false, settingsPage: "general", view: "retrospective" };
+    return {
+      archiveMode: "issues",
+      onlyMyTasks: false,
+      settingsPage: "general",
+      view: "retrospective"
+    };
   }
 
   if (viewPart === "settings") {
     if (subpagePart === "recurring") {
-      return { onlyMyTasks: false, settingsPage: "general", view: "recurring" };
+      return {
+        archiveMode: "issues",
+        onlyMyTasks: false,
+        settingsPage: "general",
+        view: "recurring"
+      };
     }
 
     return {
+      archiveMode: "issues",
       onlyMyTasks: false,
       settingsPage: isSettingsPage(subpagePart) ? subpagePart : "general",
       view: "settings"
     };
   }
 
-  return { onlyMyTasks: false, settingsPage: "general", view: "board" };
+  return {
+    archiveMode: "issues",
+    onlyMyTasks: false,
+    settingsPage: "general",
+    view: "board"
+  };
 }
 
-function buildHashForRoute(view: ViewName, settingsPage: SettingsPage) {
-  return view === "settings" ? `settings/${settingsPage}` : view;
+function buildHashForRoute(
+  view: ViewName,
+  settingsPage: SettingsPage,
+  archiveMode: ArchiveMode = "issues"
+) {
+  if (view === "settings") {
+    return `settings/${settingsPage}`;
+  }
+
+  if (view === "archive" && archiveMode === "retrospectives") {
+    return "archive/retrospectives";
+  }
+
+  return view;
 }
 
 function createChecklistDraft(items: Array<{ body: string; isCompleted: boolean }>) {
@@ -848,6 +895,9 @@ export function App() {
   const initialRoute = readRouteFromHash();
   const [view, setView] = useState<ViewName>(initialRoute.view);
   const [onlyMyTasks, setOnlyMyTasks] = useState(initialRoute.onlyMyTasks);
+  const [archiveMode, setArchiveMode] = useState<ArchiveMode>(
+    initialRoute.archiveMode
+  );
   const [settingsPage, setSettingsPage] = useState<SettingsPage>(initialRoute.settingsPage);
   const [accessState, setAccessState] = useState<AccessState | null>(null);
   const [snapshot, setSnapshot] = useState<AppSnapshot>(emptySnapshot);
@@ -867,6 +917,7 @@ export function App() {
   const [archiveSearch, setArchiveSearch] = useState("");
   const [retrospectiveState, setRetrospectiveState] = useState<RetrospectiveState>({
     detail: null,
+    finalizedRetrospectives: [],
     home: null,
     isLoading: false,
     templates: []
@@ -881,6 +932,7 @@ export function App() {
 
       setView(nextRoute.view);
       setOnlyMyTasks(nextRoute.onlyMyTasks);
+      setArchiveMode(nextRoute.archiveMode);
       setSettingsPage(nextRoute.settingsPage);
     };
 
@@ -1027,9 +1079,10 @@ export function App() {
     setRetrospectiveState((current) => ({ ...current, isLoading: true }));
 
     try {
-      const [home, templates] = await Promise.all([
+      const [home, templates, finalizedRetrospectives] = await Promise.all([
         api.getRetrospectiveHome(),
-        api.listRetrospectiveTemplates()
+        api.listRetrospectiveTemplates(),
+        api.listRetrospectives({ limit: 100, status: "finalized" })
       ]);
       const openRetrospectiveId = home.openRetrospective?.id ?? null;
       const detail = openRetrospectiveId
@@ -1038,6 +1091,7 @@ export function App() {
 
       setRetrospectiveState({
         detail,
+        finalizedRetrospectives: finalizedRetrospectives.items,
         home,
         isLoading: false,
         templates: templates.items
@@ -1079,12 +1133,16 @@ export function App() {
   }, [selectedTaskId]);
 
   useEffect(() => {
-    if (view !== "retrospective" || !snapshot.actor) {
+    if (
+      !snapshot.actor ||
+      (view !== "retrospective" &&
+        !(view === "archive" && archiveMode === "retrospectives"))
+    ) {
       return;
     }
 
     void refreshRetrospective();
-  }, [snapshot.actor, view]);
+  }, [archiveMode, snapshot.actor, view]);
 
   useEffect(() => {
     if (view !== "settings" || settingsPage !== "retrospective" || !snapshot.actor) {
@@ -1164,6 +1222,22 @@ export function App() {
     return result;
   }
 
+  async function openRetrospectiveDetail(retrospectiveId: string) {
+    const detail = await api.getRetrospective(retrospectiveId);
+
+    setRetrospectiveState((current) => ({
+      ...current,
+      detail: detail.item
+    }));
+    setView("retrospective");
+
+    const nextHash = buildHashForRoute("retrospective", settingsPage, archiveMode);
+
+    if (window.location.hash !== `#${nextHash}`) {
+      window.location.hash = nextHash;
+    }
+  }
+
   function handleViewChange(nextView: ViewName) {
     setView(nextView);
     setOnlyMyTasks(false);
@@ -1176,7 +1250,7 @@ export function App() {
       setEditingRetrospectiveTemplateKey(null);
     }
 
-    const nextHash = buildHashForRoute(nextView, settingsPage);
+    const nextHash = buildHashForRoute(nextView, settingsPage, archiveMode);
 
     if (window.location.hash !== `#${nextHash}`) {
       window.location.hash = nextHash;
@@ -1185,11 +1259,20 @@ export function App() {
     setIsNavOpen(false);
   }
 
+  function handleArchiveModeChange(nextMode: ArchiveMode) {
+    setArchiveMode(nextMode);
+    const nextHash = buildHashForRoute("archive", settingsPage, nextMode);
+
+    if (window.location.hash !== `#${nextHash}`) {
+      window.location.hash = nextHash;
+    }
+  }
+
   function handleSettingsPageChange(nextPage: SettingsPage) {
     setView("settings");
     setSettingsPage(nextPage);
     setEditingRetrospectiveTemplateKey(null);
-    const nextHash = buildHashForRoute("settings", nextPage);
+    const nextHash = buildHashForRoute("settings", nextPage, archiveMode);
 
     if (window.location.hash !== `#${nextHash}`) {
       window.location.hash = nextHash;
@@ -1862,32 +1945,20 @@ export function App() {
               ) : null}
 
               {!isBooting && view === "archive" ? (
-                <section className="panel-stack">
-                  <SectionHeading
-                    actions={
-                      <SearchField
-                        label="Search archive"
-                        onChange={setArchiveSearch}
-                        placeholder="Search titles or notes"
-                        value={archiveSearch}
-                      />
-                    }
-                    eyebrow="History"
-                    title="Archive"
-                  />
-                  <TaskListView
-                    aiAssistanceLabel={getAiAssistanceLabel(snapshot.users)}
-                    description="A place for finished errands, closed loops, and things you only need to remember once in a while."
-                    emptyMessage="Nothing has been archived yet."
-                    onOpenTask={openTask}
-                    onQuickMove={() => Promise.resolve()}
-                    onReorder={() => Promise.resolve()}
-                    settings={snapshot.settings}
-                    showHeader={false}
-                    tasks={archivedTasks}
-                    title="Archive"
-                  />
-                </section>
+                <ArchiveView
+                  actor={snapshot.actor}
+                  aiAssistanceLabel={getAiAssistanceLabel(snapshot.users)}
+                  archiveMode={archiveMode}
+                  archiveSearch={archiveSearch}
+                  isRetrospectiveLoading={retrospectiveState.isLoading}
+                  onArchiveModeChange={handleArchiveModeChange}
+                  onArchiveSearchChange={setArchiveSearch}
+                  onOpenRetrospective={openRetrospectiveDetail}
+                  onOpenTask={openTask}
+                  retrospectives={retrospectiveState.finalizedRetrospectives}
+                  settings={snapshot.settings}
+                  tasks={archivedTasks}
+                />
               ) : null}
 
               {!isBooting && view === "recurring" ? (
@@ -1973,14 +2044,6 @@ export function App() {
                       "Retrospective finalized."
                     )
                   }
-                  onOpenRetrospective={async (retrospectiveId) => {
-                    const detail = await api.getRetrospective(retrospectiveId);
-
-                    setRetrospectiveState((current) => ({
-                      ...current,
-                      detail: detail.item
-                    }));
-                  }}
                   onRefresh={refreshRetrospective}
                   onReviewCommitment={(commitmentId, retrospectiveId, roundId, rating) =>
                     runRetrospectiveMutation(
@@ -5506,6 +5569,144 @@ function RetrospectiveTemplateForm(props: {
   );
 }
 
+function ArchiveView(props: {
+  actor: Actor | null;
+  aiAssistanceLabel: string;
+  archiveMode: ArchiveMode;
+  archiveSearch: string;
+  isRetrospectiveLoading: boolean;
+  onArchiveModeChange: (mode: ArchiveMode) => void;
+  onArchiveSearchChange: (value: string) => void;
+  onOpenRetrospective: (retrospectiveId: string) => Promise<void>;
+  onOpenTask: (taskId: string) => void;
+  retrospectives: Retrospective[];
+  settings: Settings | null;
+  tasks: TaskListItem[];
+}) {
+  return (
+    <section className="panel-stack">
+      <SectionHeading
+        actions={
+          props.archiveMode === "issues" ? (
+            <SearchField
+              label="Search archive"
+              onChange={props.onArchiveSearchChange}
+              placeholder="Search titles or notes"
+              value={props.archiveSearch}
+            />
+          ) : null
+        }
+        eyebrow="History"
+        title="Archive"
+      />
+      <div className="archive-mode-toggle" role="group" aria-label="Archive kind">
+        <Button
+          aria-pressed={props.archiveMode === "issues"}
+          onClick={() => props.onArchiveModeChange("issues")}
+          size="sm"
+          type="button"
+          variant={props.archiveMode === "issues" ? "default" : "outline"}
+        >
+          Issues
+        </Button>
+        <Button
+          aria-pressed={props.archiveMode === "retrospectives"}
+          onClick={() => props.onArchiveModeChange("retrospectives")}
+          size="sm"
+          type="button"
+          variant={props.archiveMode === "retrospectives" ? "default" : "outline"}
+        >
+          Retrospectives
+        </Button>
+      </div>
+
+      {props.archiveMode === "issues" ? (
+        <TaskListView
+          aiAssistanceLabel={props.aiAssistanceLabel}
+          description="A place for finished errands, closed loops, and things you only need to remember once in a while."
+          emptyMessage="Nothing has been archived yet."
+          onOpenTask={props.onOpenTask}
+          onQuickMove={() => Promise.resolve()}
+          onReorder={() => Promise.resolve()}
+          settings={props.settings}
+          showHeader={false}
+          tasks={props.tasks}
+          title="Archive"
+        />
+      ) : (
+        <RetrospectiveArchiveList
+          actor={props.actor}
+          isLoading={props.isRetrospectiveLoading}
+          onOpenRetrospective={props.onOpenRetrospective}
+          retrospectives={props.retrospectives}
+        />
+      )}
+    </section>
+  );
+}
+
+function RetrospectiveArchiveList(props: {
+  actor: Actor | null;
+  isLoading: boolean;
+  onOpenRetrospective: (retrospectiveId: string) => Promise<void>;
+  retrospectives: Retrospective[];
+}) {
+  if (props.actor?.role !== "admin") {
+    return (
+      <StatusMessageCard
+        description="Retrospectives include household-private notes, so only admins can open this archive."
+        title="Retrospective archive is for household admins."
+      />
+    );
+  }
+
+  if (props.isLoading && props.retrospectives.length === 0) {
+    return (
+      <StatusMessageCard
+        description="Gathering finalized retrospectives."
+        title="Opening retrospective archive..."
+      />
+    );
+  }
+
+  return (
+    <SurfaceCard className="retrospective-card">
+      <SectionHeading
+        compact
+        description="Finalized retrospective sessions live here once the current cycle has moved on."
+        eyebrow="Retrospectives"
+        title="Past retrospectives"
+      />
+      {props.retrospectives.length === 0 ? (
+        <EmptyStateCard message="No finalized retrospectives yet." />
+      ) : (
+        <div className="retrospective-list">
+          {props.retrospectives.map((retrospective) => (
+            <div className="retrospective-row" key={retrospective.id}>
+              <span>
+                <strong>{retrospective.title}</strong>
+                <span>
+                  {retrospective.finalizedAt
+                    ? `Finalized ${formatTimestamp(retrospective.finalizedAt)}`
+                    : retrospective.status}
+                </span>
+              </span>
+              <Button
+                onClick={() => void props.onOpenRetrospective(retrospective.id)}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                Open
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+    </SurfaceCard>
+  );
+}
+
 function RetrospectiveView(props: {
   actor: Actor | null;
   onAddCheckin: (commitmentId: string) => Promise<unknown>;
@@ -5525,7 +5726,6 @@ function RetrospectiveView(props: {
   onCreateRetrospective: (templateId?: string) => Promise<unknown>;
   onEnterRound: (retrospectiveId: string, roundId: string) => Promise<unknown>;
   onFinalize: (retrospectiveId: string) => Promise<unknown>;
-  onOpenRetrospective: (retrospectiveId: string) => Promise<void>;
   onRefresh: () => Promise<void>;
   onReviewCommitment: (
     commitmentId: string,
@@ -5684,32 +5884,6 @@ function RetrospectiveView(props: {
         commitments={detail?.commitments ?? home.commitments}
         onAddCheckin={props.onAddCheckin}
       />
-
-      <SurfaceCard className="retrospective-card">
-        <SectionHeading compact eyebrow="History" title="Past retrospectives" />
-        {home.recentRetrospectives.length === 0 ? (
-          <EmptyStateCard message="No finalized retrospectives yet." />
-        ) : (
-          <div className="retrospective-list">
-            {home.recentRetrospectives.map((retrospective) => (
-              <div className="retrospective-row" key={retrospective.id}>
-                <span>
-                  <strong>{retrospective.title}</strong>
-                  <span>{retrospective.finalizedAt ? "Finalized" : retrospective.status}</span>
-                </span>
-                <Button
-                  onClick={() => void props.onOpenRetrospective(retrospective.id)}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                >
-                  Open
-                </Button>
-              </div>
-            ))}
-          </div>
-        )}
-      </SurfaceCard>
     </section>
   );
 }
