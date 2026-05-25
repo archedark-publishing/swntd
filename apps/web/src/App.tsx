@@ -1040,6 +1040,19 @@ function getCommitmentIntervalBuckets(
   };
 }
 
+function getCommitmentHeatmapColumnCount(interval: Commitment["trackingInterval"]) {
+  switch (interval) {
+    case "daily":
+      return 7;
+    case "weekly":
+      return 5;
+    case "monthly":
+      return 4;
+    case "none":
+      return 1;
+  }
+}
+
 function buildExeDevLoginUrl() {
   const redirect = `${window.location.pathname}${window.location.search}${window.location.hash}`;
   const url = new URL("/__exe.dev/login", window.location.origin);
@@ -7427,7 +7440,9 @@ function CommitmentTrackerRow(props: {
           >
             <span
               className="commitment-check-grid"
-              style={{ gridTemplateColumns: `repeat(${targetCount}, minmax(0, 1fr))` }}
+              style={{
+                gridTemplateColumns: `repeat(${Math.min(targetCount, 7)}, minmax(0, 1fr))`
+              }}
             >
               {Array.from({ length: targetCount }, (_, index) => (
                 <span
@@ -7454,7 +7469,15 @@ function CommitmentTrackerRow(props: {
             )}
           </button>
           {isCountDetailOpen && intervalProgress ? (
-            <div className="commitment-heatmap" aria-label="Commitment period progress">
+            <div
+              className="commitment-heatmap"
+              aria-label="Commitment period progress"
+              style={{
+                gridTemplateColumns: `repeat(${getCommitmentHeatmapColumnCount(
+                  props.commitment.trackingInterval
+                )}, minmax(0, 1fr))`
+              }}
+            >
               {intervalProgress.buckets.map((bucket) => {
                 const ratio = bucket.amount / targetCount;
 

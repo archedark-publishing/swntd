@@ -886,6 +886,8 @@ a {
 
 .commitment-tracker-row {
   align-items: flex-start;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 
 .commitment-assignee-groups,
@@ -913,10 +915,12 @@ a {
 
 .commitment-grid-wrap {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(0, 18rem) auto;
   align-items: center;
   gap: 0.6rem;
-  max-width: min(28rem, 100%);
+  justify-content: end;
+  max-width: 100%;
 }
 
 .commitment-check-grid {
@@ -927,10 +931,11 @@ a {
 
 .commitment-current-grid-button {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto;
   align-items: center;
   gap: 0.55rem;
   min-width: 0;
+  width: min(18rem, 100%);
   padding: 0;
   border: 0;
   background: transparent;
@@ -959,15 +964,16 @@ a {
 }
 
 .commitment-heatmap {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
   grid-column: 1 / -1;
   gap: 0.24rem;
+  justify-self: end;
   padding-top: 0.1rem;
+  width: min(18rem, 100%);
 }
 
 .commitment-heatmap-cell {
-  width: 0.72rem;
+  width: 100%;
   aspect-ratio: 1;
   border: 1px solid rgb(86 58 30 / 0.18);
   border-radius: 0.22rem;
