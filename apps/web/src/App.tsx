@@ -3584,7 +3584,7 @@ function TaskSheet(props: {
                   />
                   <div className="activity-composer-actions">
                     <input
-                      accept=".csv,.heic,.jpeg,.jpg,.json,.md,.pdf,.png,.txt,.webp"
+                      accept=".csv,.docx,.gif,.heic,.htm,.html,.jpeg,.jpg,.json,.m4a,.md,.mp3,.pdf,.png,.pptx,.rtf,.txt,.webp,.xlsx,.xml"
                       className="sr-only"
                       multiple
                       onChange={(event) => {

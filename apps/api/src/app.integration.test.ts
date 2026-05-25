@@ -579,6 +579,21 @@ describe("Phase 3 API", () => {
     expect(downloadResponse.status).toBe(200);
     expect(await downloadResponse.text()).toBe("shopping notes");
 
+    const htmlUploadForm = new FormData();
+    htmlUploadForm.set(
+      "file",
+      new File(["<a href=\"https://example.com\">Example</a>"], "reference.html", {
+        type: "text/html"
+      })
+    );
+
+    const htmlUploadResponse = await app.request(`/api/v1/tasks/${taskAId}/uploads`, {
+      body: htmlUploadForm,
+      headers: adminHeaders,
+      method: "POST"
+    });
+    expect(htmlUploadResponse.status).toBe(201);
+
     const archiveResponse = await app.request(
       `/api/v1/tasks/${taskAId}/archive`,
       jsonRequest({
@@ -615,7 +630,7 @@ describe("Phase 3 API", () => {
     expect(detailResponse.status).toBe(200);
     const detail = await parseJson<TaskItemResponse>(detailResponse);
     expect(detail.item.labels).toHaveLength(1);
-    expect(detail.item.attachments).toHaveLength(2);
+    expect(detail.item.attachments).toHaveLength(3);
     expect(detail.item.comments).toHaveLength(1);
   });
 

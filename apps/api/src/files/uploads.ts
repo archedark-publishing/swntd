@@ -3,28 +3,50 @@ import path from "node:path";
 import { ApiError } from "../http/errors";
 
 const allowedMimeTypes = new Set([
+  "application/rtf",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/xml",
   "application/json",
   "application/pdf",
+  "audio/mp4",
+  "audio/mpeg",
+  "audio/x-m4a",
+  "image/gif",
   "image/heic",
   "image/jpeg",
   "image/png",
   "image/webp",
   "text/csv",
+  "text/html",
   "text/markdown",
-  "text/plain"
+  "text/plain",
+  "text/rtf",
+  "text/xml"
 ]);
 
 const allowedExtensions = new Set([
   ".csv",
+  ".docx",
+  ".gif",
+  ".htm",
+  ".html",
   ".heic",
   ".jpeg",
   ".jpg",
   ".json",
+  ".m4a",
   ".md",
+  ".mp3",
   ".pdf",
+  ".pptx",
   ".png",
+  ".rtf",
   ".txt",
-  ".webp"
+  ".webp",
+  ".xlsx",
+  ".xml"
 ]);
 
 type UploadConfig = {
