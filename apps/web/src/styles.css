@@ -855,12 +855,28 @@ a {
   gap: 0.4rem;
 }
 
+.retrospective-row-actions,
 .retrospective-note-actions {
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 0.4rem;
   flex: 0 0 auto;
+}
+
+.retrospective-row-editor {
+  display: block;
+}
+
+.commitment-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.retrospective-capture-stack {
+  display: grid;
+  gap: 0.85rem;
 }
 
 .retrospective-row strong,

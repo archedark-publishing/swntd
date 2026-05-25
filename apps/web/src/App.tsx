@@ -43,6 +43,7 @@ import {
   Heart,
   Menu,
   Paperclip,
+  Pencil,
   Plus,
   RefreshCw,
   SendHorizontal,
@@ -229,6 +230,54 @@ type CommitmentDraft = {
   trackingInterval: "none" | "daily" | "weekly" | "monthly";
   trackingKind: CommitmentTrackingKind;
 };
+
+function createCommitmentDraft(commitment?: Commitment | null): CommitmentDraft {
+  return {
+    assigneeUserId: commitment?.assigneeUserId ?? "",
+    checklistItems:
+      commitment?.checklistItems.map((item) => ({
+        body: item.body,
+        clientId: item.id,
+        isCompleted: item.isCompleted
+      })) ?? [],
+    targetCount:
+      commitment?.targetCount !== null && commitment?.targetCount !== undefined
+        ? String(commitment.targetCount)
+        : "",
+    title: commitment?.title ?? "",
+    trackingInterval: commitment?.trackingInterval ?? "none",
+    trackingKind: commitment?.trackingKind ?? "binary"
+  };
+}
+
+function buildCommitmentUpdatePayload(
+  commitment: Commitment,
+  draft: CommitmentDraft
+): Parameters<typeof api.updateCommitment>[1] {
+  return {
+    ...(draft.assigneeUserId ? { assigneeUserId: draft.assigneeUserId } : {}),
+    checklistItems:
+      draft.trackingKind === "checklist"
+        ? draft.checklistItems
+            .map((item) => ({
+              body: item.body.trim(),
+              isCompleted: item.isCompleted
+            }))
+            .filter((item) => item.body)
+        : [],
+    commitmentPeriodId: commitment.commitmentPeriodId,
+    createdInRetrospectiveId: commitment.createdInRetrospectiveId,
+    description: commitment.description,
+    status: commitment.status,
+    targetCount:
+      draft.trackingKind !== "checklist" && draft.targetCount
+        ? Number(draft.targetCount)
+        : null,
+    title: draft.title,
+    trackingInterval: draft.trackingInterval,
+    trackingKind: draft.trackingKind
+  };
+}
 
 type AppSnapshot = {
   activeTasks: TaskListItem[];
@@ -2080,21 +2129,26 @@ export function App() {
                     runRetrospectiveMutation(
                       () =>
                         api.updateCommitment(commitment.id, {
-                          ...(commitment.assigneeUserId
-                            ? { assigneeUserId: commitment.assigneeUserId }
-                            : {}),
+                          ...buildCommitmentUpdatePayload(
+                            commitment,
+                            createCommitmentDraft(commitment)
+                          ),
                           checklistItems,
-                          commitmentPeriodId: commitment.commitmentPeriodId,
-                          createdInRetrospectiveId:
-                            commitment.createdInRetrospectiveId,
-                          description: commitment.description,
-                          status: commitment.status,
-                          targetCount: commitment.targetCount,
-                          title: commitment.title,
-                          trackingInterval: commitment.trackingInterval,
-                          trackingKind: commitment.trackingKind
                         }),
                       "Checklist updated."
+                    )
+                  }
+                  onArchiveCommitment={(commitment) =>
+                    runRetrospectiveMutation(
+                      () =>
+                        api.updateCommitment(commitment.id, {
+                          ...buildCommitmentUpdatePayload(
+                            commitment,
+                            createCommitmentDraft(commitment)
+                          ),
+                          status: "archived"
+                        }),
+                      "Commitment deleted."
                     )
                   }
                   onCreateCommitment={(retrospectiveId, draft) =>
@@ -2128,6 +2182,16 @@ export function App() {
                     runRetrospectiveMutation(
                       () => api.createRetrospectiveNote(input),
                       "Note added."
+                    )
+                  }
+                  onUpdateCommitment={(commitment, draft) =>
+                    runRetrospectiveMutation(
+                      () =>
+                        api.updateCommitment(
+                          commitment.id,
+                          buildCommitmentUpdatePayload(commitment, draft)
+                        ),
+                      "Commitment updated."
                     )
                   }
                   onDeleteNote={(noteId) =>
@@ -6020,6 +6084,7 @@ function formatRetrospectiveRoundKind(kind: RetrospectiveRound["kind"]) {
 function RetrospectiveView(props: {
   actor: Actor | null;
   onAddCheckin: (commitmentId: string) => Promise<unknown>;
+  onArchiveCommitment: (commitment: Commitment) => Promise<unknown>;
   onCreateCommitment: (
     retrospectiveId: string,
     draft: CommitmentDraft
@@ -6057,6 +6122,10 @@ function RetrospectiveView(props: {
     retrospectiveId: string,
     roundId: string,
     rating: "met" | "mostly_met" | "partly_met" | "missed" | "skipped"
+  ) => Promise<unknown>;
+  onUpdateCommitment: (
+    commitment: Commitment,
+    draft: CommitmentDraft
   ) => Promise<unknown>;
   state: RetrospectiveState;
   users: UserRef[];
@@ -6193,7 +6262,9 @@ function RetrospectiveView(props: {
           onDeleteNote={props.onDeleteNote}
           onEnterRound={props.onEnterRound}
           onFinalize={props.onFinalize}
+          onArchiveCommitment={props.onArchiveCommitment}
           onReviewCommitment={props.onReviewCommitment}
+          onUpdateCommitment={props.onUpdateCommitment}
           onUpdateTemplate={props.onUpdateRetrospectiveTemplate}
           onUpdateClosureOn={props.onUpdateRetrospectiveClosure}
           actor={props.actor}
@@ -6203,12 +6274,17 @@ function RetrospectiveView(props: {
       ) : null}
 
         <CommitmentTracker
-          commitments={detail?.commitments ?? home.commitments}
+          commitments={(detail?.commitments ?? home.commitments).filter(
+            (commitment) => commitment.status === "active"
+          )}
           onAddCheckin={props.onAddCheckin}
+          onArchiveCommitment={props.onArchiveCommitment}
           onDeleteCheckin={props.onDeleteCheckin}
+          onUpdateCommitment={props.onUpdateCommitment}
           onUpdateChecklist={props.onUpdateCommitmentChecklist}
           actor={props.actor}
           period={activePeriod}
+          users={props.users}
         />
 
       {activePeriod && !detail ? (
@@ -6258,11 +6334,16 @@ function ActiveRetrospectivePanel(props: {
   onDeleteNote: (noteId: string) => Promise<unknown>;
   onEnterRound: (retrospectiveId: string, roundId: string) => Promise<unknown>;
   onFinalize: (retrospectiveId: string) => Promise<unknown>;
+  onArchiveCommitment: (commitment: Commitment) => Promise<unknown>;
   onReviewCommitment: (
     commitmentId: string,
     retrospectiveId: string,
     roundId: string,
     rating: "met" | "mostly_met" | "partly_met" | "missed" | "skipped"
+  ) => Promise<unknown>;
+  onUpdateCommitment: (
+    commitment: Commitment,
+    draft: CommitmentDraft
   ) => Promise<unknown>;
   onUpdateClosureOn: (retrospectiveId: string, closureOn: string) => Promise<unknown>;
   onUpdateTemplate: (retrospectiveId: string, templateId: string) => Promise<unknown>;
@@ -6394,7 +6475,9 @@ function ActiveRetrospectivePanel(props: {
           onCreateCommitment={props.onCreateCommitment}
           onCreateNote={props.onCreateNote}
           onDeleteNote={props.onDeleteNote}
+          onArchiveCommitment={props.onArchiveCommitment}
           onReviewCommitment={props.onReviewCommitment}
+          onUpdateCommitment={props.onUpdateCommitment}
           actor={props.actor}
           round={currentRound}
           users={props.users}
@@ -6423,22 +6506,43 @@ function RetrospectiveRoundBody(props: {
     templateRoundId?: string | null;
   }) => Promise<unknown>;
   onDeleteNote: (noteId: string) => Promise<unknown>;
+  onArchiveCommitment: (commitment: Commitment) => Promise<unknown>;
   onReviewCommitment: (
     commitmentId: string,
     retrospectiveId: string,
     roundId: string,
     rating: "met" | "mostly_met" | "partly_met" | "missed" | "skipped"
   ) => Promise<unknown>;
+  onUpdateCommitment: (
+    commitment: Commitment,
+    draft: CommitmentDraft
+  ) => Promise<unknown>;
   round: RetrospectiveRound;
   users: UserRef[];
 }) {
   if (props.round.kind === "commitment_capture") {
+    const capturedCommitments = props.commitments.filter(
+      (commitment) =>
+        commitment.createdInRetrospectiveId === props.detail.id &&
+        commitment.status === "active"
+    );
+
     return (
-      <CommitmentCaptureForm
-        actor={props.actor}
-        onSubmit={(draft) => props.onCreateCommitment(props.detail.id, draft)}
-        users={props.users}
-      />
+      <div className="retrospective-capture-stack">
+        <CommitmentCaptureForm
+          actor={props.actor}
+          onSubmit={(draft) => props.onCreateCommitment(props.detail.id, draft)}
+          users={props.users}
+        />
+        <EditableCommitmentList
+          actor={props.actor}
+          commitments={capturedCommitments}
+          emptyMessage="No commitments captured yet."
+          onArchiveCommitment={props.onArchiveCommitment}
+          onUpdateCommitment={props.onUpdateCommitment}
+          users={props.users}
+        />
+      </div>
     );
   }
 
@@ -6671,26 +6775,141 @@ function RetrospectiveNoteComposer(props: {
   );
 }
 
-function CommitmentCaptureForm(props: {
+function EditableCommitmentList(props: {
   actor: Actor | null;
+  commitments: Commitment[];
+  emptyMessage: string;
+  onArchiveCommitment: (commitment: Commitment) => Promise<unknown>;
+  onUpdateCommitment: (
+    commitment: Commitment,
+    draft: CommitmentDraft
+  ) => Promise<unknown>;
+  users: UserRef[];
+}) {
+  const [editingCommitmentId, setEditingCommitmentId] = useState<string | null>(null);
+
+  if (props.commitments.length === 0) {
+    return <EmptyStateCard message={props.emptyMessage} />;
+  }
+
+  return (
+    <div className="retrospective-list">
+      {props.commitments.map((commitment) => {
+        const canEdit =
+          commitment.status === "active" &&
+          commitment.assigneeUserId !== null &&
+          commitment.assigneeUserId === props.actor?.id;
+
+        return (
+          <EditableCommitmentRow
+            canEdit={canEdit}
+            commitment={commitment}
+            isEditing={editingCommitmentId === commitment.id}
+            key={commitment.id}
+            onArchiveCommitment={props.onArchiveCommitment}
+            onCancelEdit={() => setEditingCommitmentId(null)}
+            onStartEdit={() => setEditingCommitmentId(commitment.id)}
+            onUpdateCommitment={async (draft) => {
+              await props.onUpdateCommitment(commitment, draft);
+              setEditingCommitmentId(null);
+            }}
+            users={props.users}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function EditableCommitmentRow(props: {
+  canEdit: boolean;
+  commitment: Commitment;
+  isEditing: boolean;
+  onArchiveCommitment: (commitment: Commitment) => Promise<unknown>;
+  onCancelEdit: () => void;
+  onStartEdit: () => void;
+  onUpdateCommitment: (draft: CommitmentDraft) => Promise<unknown>;
+  users: UserRef[];
+}) {
+  if (props.isEditing) {
+    return (
+      <div className="retrospective-row retrospective-row-editor">
+        <CommitmentCaptureForm
+          initialDraft={createCommitmentDraft(props.commitment)}
+          onCancel={props.onCancelEdit}
+          onSubmit={props.onUpdateCommitment}
+          submitLabel="Save Commitment"
+          users={props.users}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="retrospective-row">
+      <span>
+        <strong>{props.commitment.title}</strong>
+        <span>
+          {props.commitment.assignee?.displayName ?? "Unassigned"} ·{" "}
+          {getCommitmentProgressLabel(props.commitment)}
+        </span>
+        {props.commitment.description ? <span>{props.commitment.description}</span> : null}
+      </span>
+      <div className="retrospective-row-actions">
+        <Button
+          disabled={!props.canEdit}
+          onClick={props.onStartEdit}
+          size="icon"
+          type="button"
+          variant="outline"
+        >
+          <Pencil className="size-4" />
+          <span className="sr-only">Edit commitment</span>
+        </Button>
+        <Button
+          disabled={!props.canEdit}
+          onClick={() => {
+            if (window.confirm("Delete this commitment?")) {
+              void props.onArchiveCommitment(props.commitment);
+            }
+          }}
+          size="icon"
+          type="button"
+          variant="outline"
+        >
+          <Trash2 className="size-4" />
+          <span className="sr-only">Delete commitment</span>
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function CommitmentCaptureForm(props: {
+  actor?: Actor | null;
+  initialDraft?: CommitmentDraft;
+  onCancel?: () => void;
   onSubmit: (draft: CommitmentDraft) => Promise<unknown>;
+  submitLabel?: string;
   users: UserRef[];
 }) {
   const assignableUsers = useMemo(
     () => props.users.filter((user) => user.role === "admin"),
     [props.users]
   );
-  const [draft, setDraft] = useState<CommitmentDraft>({
-    assigneeUserId:
-      assignableUsers.find((user) => user.id === props.actor?.id)?.id ??
-      assignableUsers[0]?.id ??
-      "",
-    checklistItems: [],
-    targetCount: "",
-    title: "",
-    trackingInterval: "none",
-    trackingKind: "binary"
-  });
+  const getDefaultDraft = () =>
+    props.initialDraft ?? {
+      assigneeUserId:
+        assignableUsers.find((user) => user.id === props.actor?.id)?.id ??
+        assignableUsers[0]?.id ??
+        "",
+      checklistItems: [],
+      targetCount: "",
+      title: "",
+      trackingInterval: "none",
+      trackingKind: "binary"
+    };
+  const [draft, setDraft] = useState<CommitmentDraft>(getDefaultDraft);
   const [checklistComposerValue, setChecklistComposerValue] = useState("");
 
   useEffect(() => {
@@ -6708,17 +6927,7 @@ function CommitmentCaptureForm(props: {
   }, [assignableUsers, draft.assigneeUserId, props.actor?.id]);
 
   const resetDraft = () => {
-    setDraft({
-      assigneeUserId:
-        assignableUsers.find((user) => user.id === props.actor?.id)?.id ??
-        assignableUsers[0]?.id ??
-        "",
-      checklistItems: [],
-      targetCount: "",
-      title: "",
-      trackingInterval: "none",
-      trackingKind: "binary"
-    });
+    setDraft(getDefaultDraft());
     setChecklistComposerValue("");
   };
   const addChecklistItem = () => {
@@ -6774,7 +6983,11 @@ function CommitmentCaptureForm(props: {
               }
             : draft;
 
-        void props.onSubmit(submitDraft).then(resetDraft);
+        void props.onSubmit(submitDraft).then(() => {
+          if (!props.initialDraft) {
+            resetDraft();
+          }
+        });
       }}
     >
       <FormField label="Commitment">
@@ -6905,10 +7118,17 @@ function CommitmentCaptureForm(props: {
           </div>
         </div>
       ) : null}
-      <Button disabled={!canSubmit} type="submit">
-        <Plus className="size-4" />
-        Add Commitment
-      </Button>
+      <div className="commitment-form-actions">
+        {props.onCancel ? (
+          <Button onClick={props.onCancel} type="button" variant="outline">
+            Cancel
+          </Button>
+        ) : null}
+        <Button disabled={!canSubmit} type="submit">
+          <Plus className="size-4" />
+          {props.submitLabel ?? "Add Commitment"}
+        </Button>
+      </div>
     </form>
   );
 }
@@ -6917,12 +7137,18 @@ function CommitmentTracker(props: {
   actor: Actor | null;
   commitments: Commitment[];
   onAddCheckin: (commitmentId: string) => Promise<unknown>;
+  onArchiveCommitment: (commitment: Commitment) => Promise<unknown>;
   onDeleteCheckin: (checkinId: string) => Promise<unknown>;
+  onUpdateCommitment: (
+    commitment: Commitment,
+    draft: CommitmentDraft
+  ) => Promise<unknown>;
   onUpdateChecklist: (
     commitment: Commitment,
     checklistItems: Array<{ body: string; isCompleted?: boolean }>
   ) => Promise<unknown>;
   period: CommitmentPeriod | null;
+  users: UserRef[];
 }) {
   const groups = groupCommitmentsByAssignee(props.commitments);
 
@@ -6949,9 +7175,12 @@ function CommitmentTracker(props: {
                     commitment={commitment}
                     key={commitment.id}
                     onAddCheckin={props.onAddCheckin}
+                    onArchiveCommitment={props.onArchiveCommitment}
                     onDeleteCheckin={props.onDeleteCheckin}
+                    onUpdateCommitment={props.onUpdateCommitment}
                     onUpdateChecklist={props.onUpdateChecklist}
                     period={props.period}
+                    users={props.users}
                   />
                 ))}
               </div>
@@ -6987,14 +7216,21 @@ function CommitmentTrackerRow(props: {
   actor: Actor | null;
   commitment: Commitment;
   onAddCheckin: (commitmentId: string) => Promise<unknown>;
+  onArchiveCommitment: (commitment: Commitment) => Promise<unknown>;
   onDeleteCheckin: (checkinId: string) => Promise<unknown>;
+  onUpdateCommitment: (
+    commitment: Commitment,
+    draft: CommitmentDraft
+  ) => Promise<unknown>;
   onUpdateChecklist: (
     commitment: Commitment,
     checklistItems: Array<{ body: string; isCompleted?: boolean }>
   ) => Promise<unknown>;
   period: CommitmentPeriod | null;
+  users: UserRef[];
 }) {
   const [checklistComposerValue, setChecklistComposerValue] = useState("");
+  const [isEditing, setIsEditing] = useState(false);
   const sortedCheckins = props.commitment.checkins
     .slice()
     .sort((left, right) =>
@@ -7050,6 +7286,23 @@ function CommitmentTrackerRow(props: {
     setChecklistComposerValue("");
   };
 
+  if (isEditing) {
+    return (
+      <div className="retrospective-row retrospective-row-editor">
+        <CommitmentCaptureForm
+          initialDraft={createCommitmentDraft(props.commitment)}
+          onCancel={() => setIsEditing(false)}
+          onSubmit={async (draft) => {
+            await props.onUpdateCommitment(props.commitment, draft);
+            setIsEditing(false);
+          }}
+          submitLabel="Save Commitment"
+          users={props.users}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="retrospective-row commitment-tracker-row">
       <span>
@@ -7059,6 +7312,32 @@ function CommitmentTrackerRow(props: {
           {getCommitmentProgressLabel(props.commitment)}
         </span>
       </span>
+      <div className="retrospective-row-actions">
+        <Button
+          disabled={!canMutate}
+          onClick={() => setIsEditing(true)}
+          size="icon"
+          type="button"
+          variant="outline"
+        >
+          <Pencil className="size-4" />
+          <span className="sr-only">Edit commitment</span>
+        </Button>
+        <Button
+          disabled={!canMutate}
+          onClick={() => {
+            if (window.confirm("Delete this commitment?")) {
+              void props.onArchiveCommitment(props.commitment);
+            }
+          }}
+          size="icon"
+          type="button"
+          variant="outline"
+        >
+          <Trash2 className="size-4" />
+          <span className="sr-only">Delete commitment</span>
+        </Button>
+      </div>
       {isCountGrid ? (
         <div className="commitment-grid-wrap">
           <div
