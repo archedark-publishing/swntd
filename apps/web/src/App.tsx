@@ -925,6 +925,15 @@ function buildExeDevLoginUrl() {
   return `${url.pathname}${url.search}`;
 }
 
+function submitExeDevLogout() {
+  const form = document.createElement("form");
+  form.action = "/__exe.dev/logout";
+  form.method = "POST";
+  form.style.display = "none";
+  document.body.append(form);
+  form.submit();
+}
+
 function createAccessState(
   error: SwntdApiError,
   context: BootstrapContext | null
@@ -1889,32 +1898,12 @@ export function App() {
 
   async function handleSwitchAccount() {
     setIsSwitchingAccount(true);
-
-    try {
-      await fetch("/__exe.dev/logout", {
-        credentials: "same-origin",
-        method: "POST"
-      });
-      window.location.assign(buildExeDevLoginUrl());
-    } catch (error) {
-      showErrorToast(buildFlashMessage(error), "switch-account-error");
-      setIsSwitchingAccount(false);
-    }
+    submitExeDevLogout();
   }
 
-  async function handleLogOut() {
+  function handleLogOut() {
     setIsLoggingOut(true);
-
-    try {
-      await fetch("/__exe.dev/logout", {
-        credentials: "same-origin",
-        method: "POST"
-      });
-      window.location.assign("/");
-    } catch (error) {
-      showErrorToast(buildFlashMessage(error), "logout-error");
-      setIsLoggingOut(false);
-    }
+    submitExeDevLogout();
   }
 
   async function handleClaimOwnership() {
@@ -1984,7 +1973,7 @@ export function App() {
               mainItems={navItems.map((item) => ({ id: item.id, label: item.label }))}
               onClose={() => setIsNavOpen(false)}
               onLogOut={() => {
-                void handleLogOut();
+                handleLogOut();
               }}
               onSelectMain={(itemId) => handleViewChange(itemId as ViewName)}
               selectedMain={view}
