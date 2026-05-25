@@ -166,6 +166,56 @@ describe("Phase 5 lifecycle jobs", () => {
     }
   });
 
+  it("generates a recurring task at the start of the due date even when the due time is later", async () => {
+    const { client, db } = await createDatabase();
+
+    try {
+      const seedUsers = await getSeedUsers(db);
+
+      const [rawTemplate] = await db
+        .insert(recurringTaskTemplates)
+        .values({
+          createdByUserId: seedUsers.admin.id,
+          defaultAssigneeUserId: seedUsers.assistant.id,
+          defaultDueTime: "19:00",
+          description: "Check the board before tonight.",
+          householdId: "default-household",
+          nextOccurrenceOn: "2026-05-01",
+          recurrenceCadence: "weekly",
+          recurrenceInterval: 1,
+          title: "Evening reminder",
+          updatedByUserId: seedUsers.admin.id
+        })
+        .returning({
+          id: recurringTaskTemplates.id
+        });
+      const template = getRequiredRow(rawTemplate, "Expected recurring template to be created.");
+
+      const run = await runRecurringOccurrenceGenerationJob({
+        config: getApiConfig(),
+        db,
+        now: new Date("2026-05-01T18:00:00.000Z")
+      });
+
+      expect(run.generatedOccurrences).toBe(1);
+
+      const generatedTasks = await db
+        .select()
+        .from(tasks)
+        .where(eq(tasks.recurringTaskTemplateId, template.id));
+      const generatedTask = getRequiredRow(
+        generatedTasks[0],
+        "Expected recurring task occurrence to be created."
+      );
+
+      expect(generatedTask.dueOn).toBe("2026-05-01");
+      expect(generatedTask.dueTime).toBe("19:00");
+      expect(generatedTask.status).toBe("To Do");
+    } finally {
+      client.close();
+    }
+  });
+
   it("archives overdue one-off tasks and completed recurring predecessors", async () => {
     const { client, db } = await createDatabase();
 

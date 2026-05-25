@@ -22,6 +22,27 @@
       "when": 1774026453242,
       "tag": "0002_amusing_firelord",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1774048200000,
+      "tag": "0003_near_due_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1777403873381,
+      "tag": "0004_giant_sister_grimm",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1777643200000,
+      "tag": "0005_retrospective_next_period",
+      "breakpoints": true
     }
   ]
 }

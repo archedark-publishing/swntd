@@ -26,6 +26,10 @@
       "types": "./src/server/domain/authorization.ts",
       "default": "./src/server/domain/authorization.ts"
     },
+    "./server/domain/retrospectives": {
+      "types": "./src/server/domain/retrospectives.ts",
+      "default": "./src/server/domain/retrospectives.ts"
+    },
     "./server/domain/fixtures": {
       "types": "./src/server/domain/fixtures.ts",
       "default": "./src/server/domain/fixtures.ts"

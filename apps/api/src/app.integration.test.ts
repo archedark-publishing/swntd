@@ -1,5 +1,12 @@
 import { readdir } from "node:fs/promises";
+import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+  commitmentPeriods,
+  retrospectiveTemplateRounds,
+  users
+} from "@swntd/shared/server/db/schema";
+import { createDatabase } from "./db/client";
 import {
   getAssistantActorId,
   issueAssistantBearerToken,
@@ -73,6 +80,7 @@ type SettingsResponse = {
   settings: {
     defaultCalendarExportKind: "google" | "ics";
     doneArchiveAfterDays: number;
+    nearDueThresholdDays: number;
   };
 };
 
@@ -87,11 +95,19 @@ type TaskItemResponse = {
       downloadUrl: string | null;
       storageKind: string;
     }>;
+    checklistItems: Array<{
+      body: string;
+      id: string;
+      isCompleted: boolean;
+    }>;
     checklistProgress: {
       completed: number;
+      total?: number;
     };
     commentCount: number;
-    comments: unknown[];
+    comments: Array<{
+      body: string;
+    }>;
     id: string;
     labels: unknown[];
     revision: number;
@@ -119,6 +135,93 @@ type TemplateListResponse = {
   items: unknown[];
 };
 
+type RetrospectiveTemplatesResponse = {
+  items: Array<{
+    id: string;
+    name: string;
+    rounds: Array<{
+      entryPhase?: string | null;
+      kind?: string;
+      id: string;
+      privacy: string | null;
+      title: string;
+    }>;
+  }>;
+};
+
+type RetrospectiveHomeResponse = {
+  activePeriod: {
+    closureOn: string;
+    id: string;
+    periodStartOn: string;
+  };
+  daysUntilClosure: number;
+};
+
+type RetrospectiveNoteResponse = {
+  item: {
+    id: string;
+    visibilityState: string;
+  };
+};
+
+type RetrospectiveNotesResponse = {
+  items: Array<{
+    id: string;
+    visibilityState: string;
+  }>;
+};
+
+type CommitmentCheckinResponse = {
+  item: {
+    amount: number;
+    checkinOn: string;
+    id: string;
+  };
+};
+
+type RetrospectiveResponse = {
+  item: {
+    commitments: Array<{
+      commitmentPeriodId: string | null;
+      id: string;
+    }>;
+    currentRoundId: string | null;
+    id: string;
+    nextCommitmentPeriodClosureOn: string | null;
+    nextCommitmentPeriodStartOn: string | null;
+    period: {
+      closureOn: string;
+      id: string;
+      status: string;
+    };
+    rounds: Array<{
+      id: string;
+      privacy: string | null;
+      title: string;
+    }>;
+    status: string;
+    templateId: string;
+  };
+};
+
+type CommitmentResponse = {
+  item: {
+    assigneeUserId: string | null;
+    commitmentPeriodId: string | null;
+    id: string;
+    status?: string;
+    title: string;
+  };
+};
+
+type CommitmentReviewResponse = {
+  item: {
+    id: string;
+    rating: string;
+  };
+};
+
 function jsonRequest(init: {
   body?: unknown;
   headers?: JsonHeaders;
@@ -141,6 +244,107 @@ function jsonRequest(init: {
 
 async function parseJson<T>(response: Response) {
   return (await response.json()) as T;
+}
+
+function todayIsoDate() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function addDaysIso(dateValue: string, days: number) {
+  const date = new Date(`${dateValue}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+
+  return date.toISOString().slice(0, 10);
+}
+
+async function forceActiveCommitmentPeriodClosed(closureOn: string) {
+  const { client, db } = await createDatabase();
+
+  try {
+    await db
+      .update(commitmentPeriods)
+      .set({
+        closureOn,
+        updatedAt: new Date()
+      })
+      .where(eq(commitmentPeriods.status, "active"));
+  } finally {
+    client.close();
+  }
+}
+
+async function createActiveCommitmentPeriod(periodStartOn: string, closureOn: string) {
+  const { client, db } = await createDatabase();
+
+  try {
+    const [admin] = await db
+      .select({
+        householdId: users.householdId
+      })
+      .from(users)
+      .where(eq(users.email, "admin1@example.com"))
+      .limit(1);
+
+    if (!admin) {
+      throw new Error("Admin user was not seeded.");
+    }
+
+    await db.insert(commitmentPeriods).values({
+      closureOn,
+      householdId: admin.householdId,
+      periodStartOn
+    });
+  } finally {
+    client.close();
+  }
+}
+
+async function getAdminUserId(email: string) {
+  const { client, db } = await createDatabase();
+
+  try {
+    const [admin] = await db
+      .select({
+        id: users.id
+      })
+      .from(users)
+      .where(eq(users.email, email))
+      .limit(1);
+
+    if (!admin) {
+      throw new Error(`Admin user ${email} was not seeded.`);
+    }
+
+    return admin.id;
+  } finally {
+    client.close();
+  }
+}
+
+async function deleteCommitmentPeriods() {
+  const { client, db } = await createDatabase();
+
+  try {
+    await db.delete(commitmentPeriods);
+  } finally {
+    client.close();
+  }
+}
+
+async function setTemplateRoundPrivacy(title: string, privacy: "private") {
+  const { client, db } = await createDatabase();
+
+  try {
+    await db
+      .update(retrospectiveTemplateRounds)
+      .set({
+        privacy,
+        updatedAt: new Date()
+      })
+      .where(eq(retrospectiveTemplateRounds.title, title));
+  } finally {
+    client.close();
+  }
 }
 
 describe("Phase 3 API", () => {
@@ -442,7 +646,8 @@ describe("Phase 3 API", () => {
       jsonRequest({
         body: {
           defaultCalendarExportKind: "ics",
-          doneArchiveAfterDays: 14
+          doneArchiveAfterDays: 14,
+          nearDueThresholdDays: 5
         },
         headers: adminHeaders,
         method: "PATCH"
@@ -452,6 +657,7 @@ describe("Phase 3 API", () => {
     const settingsPatch = await parseJson<SettingsResponse>(settingsPatchResponse);
     expect(settingsPatch.settings.defaultCalendarExportKind).toBe("ics");
     expect(settingsPatch.settings.doneArchiveAfterDays).toBe(14);
+    expect(settingsPatch.settings.nearDueThresholdDays).toBe(5);
 
     const labelResponse = await app.request(
       "/api/v1/labels",
@@ -530,6 +736,7 @@ describe("Phase 3 API", () => {
     expect(openApiResponse.status).toBe(200);
     const openApi = await parseJson<OpenApiResponse>(openApiResponse);
     expect(openApi.paths["/api/v1/tasks/{taskId}/status"]).toContain("post");
+    expect(openApi.paths["/api/v1/tasks/{taskId}/checklist-items"]).toContain("post");
     expect(openApi.paths["/api/v1/users/{userId}/service-tokens"]).toContain("post");
     expect(openApi.paths["/api/v1/users/{userId}/remove"]).toContain("post");
   });
@@ -747,6 +954,675 @@ describe("Phase 3 API", () => {
     expect(revokeTokenResponse.status).toBe(200);
   });
 
+  it("creates an initial retrospective period when none exists", async () => {
+    const adminHeaders = trustedHeader("admin1@example.com");
+
+    await deleteCommitmentPeriods();
+
+    const homeResponse = await app.request("/api/v1/retrospective-home", {
+      headers: adminHeaders
+    });
+    expect(homeResponse.status).toBe(200);
+    const home = await parseJson<RetrospectiveHomeResponse>(homeResponse);
+    expect(home.activePeriod.id).toEqual(expect.any(String));
+    expect(home.daysUntilClosure).toBe(0);
+
+    const retrospectiveCreateResponse = await app.request(
+      "/api/v1/retrospectives",
+      jsonRequest({
+        body: {
+          title: "First retro"
+        },
+        headers: adminHeaders,
+        method: "POST"
+      })
+    );
+    expect(retrospectiveCreateResponse.status).toBe(201);
+    const createdRetrospective = await parseJson<RetrospectiveResponse>(
+      retrospectiveCreateResponse
+    );
+    expect(createdRetrospective.item.status).toBe("active");
+  });
+
+  it("allows early retrospective creation when a period is still active", async () => {
+    const adminHeaders = trustedHeader("admin1@example.com");
+
+    const homeResponse = await app.request("/api/v1/retrospective-home", {
+      headers: adminHeaders
+    });
+    expect(homeResponse.status).toBe(200);
+
+    await forceActiveCommitmentPeriodClosed("2999-01-31");
+    const selectedClosureOn = addDaysIso(todayIsoDate(), 30);
+
+    const earlyRetrospectiveResponse = await app.request(
+      "/api/v1/retrospectives",
+      jsonRequest({
+        body: {
+          closureOn: selectedClosureOn,
+          title: "Early retro"
+        },
+        headers: adminHeaders,
+        method: "POST"
+      })
+    );
+    expect(earlyRetrospectiveResponse.status).toBe(201);
+    const earlyRetrospective = await parseJson<RetrospectiveResponse>(
+      earlyRetrospectiveResponse
+    );
+    expect(earlyRetrospective.item.status).toBe("active");
+    expect(earlyRetrospective.item.nextCommitmentPeriodClosureOn).toBe(
+      selectedClosureOn
+    );
+    expect(earlyRetrospective.item.nextCommitmentPeriodStartOn).toBe(todayIsoDate());
+    expect(earlyRetrospective.item.period.closureOn).toBe(todayIsoDate());
+    expect(earlyRetrospective.item.period.status).toBe("closed");
+
+    const updateClosureResponse = await app.request(
+      `/api/v1/retrospectives/${earlyRetrospective.item.id}`,
+      jsonRequest({
+        body: {
+          closureOn: todayIsoDate()
+        },
+        headers: adminHeaders,
+        method: "PATCH"
+      })
+    );
+    expect(updateClosureResponse.status).toBe(200);
+    const updatedRetrospective = await parseJson<RetrospectiveResponse>(
+      updateClosureResponse
+    );
+    expect(updatedRetrospective.item.nextCommitmentPeriodClosureOn).toBe(
+      todayIsoDate()
+    );
+
+    const futureClosureResponse = await app.request(
+      `/api/v1/retrospectives/${earlyRetrospective.item.id}`,
+      jsonRequest({
+        body: {
+          closureOn: "2999-02-01"
+        },
+        headers: adminHeaders,
+        method: "PATCH"
+      })
+    );
+    expect(futureClosureResponse.status).toBe(200);
+    const futureRetrospective = await parseJson<RetrospectiveResponse>(
+      futureClosureResponse
+    );
+    expect(futureRetrospective.item.nextCommitmentPeriodClosureOn).toBe(
+      "2999-02-01"
+    );
+
+    const invalidClosureResponse = await app.request(
+      `/api/v1/retrospectives/${earlyRetrospective.item.id}`,
+      jsonRequest({
+        body: {
+          closureOn: "1900-01-01"
+        },
+        headers: adminHeaders,
+        method: "PATCH"
+      })
+    );
+    expect(invalidClosureResponse.status).toBe(400);
+
+    await createActiveCommitmentPeriod(todayIsoDate(), "2999-02-28");
+
+    const concurrentRetrospectiveResponse = await app.request(
+      "/api/v1/retrospectives",
+      jsonRequest({
+        body: {
+          title: "Concurrent retro"
+        },
+        headers: adminHeaders,
+        method: "POST"
+      })
+    );
+    expect(concurrentRetrospectiveResponse.status).toBe(201);
+    const concurrentRetrospective = await parseJson<RetrospectiveResponse>(
+      concurrentRetrospectiveResponse
+    );
+    expect(concurrentRetrospective.item.id).not.toBe(earlyRetrospective.item.id);
+    expect(concurrentRetrospective.item.period.closureOn).toBe(todayIsoDate());
+    expect(concurrentRetrospective.item.period.status).toBe("closed");
+  });
+
+  it("creates and updates retrospective templates", async () => {
+    const adminHeaders = trustedHeader("admin1@example.com");
+
+    const createTemplateResponse = await app.request(
+      "/api/v1/retrospective-templates",
+      jsonRequest({
+        body: {
+          description: "A short check-in flow.",
+          name: "Lightweight retro",
+          rounds: [
+            {
+              kind: "notes",
+              entryPhase: "both",
+              privacy: "shared",
+              prompt: "What should we talk through?",
+              title: "Topics"
+            },
+            {
+              kind: "commitment_capture",
+              prompt: "What should happen next?",
+              title: "Next steps"
+            }
+          ]
+        },
+        headers: adminHeaders,
+        method: "POST"
+      })
+    );
+    expect(createTemplateResponse.status).toBe(201);
+    const createdTemplate = await parseJson<{
+      item: RetrospectiveTemplatesResponse["items"][number];
+    }>(createTemplateResponse);
+    expect(createdTemplate.item.rounds).toHaveLength(2);
+    expect(createdTemplate.item.rounds[0]).toEqual(
+      expect.objectContaining({
+        entryPhase: "both",
+        privacy: "shared",
+        title: "Topics"
+      })
+    );
+
+    const updateTemplateResponse = await app.request(
+      `/api/v1/retrospective-templates/${createdTemplate.item.id}`,
+      jsonRequest({
+        body: {
+          description: "A slightly longer flow.",
+          name: "Lightweight retro v2",
+          rounds: [
+            {
+              kind: "task_lookback",
+              prompt: "What got done?",
+              title: "Lookback"
+            },
+            {
+              kind: "notes",
+              entryPhase: "retrospective",
+              privacy: "private",
+              prompt: "What should stay with the author?",
+              title: "Private notes"
+            }
+          ]
+        },
+        headers: adminHeaders,
+        method: "PATCH"
+      })
+    );
+    expect(updateTemplateResponse.status).toBe(200);
+    const updatedTemplate = await parseJson<{
+      item: RetrospectiveTemplatesResponse["items"][number];
+    }>(updateTemplateResponse);
+    expect(updatedTemplate.item.name).toBe("Lightweight retro v2");
+    expect(updatedTemplate.item.rounds).toEqual([
+      expect.objectContaining({
+        kind: "task_lookback",
+        privacy: null,
+        title: "Lookback"
+      }),
+      expect.objectContaining({
+        entryPhase: "retrospective",
+        kind: "notes",
+        privacy: "private",
+        title: "Private notes"
+      })
+    ]);
+  });
+
+  it("supports retrospective notes, reveal, commitments, and finalization", async () => {
+    const adminHeaders = trustedHeader("admin1@example.com");
+    const otherAdminHeaders = trustedHeader("admin2@example.com");
+    const adminUserId = await getAdminUserId("admin1@example.com");
+
+    const templatesResponse = await app.request("/api/v1/retrospective-templates", {
+      headers: adminHeaders
+    });
+    expect(templatesResponse.status).toBe(200);
+    const templates = await parseJson<RetrospectiveTemplatesResponse>(
+      templatesResponse
+    );
+    expect(templates.items).toHaveLength(1);
+    const highlightsRound = templates.items[0]!.rounds.find(
+      (round) => round.title === "Highlights"
+    );
+    expect(highlightsRound?.privacy).toBe("private_until_round");
+
+    const homeResponse = await app.request("/api/v1/retrospective-home", {
+      headers: adminHeaders
+    });
+    expect(homeResponse.status).toBe(200);
+    const home = await parseJson<RetrospectiveHomeResponse>(homeResponse);
+    expect(home.daysUntilClosure).toBeGreaterThanOrEqual(0);
+
+    const noteResponse = await app.request(
+      "/api/v1/retrospective-notes",
+      jsonRequest({
+        body: {
+          body: "Thanks for making the hard week lighter.",
+          commitmentPeriodId: home.activePeriod.id,
+          entryPhase: "commitment_period",
+          templateRoundId: highlightsRound!.id
+        },
+        headers: adminHeaders,
+        method: "POST"
+      })
+    );
+    expect(noteResponse.status).toBe(201);
+    const privateNote = await parseJson<RetrospectiveNoteResponse>(noteResponse);
+    expect(privateNote.item.visibilityState).toBe("private_until_round");
+
+    const authorVisibleNotesResponse = await app.request(
+      `/api/v1/retrospective-notes?commitmentPeriodId=${home.activePeriod.id}`,
+      {
+        headers: adminHeaders
+      }
+    );
+    expect(authorVisibleNotesResponse.status).toBe(200);
+    const authorVisibleNotes = await parseJson<RetrospectiveNotesResponse>(
+      authorVisibleNotesResponse
+    );
+    expect(authorVisibleNotes.items).toEqual([
+      expect.objectContaining({
+        id: privateNote.item.id,
+        visibilityState: "private_until_round"
+      })
+    ]);
+
+    const hiddenNotesResponse = await app.request(
+      `/api/v1/retrospective-notes?commitmentPeriodId=${home.activePeriod.id}`,
+      {
+        headers: otherAdminHeaders
+      }
+    );
+    expect(hiddenNotesResponse.status).toBe(200);
+    const hiddenNotes = await parseJson<RetrospectiveNotesResponse>(
+      hiddenNotesResponse
+    );
+    expect(hiddenNotes.items).toHaveLength(0);
+
+    const otherDeletePrivateNoteResponse = await app.request(
+      `/api/v1/retrospective-notes/${privateNote.item.id}`,
+      {
+        headers: otherAdminHeaders,
+        method: "DELETE"
+      }
+    );
+    expect(otherDeletePrivateNoteResponse.status).toBe(403);
+
+    await forceActiveCommitmentPeriodClosed("2999-01-31");
+
+    await setTemplateRoundPrivacy("Planning", "private");
+
+    const retrospectiveCreateResponse = await app.request(
+      "/api/v1/retrospectives",
+      jsonRequest({
+        body: {
+          title: "Current retro"
+        },
+        headers: adminHeaders,
+        method: "POST"
+      })
+    );
+    expect(retrospectiveCreateResponse.status).toBe(201);
+    const createdRetrospective = await parseJson<RetrospectiveResponse>(
+      retrospectiveCreateResponse
+    );
+    const plannedClosureOn = addDaysIso(todayIsoDate(), 30);
+    const planNextPeriodResponse = await app.request(
+      `/api/v1/retrospectives/${createdRetrospective.item.id}`,
+      jsonRequest({
+        body: {
+          closureOn: plannedClosureOn
+        },
+        headers: adminHeaders,
+        method: "PATCH"
+      })
+    );
+    expect(planNextPeriodResponse.status).toBe(200);
+
+    const alternateTemplateResponse = await app.request(
+      "/api/v1/retrospective-templates",
+      jsonRequest({
+        body: {
+          description: "A shorter template for template switching.",
+          name: "Quick reset",
+          rounds: [
+            {
+              kind: "notes",
+              entryPhase: "retrospective",
+              privacy: "shared",
+              title: "Reset round"
+            }
+          ]
+        },
+        headers: adminHeaders,
+        method: "POST"
+      })
+    );
+    expect(alternateTemplateResponse.status).toBe(201);
+    const alternateTemplate = await parseJson<{
+      item: RetrospectiveTemplatesResponse["items"][number];
+    }>(alternateTemplateResponse);
+
+    const switchTemplateResponse = await app.request(
+      `/api/v1/retrospectives/${createdRetrospective.item.id}`,
+      jsonRequest({
+        body: {
+          templateId: alternateTemplate.item.id
+        },
+        headers: adminHeaders,
+        method: "PATCH"
+      })
+    );
+    expect(switchTemplateResponse.status).toBe(200);
+    const switchedRetrospective = await parseJson<RetrospectiveResponse>(
+      switchTemplateResponse
+    );
+    expect(switchedRetrospective.item.templateId).toBe(alternateTemplate.item.id);
+    expect(switchedRetrospective.item.rounds).toEqual([
+      expect.objectContaining({ title: "Reset round" })
+    ]);
+
+    const switchBackResponse = await app.request(
+      `/api/v1/retrospectives/${createdRetrospective.item.id}`,
+      jsonRequest({
+        body: {
+          templateId: templates.items[0]!.id
+        },
+        headers: adminHeaders,
+        method: "PATCH"
+      })
+    );
+    expect(switchBackResponse.status).toBe(200);
+    const restoredRetrospective = await parseJson<RetrospectiveResponse>(
+      switchBackResponse
+    );
+
+    const duplicateRetrospectiveResponse = await app.request(
+      "/api/v1/retrospectives",
+      jsonRequest({
+        body: {
+          title: "Duplicate"
+        },
+        headers: adminHeaders,
+        method: "POST"
+      })
+    );
+    expect(duplicateRetrospectiveResponse.status).toBe(409);
+
+    const commitmentsRound = restoredRetrospective.item.rounds.find(
+      (round) => round.title === "Commitments"
+    );
+    const retroHighlightsRound = restoredRetrospective.item.rounds.find(
+      (round) => round.title === "Highlights"
+    );
+    const planningRound = restoredRetrospective.item.rounds.find(
+      (round) => round.title === "Planning"
+    );
+    expect(commitmentsRound).toBeDefined();
+    expect(retroHighlightsRound).toBeDefined();
+    expect(planningRound?.privacy).toBe("private");
+
+    const privateForeverResponse = await app.request(
+      "/api/v1/retrospective-notes",
+      jsonRequest({
+        body: {
+          body: "A private planning thought.",
+          commitmentPeriodId: home.activePeriod.id,
+          entryPhase: "retrospective",
+          roundId: planningRound!.id
+        },
+        headers: adminHeaders,
+        method: "POST"
+      })
+    );
+    expect(privateForeverResponse.status).toBe(201);
+
+    const revealResponse = await app.request(
+      `/api/v1/retrospectives/${createdRetrospective.item.id}/rounds/${retroHighlightsRound!.id}/enter`,
+      {
+        headers: adminHeaders,
+        method: "POST"
+      }
+    );
+    expect(revealResponse.status).toBe(200);
+
+    const revealedNotesResponse = await app.request(
+      `/api/v1/retrospective-notes?retrospectiveId=${createdRetrospective.item.id}`,
+      {
+        headers: otherAdminHeaders
+      }
+    );
+    expect(revealedNotesResponse.status).toBe(200);
+    const revealedNotes = await parseJson<RetrospectiveNotesResponse>(
+      revealedNotesResponse
+    );
+    expect(revealedNotes.items).toEqual([
+      expect.objectContaining({
+        id: privateNote.item.id,
+        visibilityState: "revealed"
+      })
+    ]);
+
+    const commitmentResponse = await app.request(
+      "/api/v1/commitments",
+      jsonRequest({
+        body: {
+          assigneeUserId: adminUserId,
+          createdInRetrospectiveId: createdRetrospective.item.id,
+          targetCount: 3,
+          title: "Read together",
+          trackingInterval: "weekly",
+          trackingKind: "count_per_period"
+        },
+        headers: adminHeaders,
+        method: "POST"
+      })
+    );
+    expect(commitmentResponse.status).toBe(201);
+    const commitment = await parseJson<CommitmentResponse>(commitmentResponse);
+    expect(commitment.item.commitmentPeriodId).toBeNull();
+    expect(commitment.item.assigneeUserId).toBe(adminUserId);
+
+    const unassignedCommitmentResponse = await app.request(
+      "/api/v1/commitments",
+      jsonRequest({
+        body: {
+          createdInRetrospectiveId: createdRetrospective.item.id,
+          title: "No owner",
+          trackingInterval: "none",
+          trackingKind: "binary"
+        },
+        headers: adminHeaders,
+        method: "POST"
+      })
+    );
+    expect(unassignedCommitmentResponse.status).toBe(400);
+
+    const otherAdminCheckinResponse = await app.request(
+      `/api/v1/commitments/${commitment.item.id}/checkins`,
+      jsonRequest({
+        body: {
+          amount: 1,
+          checkinOn: "2026-02-01"
+        },
+        headers: otherAdminHeaders,
+        method: "POST"
+      })
+    );
+    expect(otherAdminCheckinResponse.status).toBe(403);
+
+    const otherAdminUpdateResponse = await app.request(
+      `/api/v1/commitments/${commitment.item.id}`,
+      jsonRequest({
+        body: {
+          assigneeUserId: adminUserId,
+          targetCount: 3,
+          title: "Read together, renamed by someone else",
+          trackingInterval: "weekly",
+          trackingKind: "count_per_period"
+        },
+        headers: otherAdminHeaders,
+        method: "PATCH"
+      })
+    );
+    expect(otherAdminUpdateResponse.status).toBe(403);
+
+    const checkinResponse = await app.request(
+      `/api/v1/commitments/${commitment.item.id}/checkins`,
+      jsonRequest({
+        body: {
+          amount: 1,
+          checkinOn: "2026-02-01",
+          note: "Started strong."
+        },
+        headers: adminHeaders,
+        method: "POST"
+      })
+    );
+    expect(checkinResponse.status).toBe(201);
+    const checkin = await parseJson<CommitmentCheckinResponse>(checkinResponse);
+    expect(checkin.item.checkinOn).toBe("2026-02-01");
+
+    const deleteCheckinResponse = await app.request(
+      `/api/v1/commitment-checkins/${checkin.item.id}`,
+      {
+        headers: adminHeaders,
+        method: "DELETE"
+      }
+    );
+    expect(deleteCheckinResponse.status).toBe(200);
+
+    const secondCheckinResponse = await app.request(
+      `/api/v1/commitments/${commitment.item.id}/checkins`,
+      jsonRequest({
+        body: {
+          amount: 1,
+          checkinOn: "2026-02-02",
+          note: "Back on the board."
+        },
+        headers: adminHeaders,
+        method: "POST"
+      })
+    );
+    expect(secondCheckinResponse.status).toBe(201);
+
+    const reviewResponse = await app.request(
+      `/api/v1/commitments/${commitment.item.id}/reviews`,
+      jsonRequest({
+        body: {
+          note: "Good enough for a first pass.",
+          rating: "mostly_met",
+          retrospectiveId: createdRetrospective.item.id,
+          roundId: commitmentsRound!.id
+        },
+        headers: adminHeaders,
+        method: "POST"
+      })
+    );
+    expect(reviewResponse.status).toBe(201);
+    const review = await parseJson<CommitmentReviewResponse>(reviewResponse);
+    expect(review.item.rating).toBe("mostly_met");
+
+    const updateReviewResponse = await app.request(
+      `/api/v1/commitment-reviews/${review.item.id}`,
+      jsonRequest({
+        body: {
+          note: "Actually, calling this met.",
+          rating: "met"
+        },
+        headers: adminHeaders,
+        method: "PATCH"
+      })
+    );
+    expect(updateReviewResponse.status).toBe(200);
+    const updatedReview = await parseJson<CommitmentReviewResponse>(
+      updateReviewResponse
+    );
+    expect(updatedReview.item.rating).toBe("met");
+
+    const finalizeResponse = await app.request(
+      `/api/v1/retrospectives/${createdRetrospective.item.id}/finalize`,
+      {
+        headers: adminHeaders,
+        method: "POST"
+      }
+    );
+    expect(finalizeResponse.status).toBe(200);
+    const finalized = await parseJson<RetrospectiveResponse>(finalizeResponse);
+    expect(finalized.item.status).toBe("finalized");
+    expect(finalized.item.period.status).toBe("reviewed");
+
+    const homeAfterFinalizeResponse = await app.request(
+      "/api/v1/retrospective-home",
+      {
+        headers: adminHeaders
+      }
+    );
+    expect(homeAfterFinalizeResponse.status).toBe(200);
+    const homeAfterFinalize = await parseJson<RetrospectiveHomeResponse>(
+      homeAfterFinalizeResponse
+    );
+    expect(homeAfterFinalize.activePeriod.periodStartOn).toBe(todayIsoDate());
+    expect(homeAfterFinalize.activePeriod.closureOn).toBe(plannedClosureOn);
+
+    const commitmentsResponse = await app.request("/api/v1/commitments", {
+      headers: adminHeaders
+    });
+    expect(commitmentsResponse.status).toBe(200);
+    const commitmentsBody = await parseJson<{
+      items: CommitmentResponse["item"][];
+    }>(commitmentsResponse);
+    expect(commitmentsBody.items).toEqual([
+      expect.objectContaining({
+        id: commitment.item.id,
+        commitmentPeriodId: expect.any(String),
+        status: "reviewed"
+      })
+    ]);
+
+    const otherVisibleNotesAfterReveal = await app.request(
+      `/api/v1/retrospective-notes?retrospectiveId=${createdRetrospective.item.id}`,
+      {
+        headers: otherAdminHeaders
+      }
+    );
+    const notesAfterReveal = await parseJson<RetrospectiveNotesResponse>(
+      otherVisibleNotesAfterReveal
+    );
+    expect(notesAfterReveal.items).toHaveLength(1);
+
+    const deleteRevealedNoteResponse = await app.request(
+      `/api/v1/retrospective-notes/${privateNote.item.id}`,
+      {
+        headers: otherAdminHeaders,
+        method: "DELETE"
+      }
+    );
+    expect(deleteRevealedNoteResponse.status).toBe(200);
+
+    const notesAfterDeleteResponse = await app.request(
+      `/api/v1/retrospective-notes?retrospectiveId=${createdRetrospective.item.id}`,
+      {
+        headers: adminHeaders
+      }
+    );
+    const notesAfterDelete = await parseJson<RetrospectiveNotesResponse>(
+      notesAfterDeleteResponse
+    );
+    expect(notesAfterDelete.items).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: privateNote.item.id
+        })
+      ])
+    );
+  });
+
   it("does not let an admin remove the currently authenticated actor", async () => {
     const adminHeaders = trustedHeader("admin1@example.com");
 
@@ -785,7 +1661,7 @@ describe("Phase 3 API", () => {
       jsonRequest({
         body: {
           aiAssistanceEnabled: true,
-          assigneeUserId: assistantUserId,
+          checklistItems: [{ body: "Review current state" }],
           title: "Draft grocery recap"
         },
         headers: adminHeaders,
@@ -795,6 +1671,23 @@ describe("Phase 3 API", () => {
     expect(createEligibleTaskResponse.status).toBe(201);
     const eligibleTask = await parseJson<TaskItemResponse>(
       createEligibleTaskResponse
+    );
+
+    const createAssignedEligibleTaskResponse = await app.request(
+      "/api/v1/tasks",
+      jsonRequest({
+        body: {
+          aiAssistanceEnabled: true,
+          assigneeUserId: assistantUserId,
+          title: "Assigned assistant follow-up"
+        },
+        headers: adminHeaders,
+        method: "POST"
+      })
+    );
+    expect(createAssignedEligibleTaskResponse.status).toBe(201);
+    const assignedEligibleTask = await parseJson<TaskItemResponse>(
+      createAssignedEligibleTaskResponse
     );
 
     const createHumanTaskResponse = await app.request(
@@ -809,6 +1702,22 @@ describe("Phase 3 API", () => {
     );
     expect(createHumanTaskResponse.status).toBe(201);
     const humanTask = await parseJson<TaskItemResponse>(createHumanTaskResponse);
+
+    const createAssignedHumanTaskResponse = await app.request(
+      "/api/v1/tasks",
+      jsonRequest({
+        body: {
+          assigneeUserId: assistantUserId,
+          title: "Assigned human-only follow-up"
+        },
+        headers: adminHeaders,
+        method: "POST"
+      })
+    );
+    expect(createAssignedHumanTaskResponse.status).toBe(201);
+    const assignedHumanTask = await parseJson<TaskItemResponse>(
+      createAssignedHumanTaskResponse
+    );
 
     const assistantToken = await issueAssistantBearerToken();
     const serviceHeaders = {
@@ -849,9 +1758,24 @@ describe("Phase 3 API", () => {
     });
     expect(listTasksResponse.status).toBe(200);
     const taskList = await parseJson<TaskListResponse>(listTasksResponse);
-    expect(taskList.total).toBe(1);
-    expect(taskList.items).toHaveLength(1);
-    expect(taskList.items[0]!.id).toBe(eligibleTask.item.id);
+    expect(taskList.total).toBe(3);
+    expect(taskList.items).toHaveLength(3);
+    expect(taskList.items.map((task) => task.id).sort()).toEqual(
+      [assignedEligibleTask.item.id, assignedHumanTask.item.id, eligibleTask.item.id].sort()
+    );
+
+    const getEligibleTaskResponse = await app.request(
+      `/api/v1/tasks/${eligibleTask.item.id}`,
+      {
+        headers: serviceHeaders
+      }
+    );
+    expect(getEligibleTaskResponse.status).toBe(200);
+    const fetchedEligibleTask = await parseJson<TaskItemResponse>(
+      getEligibleTaskResponse
+    );
+    expect(fetchedEligibleTask.item.assignee).toBeNull();
+    expect(fetchedEligibleTask.item.checklistItems).toHaveLength(1);
 
     const transitionResponse = await app.request(
       `/api/v1/tasks/${eligibleTask.item.id}/status`,
@@ -881,6 +1805,27 @@ describe("Phase 3 API", () => {
       })
     );
     expect(commentResponse.status).toBe(201);
+    const taskWithFirstComment = await parseJson<TaskItemResponse>(commentResponse);
+
+    const secondCommentResponse = await app.request(
+      `/api/v1/tasks/${eligibleTask.item.id}/comments`,
+      jsonRequest({
+        body: {
+          body: "Adding a newer note afterward."
+        },
+        headers: serviceHeaders,
+        method: "POST"
+      })
+    );
+    expect(secondCommentResponse.status).toBe(201);
+    const taskWithSecondComment = await parseJson<TaskItemResponse>(secondCommentResponse);
+    expect(taskWithFirstComment.item.comments.map((comment) => comment.body)).toEqual([
+      "Started drafting a summary."
+    ]);
+    expect(taskWithSecondComment.item.comments.map((comment) => comment.body)).toEqual([
+      "Adding a newer note afterward.",
+      "Started drafting a summary."
+    ]);
 
     const linkResponse = await app.request(
       `/api/v1/tasks/${eligibleTask.item.id}/attachment-links`,
@@ -894,6 +1839,64 @@ describe("Phase 3 API", () => {
       })
     );
     expect(linkResponse.status).toBe(201);
+
+    const addChecklistItemResponse = await app.request(
+      `/api/v1/tasks/${eligibleTask.item.id}/checklist-items`,
+      jsonRequest({
+        body: {
+          body: "Share draft back with Josh",
+          expectedRevision: transitionedTask.item.revision
+        },
+        headers: serviceHeaders,
+        method: "POST"
+      })
+    );
+    expect(addChecklistItemResponse.status).toBe(201);
+    const taskWithNewChecklistItem = await parseJson<TaskItemResponse>(
+      addChecklistItemResponse
+    );
+    expect(taskWithNewChecklistItem.item.revision).toBe(2);
+    expect(taskWithNewChecklistItem.item.checklistItems).toHaveLength(2);
+
+    const newChecklistItemId =
+      taskWithNewChecklistItem.item.checklistItems[
+        taskWithNewChecklistItem.item.checklistItems.length - 1
+      ]!.id;
+
+    const completeChecklistItemResponse = await app.request(
+      `/api/v1/tasks/${eligibleTask.item.id}/checklist-items/${newChecklistItemId}/completion`,
+      jsonRequest({
+        body: {
+          expectedRevision: taskWithNewChecklistItem.item.revision,
+          isCompleted: true
+        },
+        headers: serviceHeaders,
+        method: "POST"
+      })
+    );
+    expect(completeChecklistItemResponse.status).toBe(200);
+    const taskWithCompletedChecklistItem = await parseJson<TaskItemResponse>(
+      completeChecklistItemResponse
+    );
+    expect(taskWithCompletedChecklistItem.item.checklistProgress.completed).toBe(1);
+
+    const deleteChecklistItemResponse = await app.request(
+      `/api/v1/tasks/${eligibleTask.item.id}/checklist-items/${newChecklistItemId}`,
+      jsonRequest({
+        body: {
+          expectedRevision: taskWithCompletedChecklistItem.item.revision
+        },
+        headers: serviceHeaders,
+        method: "DELETE"
+      })
+    );
+    expect(deleteChecklistItemResponse.status).toBe(200);
+    const taskAfterChecklistDelete = await parseJson<TaskItemResponse>(
+      deleteChecklistItemResponse
+    );
+    expect(
+      taskAfterChecklistDelete.item.checklistItems.find((item) => item.id === newChecklistItemId)
+    ).toBeUndefined();
 
     const uploadForm = new FormData();
     uploadForm.set(
@@ -917,5 +1920,13 @@ describe("Phase 3 API", () => {
       }
     );
     expect(forbiddenTaskResponse.status).toBe(403);
+
+    const assignedHumanTaskResponse = await app.request(
+      `/api/v1/tasks/${assignedHumanTask.item.id}`,
+      {
+        headers: serviceHeaders
+      }
+    );
+    expect(assignedHumanTaskResponse.status).toBe(200);
   });
 });
