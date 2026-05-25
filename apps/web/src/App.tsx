@@ -2198,11 +2198,11 @@ export function App() {
                   actor={snapshot.actor}
                   state={retrospectiveState}
                   users={snapshot.users}
-                  onAddCheckin={(commitmentId) =>
+                  onAddCheckin={(commitmentId, checkinOn) =>
                     runRetrospectiveMutation(
                       () =>
                         api.createCommitmentCheckin(commitmentId, {
-                          checkinOn: new Date().toISOString().slice(0, 10)
+                          checkinOn
                         }),
                       "Progress marked."
                     )
@@ -6171,7 +6171,7 @@ function formatRetrospectiveRoundKind(kind: RetrospectiveRound["kind"]) {
 
 function RetrospectiveView(props: {
   actor: Actor | null;
-  onAddCheckin: (commitmentId: string) => Promise<unknown>;
+  onAddCheckin: (commitmentId: string, checkinOn: string) => Promise<unknown>;
   onArchiveCommitment: (commitment: Commitment) => Promise<unknown>;
   onCreateCommitment: (
     retrospectiveId: string,
@@ -7224,7 +7224,7 @@ function CommitmentCaptureForm(props: {
 function CommitmentTracker(props: {
   actor: Actor | null;
   commitments: Commitment[];
-  onAddCheckin: (commitmentId: string) => Promise<unknown>;
+  onAddCheckin: (commitmentId: string, checkinOn: string) => Promise<unknown>;
   onArchiveCommitment: (commitment: Commitment) => Promise<unknown>;
   onDeleteCheckin: (checkinId: string) => Promise<unknown>;
   onUpdateCommitment: (
@@ -7303,7 +7303,7 @@ function groupCommitmentsByAssignee(commitments: Commitment[]) {
 function CommitmentTrackerRow(props: {
   actor: Actor | null;
   commitment: Commitment;
-  onAddCheckin: (commitmentId: string) => Promise<unknown>;
+  onAddCheckin: (commitmentId: string, checkinOn: string) => Promise<unknown>;
   onArchiveCommitment: (commitment: Commitment) => Promise<unknown>;
   onDeleteCheckin: (checkinId: string) => Promise<unknown>;
   onUpdateCommitment: (
@@ -7320,6 +7320,7 @@ function CommitmentTrackerRow(props: {
   const [checklistComposerValue, setChecklistComposerValue] = useState("");
   const [isEditing, setIsEditing] = useState(false);
   const [isCountDetailOpen, setIsCountDetailOpen] = useState(false);
+  const [selectedIntervalStartOn, setSelectedIntervalStartOn] = useState<string | null>(null);
   const sortedCheckins = props.commitment.checkins
     .slice()
     .sort((left, right) =>
@@ -7333,16 +7334,24 @@ function CommitmentTrackerRow(props: {
   const intervalProgress = isCountGrid
     ? getCommitmentIntervalBuckets(props.commitment, props.period)
     : null;
+  const selectedBucket =
+    intervalProgress?.buckets.find(
+      (bucket) => bucket.startOn === selectedIntervalStartOn
+    ) ??
+    intervalProgress?.currentBucket ??
+    null;
   const targetCount = intervalProgress?.targetCount ?? 1;
   const currentFilledCount = Math.min(
     targetCount,
-    intervalProgress?.currentBucket.amount ?? 0
+    selectedBucket?.amount ?? 0
   );
   const latestCurrentIntervalCheckin =
-    intervalProgress?.currentBucket.checkins
+    selectedBucket?.checkins
       .slice()
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
       .at(-1) ?? null;
+  const todayIso = isoDateFromUtc(new Date());
+  const selectedIsCurrent = selectedBucket?.isCurrent ?? true;
   const canMutate =
     props.commitment.status === "active" &&
     props.commitment.assigneeUserId !== null &&
@@ -7457,10 +7466,12 @@ function CommitmentTrackerRow(props: {
               ))}
             </span>
             <span className="commitment-period-summary">
-              {intervalProgress?.currentBucket.amount ?? 0} / {targetCount} this{" "}
+              {selectedBucket?.amount ?? 0} / {targetCount}{" "}
+              {selectedIsCurrent ? "this" : "selected"}{" "}
               {formatCommitmentIntervalLabel(props.commitment.trackingInterval)}
               {" · "}
               {intervalProgress?.periodTotal ?? 0} / {intervalProgress?.periodTarget ?? targetCount} this period
+              {selectedBucket && !selectedBucket.isCurrent ? ` · selected ${selectedBucket.label}` : ""}
             </span>
             {isCountDetailOpen ? (
               <SquareChevronUp className="size-4" />
@@ -7481,30 +7492,44 @@ function CommitmentTrackerRow(props: {
               {intervalProgress.buckets.map((bucket) => {
                 const ratio = bucket.amount / targetCount;
 
+                const isSelected = selectedBucket?.startOn === bucket.startOn;
+                const isFuture = bucket.startOn > todayIso;
+
                 return (
-                  <span
+                  <button
                     className={cn(
                       "commitment-heatmap-cell",
                       bucket.isCurrent && "commitment-heatmap-cell-current",
+                      isSelected && "commitment-heatmap-cell-selected",
+                      isFuture && "commitment-heatmap-cell-disabled",
                       ratio > 0 && ratio < 1 && "commitment-heatmap-cell-partial",
                       ratio >= 1 && "commitment-heatmap-cell-complete",
                       ratio > 1 && "commitment-heatmap-cell-over"
                     )}
+                    disabled={isFuture}
                     key={bucket.startOn}
+                    onClick={() => setSelectedIntervalStartOn(bucket.startOn)}
                     title={`${bucket.label}: ${bucket.amount} / ${targetCount}`}
+                    type="button"
                   >
                     <span className="sr-only">
+                      {isFuture ? "Future interval, " : ""}
+                      {bucket.isCurrent ? "Current interval, " : ""}
+                      {isSelected ? "Selected interval, " : ""}
                       {bucket.label}: {bucket.amount} / {targetCount}
                     </span>
-                  </span>
+                  </button>
                 );
               })}
             </div>
           ) : null}
           <div className="commitment-stepper">
             <Button
-              disabled={!canMutate || currentFilledCount >= targetCount}
-              onClick={() => void props.onAddCheckin(props.commitment.id)}
+              disabled={!canMutate || !selectedBucket || currentFilledCount >= targetCount}
+              onClick={() =>
+                selectedBucket &&
+                void props.onAddCheckin(props.commitment.id, selectedBucket.startOn)
+              }
               size="icon"
               type="button"
               variant="outline"
@@ -7624,7 +7649,7 @@ function CommitmentTrackerRow(props: {
           onClick={() =>
             isBinaryFinished && latestCheckin
               ? void props.onDeleteCheckin(latestCheckin.id)
-              : void props.onAddCheckin(props.commitment.id)
+              : void props.onAddCheckin(props.commitment.id, todayIso)
           }
           size="sm"
           type="button"
