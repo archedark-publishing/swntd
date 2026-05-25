@@ -913,16 +913,35 @@ a {
 
 .commitment-grid-wrap {
   display: grid;
-  grid-template-columns: minmax(0, auto) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 0.6rem;
-  max-width: min(22rem, 100%);
+  max-width: min(28rem, 100%);
 }
 
 .commitment-check-grid {
   display: grid;
   gap: 0.22rem;
   width: fit-content;
+}
+
+.commitment-current-grid-button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.commitment-period-summary {
+  min-width: 0;
+  color: rgb(47 33 22 / 0.68);
+  font-size: 0.82rem;
 }
 
 .commitment-check-cell {
@@ -937,6 +956,41 @@ a {
 .commitment-check-cell-filled {
   background: rgb(41 77 67 / 0.88);
   border-color: rgb(41 77 67 / 0.88);
+}
+
+.commitment-heatmap {
+  display: flex;
+  flex-wrap: wrap;
+  grid-column: 1 / -1;
+  gap: 0.24rem;
+  padding-top: 0.1rem;
+}
+
+.commitment-heatmap-cell {
+  width: 0.72rem;
+  aspect-ratio: 1;
+  border: 1px solid rgb(86 58 30 / 0.18);
+  border-radius: 0.22rem;
+  background: rgb(255 255 255 / 0.72);
+}
+
+.commitment-heatmap-cell-partial {
+  background: rgb(155 107 47 / 0.3);
+  border-color: rgb(155 107 47 / 0.38);
+}
+
+.commitment-heatmap-cell-complete {
+  background: rgb(41 77 67 / 0.58);
+  border-color: rgb(41 77 67 / 0.45);
+}
+
+.commitment-heatmap-cell-over {
+  box-shadow: inset 0 0 0 2px rgb(41 77 67 / 0.8);
+}
+
+.commitment-heatmap-cell-current {
+  outline: 2px solid rgb(47 33 22 / 0.3);
+  outline-offset: 1px;
 }
 
 .commitment-stepper {

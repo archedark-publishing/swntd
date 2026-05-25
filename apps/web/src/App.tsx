@@ -47,6 +47,8 @@ import {
   Plus,
   RefreshCw,
   SendHorizontal,
+  SquareChevronDown,
+  SquareChevronUp,
   Tag,
   Trash2,
   UserRound,
@@ -917,7 +919,7 @@ function getCommitmentProgressLabel(commitment: Commitment) {
   if (commitment.trackingKind === "count_per_period") {
     const total = commitment.checkins.reduce((sum, checkin) => sum + checkin.amount, 0);
 
-    return `${total}${commitment.targetCount ? ` / ${commitment.targetCount}` : ""} this ${formatCommitmentIntervalLabel(commitment.trackingInterval)}`;
+    return `${total}${commitment.targetCount ? ` / ${commitment.targetCount}` : ""} this period`;
   }
 
   if (commitment.trackingKind === "checklist") {
@@ -933,36 +935,109 @@ function getCommitmentProgressLabel(commitment: Commitment) {
   return commitment.status;
 }
 
-function getInclusiveDayCount(startOn: string, endOn: string) {
-  const start = new Date(`${startOn}T00:00:00.000Z`).getTime();
-  const end = new Date(`${endOn}T00:00:00.000Z`).getTime();
-
-  return Math.max(1, Math.floor((end - start) / 86_400_000) + 1);
+function addUtcDays(date: Date, days: number) {
+  const next = new Date(date);
+  next.setUTCDate(next.getUTCDate() + days);
+  return next;
 }
 
-function getCommitmentGridRows(
+function addUtcMonths(date: Date, months: number) {
+  const next = new Date(date);
+  next.setUTCMonth(next.getUTCMonth() + months);
+  return next;
+}
+
+function isoDateFromUtc(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function getIntervalEnd(startOn: string, periodEndOn: string, interval: Commitment["trackingInterval"]) {
+  const start = new Date(`${startOn}T00:00:00.000Z`);
+  const rawEnd =
+    interval === "daily"
+      ? addUtcDays(start, 0)
+      : interval === "weekly"
+        ? addUtcDays(start, 6)
+        : interval === "monthly"
+          ? addUtcDays(addUtcMonths(start, 1), -1)
+          : new Date(`${periodEndOn}T00:00:00.000Z`);
+  const boundedEnd = rawEnd.getTime() > new Date(`${periodEndOn}T00:00:00.000Z`).getTime()
+    ? new Date(`${periodEndOn}T00:00:00.000Z`)
+    : rawEnd;
+
+  return isoDateFromUtc(boundedEnd);
+}
+
+function getCommitmentIntervalBuckets(
   commitment: Commitment,
-  period: CommitmentPeriod | null
+  period: CommitmentPeriod | null,
+  today = isoDateFromUtc(new Date())
 ) {
-  if (!period || commitment.trackingKind !== "count_per_period") {
-    return 1;
+  const targetCount = Math.max(1, commitment.targetCount ?? 1);
+  const periodStartOn = period?.periodStartOn ?? today;
+  const periodEndOn = period?.closureOn ?? today;
+  const buckets: Array<{
+    amount: number;
+    checkins: Commitment["checkins"];
+    endOn: string;
+    isCurrent: boolean;
+    label: string;
+    startOn: string;
+  }> = [];
+  let cursor = new Date(`${periodStartOn}T00:00:00.000Z`);
+  const end = new Date(`${periodEndOn}T00:00:00.000Z`);
+
+  while (cursor.getTime() <= end.getTime()) {
+    const startOn = isoDateFromUtc(cursor);
+    const bucketEndOn = getIntervalEnd(
+      startOn,
+      periodEndOn,
+      commitment.trackingInterval
+    );
+    const checkins = commitment.checkins.filter(
+      (checkin) => checkin.checkinOn >= startOn && checkin.checkinOn <= bucketEndOn
+    );
+    const amount = checkins.reduce((sum, checkin) => sum + checkin.amount, 0);
+    const isCurrent = today >= startOn && today <= bucketEndOn;
+
+    buckets.push({
+      amount,
+      checkins,
+      endOn: bucketEndOn,
+      isCurrent,
+      label:
+        startOn === bucketEndOn
+          ? formatIsoDate(startOn)
+          : `${formatIsoDate(startOn)} - ${formatIsoDate(bucketEndOn)}`,
+      startOn
+    });
+
+    if (commitment.trackingInterval === "none") {
+      break;
+    }
+
+    cursor = addUtcDays(new Date(`${bucketEndOn}T00:00:00.000Z`), 1);
   }
 
-  const dayCount = getInclusiveDayCount(period.periodStartOn, period.closureOn);
+  const currentBucket =
+    buckets.find((bucket) => bucket.isCurrent) ??
+    buckets.find((bucket) => today < bucket.startOn) ??
+    buckets[buckets.length - 1] ?? {
+      amount: 0,
+      checkins: [],
+      endOn: today,
+      isCurrent: true,
+      label: formatIsoDate(today),
+      startOn: today
+    };
 
-  if (commitment.trackingInterval === "daily") {
-    return dayCount;
-  }
-
-  if (commitment.trackingInterval === "monthly") {
-    return Math.max(1, Math.floor(dayCount / 30));
-  }
-
-  if (commitment.trackingInterval === "weekly") {
-    return Math.max(1, Math.floor(dayCount / 7));
-  }
-
-  return 1;
+  return {
+    buckets,
+    currentBucket,
+    periodTarget: targetCount * buckets.length,
+    periodTotal: buckets.reduce((sum, bucket) => sum + bucket.amount, 0),
+    targetCount
+  };
 }
 
 function buildExeDevLoginUrl() {
@@ -7231,6 +7306,7 @@ function CommitmentTrackerRow(props: {
 }) {
   const [checklistComposerValue, setChecklistComposerValue] = useState("");
   const [isEditing, setIsEditing] = useState(false);
+  const [isCountDetailOpen, setIsCountDetailOpen] = useState(false);
   const sortedCheckins = props.commitment.checkins
     .slice()
     .sort((left, right) =>
@@ -7241,15 +7317,19 @@ function CommitmentTrackerRow(props: {
   const latestCheckin = sortedCheckins[sortedCheckins.length - 1] ?? null;
   const isCountGrid = props.commitment.trackingKind === "count_per_period";
   const isChecklist = props.commitment.trackingKind === "checklist";
-  const targetCount = Math.max(1, props.commitment.targetCount ?? 1);
-  const rowCount = isCountGrid
-    ? getCommitmentGridRows(props.commitment, props.period)
-    : 0;
-  const slotCount = rowCount * targetCount;
-  const filledCount = Math.min(
-    slotCount,
-    sortedCheckins.reduce((sum, checkin) => sum + checkin.amount, 0)
+  const intervalProgress = isCountGrid
+    ? getCommitmentIntervalBuckets(props.commitment, props.period)
+    : null;
+  const targetCount = intervalProgress?.targetCount ?? 1;
+  const currentFilledCount = Math.min(
+    targetCount,
+    intervalProgress?.currentBucket.amount ?? 0
   );
+  const latestCurrentIntervalCheckin =
+    intervalProgress?.currentBucket.checkins
+      .slice()
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+      .at(-1) ?? null;
   const canMutate =
     props.commitment.status === "active" &&
     props.commitment.assigneeUserId !== null &&
@@ -7340,25 +7420,67 @@ function CommitmentTrackerRow(props: {
       </div>
       {isCountGrid ? (
         <div className="commitment-grid-wrap">
-          <div
-            className="commitment-check-grid"
-            style={{ gridTemplateColumns: `repeat(${targetCount}, minmax(0, 1fr))` }}
+          <button
+            className="commitment-current-grid-button"
+            onClick={() => setIsCountDetailOpen((current) => !current)}
+            type="button"
           >
-            {Array.from({ length: slotCount }, (_, index) => (
-              <span
-                aria-label={index < filledCount ? "Completed slot" : "Open slot"}
-                className={cn(
-                  "commitment-check-cell",
-                  index < filledCount && "commitment-check-cell-filled"
-                )}
-                key={index}
-                role="img"
-              />
-            ))}
-          </div>
+            <span
+              className="commitment-check-grid"
+              style={{ gridTemplateColumns: `repeat(${targetCount}, minmax(0, 1fr))` }}
+            >
+              {Array.from({ length: targetCount }, (_, index) => (
+                <span
+                  aria-label={index < currentFilledCount ? "Completed slot" : "Open slot"}
+                  className={cn(
+                    "commitment-check-cell",
+                    index < currentFilledCount && "commitment-check-cell-filled"
+                  )}
+                  key={index}
+                  role="img"
+                />
+              ))}
+            </span>
+            <span className="commitment-period-summary">
+              {intervalProgress?.currentBucket.amount ?? 0} / {targetCount} this{" "}
+              {formatCommitmentIntervalLabel(props.commitment.trackingInterval)}
+              {" · "}
+              {intervalProgress?.periodTotal ?? 0} / {intervalProgress?.periodTarget ?? targetCount} this period
+            </span>
+            {isCountDetailOpen ? (
+              <SquareChevronUp className="size-4" />
+            ) : (
+              <SquareChevronDown className="size-4" />
+            )}
+          </button>
+          {isCountDetailOpen && intervalProgress ? (
+            <div className="commitment-heatmap" aria-label="Commitment period progress">
+              {intervalProgress.buckets.map((bucket) => {
+                const ratio = bucket.amount / targetCount;
+
+                return (
+                  <span
+                    className={cn(
+                      "commitment-heatmap-cell",
+                      bucket.isCurrent && "commitment-heatmap-cell-current",
+                      ratio > 0 && ratio < 1 && "commitment-heatmap-cell-partial",
+                      ratio >= 1 && "commitment-heatmap-cell-complete",
+                      ratio > 1 && "commitment-heatmap-cell-over"
+                    )}
+                    key={bucket.startOn}
+                    title={`${bucket.label}: ${bucket.amount} / ${targetCount}`}
+                  >
+                    <span className="sr-only">
+                      {bucket.label}: {bucket.amount} / {targetCount}
+                    </span>
+                  </span>
+                );
+              })}
+            </div>
+          ) : null}
           <div className="commitment-stepper">
             <Button
-              disabled={!canMutate || filledCount >= slotCount}
+              disabled={!canMutate || currentFilledCount >= targetCount}
               onClick={() => void props.onAddCheckin(props.commitment.id)}
               size="icon"
               type="button"
@@ -7368,8 +7490,11 @@ function CommitmentTrackerRow(props: {
               <span className="sr-only">Add progress</span>
             </Button>
             <Button
-              disabled={!canMutate || !latestCheckin}
-              onClick={() => latestCheckin && void props.onDeleteCheckin(latestCheckin.id)}
+              disabled={!canMutate || !latestCurrentIntervalCheckin}
+              onClick={() =>
+                latestCurrentIntervalCheckin &&
+                void props.onDeleteCheckin(latestCurrentIntervalCheckin.id)
+              }
               size="icon"
               type="button"
               variant="outline"
