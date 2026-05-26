@@ -609,6 +609,21 @@ describe("Phase 3 API", () => {
     });
     expect(epubUploadResponse.status).toBe(201);
 
+    const pythonUploadForm = new FormData();
+    pythonUploadForm.set(
+      "file",
+      new File(["print('hello')"], "script.py", {
+        type: "text/x-python"
+      })
+    );
+
+    const pythonUploadResponse = await app.request(`/api/v1/tasks/${taskAId}/uploads`, {
+      body: pythonUploadForm,
+      headers: adminHeaders,
+      method: "POST"
+    });
+    expect(pythonUploadResponse.status).toBe(201);
+
     const archiveResponse = await app.request(
       `/api/v1/tasks/${taskAId}/archive`,
       jsonRequest({
@@ -645,7 +660,7 @@ describe("Phase 3 API", () => {
     expect(detailResponse.status).toBe(200);
     const detail = await parseJson<TaskItemResponse>(detailResponse);
     expect(detail.item.labels).toHaveLength(1);
-    expect(detail.item.attachments).toHaveLength(4);
+    expect(detail.item.attachments).toHaveLength(5);
     expect(detail.item.comments).toHaveLength(1);
   });
 

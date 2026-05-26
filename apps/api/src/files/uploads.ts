@@ -23,6 +23,7 @@ const allowedMimeTypes = new Set([
   "text/html",
   "text/markdown",
   "text/plain",
+  "text/x-python",
   "text/rtf",
   "text/xml"
 ]);
@@ -44,6 +45,7 @@ const allowedExtensions = new Set([
   ".pdf",
   ".pptx",
   ".png",
+  ".py",
   ".rtf",
   ".txt",
   ".webp",
