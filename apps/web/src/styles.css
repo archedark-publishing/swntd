@@ -290,10 +290,15 @@ a {
   position: relative;
 }
 
-.settings-gear-button {
+.actor-chip-actions {
   position: absolute;
   top: 0.7rem;
   right: 0.7rem;
+  display: flex;
+  gap: 0.45rem;
+}
+
+.actor-chip-action-button {
   background: rgb(255 255 255 / 0.7);
   box-shadow: 0 0.5rem 1.2rem rgb(80 50 24 / 0.06);
 }
@@ -440,7 +445,8 @@ a {
   display: flex;
   flex-direction: column;
   width: 100%;
-  padding: 0.6rem 0.9rem;
+  min-height: 5rem;
+  padding: 0.6rem 5.8rem 0.6rem 0.9rem;
   border-radius: 1rem;
   background: rgb(255 255 255 / 0.56);
   border: 1px solid var(--border-soft);
@@ -849,12 +855,28 @@ a {
   gap: 0.4rem;
 }
 
+.retrospective-row-actions,
 .retrospective-note-actions {
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 0.4rem;
   flex: 0 0 auto;
+}
+
+.retrospective-row-editor {
+  display: block;
+}
+
+.commitment-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.retrospective-capture-stack {
+  display: grid;
+  gap: 0.85rem;
 }
 
 .retrospective-row strong,
@@ -864,6 +886,8 @@ a {
 
 .commitment-tracker-row {
   align-items: flex-start;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 
 .commitment-assignee-groups,
@@ -891,16 +915,38 @@ a {
 
 .commitment-grid-wrap {
   display: grid;
-  grid-template-columns: minmax(0, auto) auto;
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(0, 18rem) auto;
   align-items: center;
   gap: 0.6rem;
-  max-width: min(22rem, 100%);
+  justify-content: end;
+  max-width: 100%;
 }
 
 .commitment-check-grid {
   display: grid;
   gap: 0.22rem;
   width: fit-content;
+}
+
+.commitment-current-grid-button {
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
+  width: min(18rem, 100%);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.commitment-period-summary {
+  min-width: 0;
+  color: rgb(47 33 22 / 0.68);
+  font-size: 0.82rem;
 }
 
 .commitment-check-cell {
@@ -915,6 +961,58 @@ a {
 .commitment-check-cell-filled {
   background: rgb(41 77 67 / 0.88);
   border-color: rgb(41 77 67 / 0.88);
+}
+
+.commitment-heatmap {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 0.24rem;
+  justify-self: end;
+  padding-top: 0.1rem;
+  width: min(18rem, 100%);
+}
+
+.commitment-heatmap-cell {
+  width: 100%;
+  aspect-ratio: 1;
+  border: 1px solid rgb(86 58 30 / 0.18);
+  border-radius: 0.22rem;
+  background: rgb(255 255 255 / 0.72);
+  padding: 0;
+}
+
+.commitment-heatmap-cell-partial {
+  background: rgb(155 107 47 / 0.3);
+  border-color: rgb(155 107 47 / 0.38);
+}
+
+.commitment-heatmap-cell-complete {
+  background: rgb(41 77 67 / 0.58);
+  border-color: rgb(41 77 67 / 0.45);
+}
+
+.commitment-heatmap-cell-over {
+  box-shadow: inset 0 0 0 2px rgb(41 77 67 / 0.8);
+}
+
+.commitment-heatmap-cell-current {
+  outline: 2px solid rgb(47 33 22 / 0.3);
+  outline-offset: 1px;
+}
+
+.commitment-heatmap-cell-selected {
+  border-color: rgb(20 43 36 / 0.7);
+  outline: 2px solid rgb(20 43 36 / 0.72);
+  outline-offset: 2px;
+}
+
+.commitment-heatmap-cell-current.commitment-heatmap-cell-selected {
+  box-shadow: 0 0 0 3px rgb(155 107 47 / 0.24);
+}
+
+.commitment-heatmap-cell-disabled {
+  cursor: not-allowed;
+  opacity: 0.38;
 }
 
 .commitment-stepper {

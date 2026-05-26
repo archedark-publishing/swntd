@@ -57,4 +57,14 @@ describe("getTaskDueState", () => {
       )
     ).toBe("none");
   });
+
+  it("ignores done tasks", () => {
+    expect(
+      getTaskDueState(
+        { dueOn: "2026-04-20", dueTime: null, status: "Done" },
+        3,
+        new Date("2026-04-24T12:00:00")
+      )
+    ).toBe("none");
+  });
 });

@@ -4,6 +4,7 @@ type DueStatusInput = {
   archivedAt?: string | null;
   dueOn: string | null;
   dueTime?: string | null;
+  status?: string;
 };
 
 export function getTaskDueState(
@@ -11,7 +12,7 @@ export function getTaskDueState(
   nearDueThresholdDays: number,
   now = new Date()
 ): DueState {
-  if (task.archivedAt || !task.dueOn) {
+  if (task.archivedAt || task.status === "Done" || !task.dueOn) {
     return "none";
   }
 

@@ -1,5 +1,5 @@
 import type { ComponentProps, ReactNode } from "react";
-import { ScrollText, Settings, X } from "lucide-react";
+import { LogOut, ScrollText, Settings, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -9,9 +9,11 @@ import { cn } from "@/lib/utils";
 export function AppNavigation(props: {
   actorDisplayName: string;
   actorRoleLabel: string;
+  isLoggingOut: boolean;
   isOpen: boolean;
   mainItems: Array<{ id: string; label: string; meta?: string }>;
   onClose: () => void;
+  onLogOut: () => void;
   onSelectMain: (itemId: string) => void;
   selectedMain: string;
 }) {
@@ -78,22 +80,35 @@ export function AppNavigation(props: {
                 {props.actorRoleLabel}
               </Badge>
             </div>
-            <Button
-              className={cn(
-                "settings-gear-button rounded-full",
-                props.selectedMain === "settings" && "settings-gear-button-active"
-              )}
-              onClick={() => {
-                props.onSelectMain("settings");
-                props.onClose();
-              }}
-              size="icon"
-              type="button"
-              variant={props.selectedMain === "settings" ? "default" : "outline"}
-            >
-              <Settings className="size-4" />
-              <span className="sr-only">Open settings</span>
-            </Button>
+            <div className="actor-chip-actions">
+              <Button
+                className="actor-chip-action-button rounded-full"
+                disabled={props.isLoggingOut}
+                onClick={props.onLogOut}
+                size="icon"
+                type="button"
+                variant="outline"
+              >
+                <LogOut className="size-4" />
+                <span className="sr-only">Log out</span>
+              </Button>
+              <Button
+                className={cn(
+                  "actor-chip-action-button settings-gear-button rounded-full",
+                  props.selectedMain === "settings" && "settings-gear-button-active"
+                )}
+                onClick={() => {
+                  props.onSelectMain("settings");
+                  props.onClose();
+                }}
+                size="icon"
+                type="button"
+                variant={props.selectedMain === "settings" ? "default" : "outline"}
+              >
+                <Settings className="size-4" />
+                <span className="sr-only">Open settings</span>
+              </Button>
+            </div>
           </div>
         </div>
       </aside>
