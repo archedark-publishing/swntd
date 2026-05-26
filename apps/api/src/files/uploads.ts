@@ -4,6 +4,7 @@ import { ApiError } from "../http/errors";
 
 const allowedMimeTypes = new Set([
   "application/rtf",
+  "application/epub+zip",
   "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -29,6 +30,7 @@ const allowedMimeTypes = new Set([
 const allowedExtensions = new Set([
   ".csv",
   ".docx",
+  ".epub",
   ".gif",
   ".htm",
   ".html",
