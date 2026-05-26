@@ -43,9 +43,12 @@ import {
   Heart,
   Menu,
   Paperclip,
+  Pencil,
   Plus,
   RefreshCw,
   SendHorizontal,
+  SquareChevronDown,
+  SquareChevronUp,
   Tag,
   Trash2,
   UserRound,
@@ -229,6 +232,54 @@ type CommitmentDraft = {
   trackingInterval: "none" | "daily" | "weekly" | "monthly";
   trackingKind: CommitmentTrackingKind;
 };
+
+function createCommitmentDraft(commitment?: Commitment | null): CommitmentDraft {
+  return {
+    assigneeUserId: commitment?.assigneeUserId ?? "",
+    checklistItems:
+      commitment?.checklistItems.map((item) => ({
+        body: item.body,
+        clientId: item.id,
+        isCompleted: item.isCompleted
+      })) ?? [],
+    targetCount:
+      commitment?.targetCount !== null && commitment?.targetCount !== undefined
+        ? String(commitment.targetCount)
+        : "",
+    title: commitment?.title ?? "",
+    trackingInterval: commitment?.trackingInterval ?? "none",
+    trackingKind: commitment?.trackingKind ?? "binary"
+  };
+}
+
+function buildCommitmentUpdatePayload(
+  commitment: Commitment,
+  draft: CommitmentDraft
+): Parameters<typeof api.updateCommitment>[1] {
+  return {
+    ...(draft.assigneeUserId ? { assigneeUserId: draft.assigneeUserId } : {}),
+    checklistItems:
+      draft.trackingKind === "checklist"
+        ? draft.checklistItems
+            .map((item) => ({
+              body: item.body.trim(),
+              isCompleted: item.isCompleted
+            }))
+            .filter((item) => item.body)
+        : [],
+    commitmentPeriodId: commitment.commitmentPeriodId,
+    createdInRetrospectiveId: commitment.createdInRetrospectiveId,
+    description: commitment.description,
+    status: commitment.status,
+    targetCount:
+      draft.trackingKind !== "checklist" && draft.targetCount
+        ? Number(draft.targetCount)
+        : null,
+    title: draft.title,
+    trackingInterval: draft.trackingInterval,
+    trackingKind: draft.trackingKind
+  };
+}
 
 type AppSnapshot = {
   activeTasks: TaskListItem[];
@@ -868,7 +919,7 @@ function getCommitmentProgressLabel(commitment: Commitment) {
   if (commitment.trackingKind === "count_per_period") {
     const total = commitment.checkins.reduce((sum, checkin) => sum + checkin.amount, 0);
 
-    return `${total}${commitment.targetCount ? ` / ${commitment.targetCount}` : ""} this ${formatCommitmentIntervalLabel(commitment.trackingInterval)}`;
+    return `${total}${commitment.targetCount ? ` / ${commitment.targetCount}` : ""} this period`;
   }
 
   if (commitment.trackingKind === "checklist") {
@@ -884,36 +935,122 @@ function getCommitmentProgressLabel(commitment: Commitment) {
   return commitment.status;
 }
 
-function getInclusiveDayCount(startOn: string, endOn: string) {
-  const start = new Date(`${startOn}T00:00:00.000Z`).getTime();
-  const end = new Date(`${endOn}T00:00:00.000Z`).getTime();
-
-  return Math.max(1, Math.floor((end - start) / 86_400_000) + 1);
+function addUtcDays(date: Date, days: number) {
+  const next = new Date(date);
+  next.setUTCDate(next.getUTCDate() + days);
+  return next;
 }
 
-function getCommitmentGridRows(
+function addUtcMonths(date: Date, months: number) {
+  const next = new Date(date);
+  next.setUTCMonth(next.getUTCMonth() + months);
+  return next;
+}
+
+function isoDateFromUtc(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function getIntervalEnd(startOn: string, periodEndOn: string, interval: Commitment["trackingInterval"]) {
+  const start = new Date(`${startOn}T00:00:00.000Z`);
+  const rawEnd =
+    interval === "daily"
+      ? addUtcDays(start, 0)
+      : interval === "weekly"
+        ? addUtcDays(start, 6)
+        : interval === "monthly"
+          ? addUtcDays(addUtcMonths(start, 1), -1)
+          : new Date(`${periodEndOn}T00:00:00.000Z`);
+  const boundedEnd = rawEnd.getTime() > new Date(`${periodEndOn}T00:00:00.000Z`).getTime()
+    ? new Date(`${periodEndOn}T00:00:00.000Z`)
+    : rawEnd;
+
+  return isoDateFromUtc(boundedEnd);
+}
+
+function getCommitmentIntervalBuckets(
   commitment: Commitment,
-  period: CommitmentPeriod | null
+  period: CommitmentPeriod | null,
+  today = isoDateFromUtc(new Date())
 ) {
-  if (!period || commitment.trackingKind !== "count_per_period") {
-    return 1;
+  const targetCount = Math.max(1, commitment.targetCount ?? 1);
+  const periodStartOn = period?.periodStartOn ?? today;
+  const periodEndOn = period?.closureOn ?? today;
+  const buckets: Array<{
+    amount: number;
+    checkins: Commitment["checkins"];
+    endOn: string;
+    isCurrent: boolean;
+    label: string;
+    startOn: string;
+  }> = [];
+  let cursor = new Date(`${periodStartOn}T00:00:00.000Z`);
+  const end = new Date(`${periodEndOn}T00:00:00.000Z`);
+
+  while (cursor.getTime() <= end.getTime()) {
+    const startOn = isoDateFromUtc(cursor);
+    const bucketEndOn = getIntervalEnd(
+      startOn,
+      periodEndOn,
+      commitment.trackingInterval
+    );
+    const checkins = commitment.checkins.filter(
+      (checkin) => checkin.checkinOn >= startOn && checkin.checkinOn <= bucketEndOn
+    );
+    const amount = checkins.reduce((sum, checkin) => sum + checkin.amount, 0);
+    const isCurrent = today >= startOn && today <= bucketEndOn;
+
+    buckets.push({
+      amount,
+      checkins,
+      endOn: bucketEndOn,
+      isCurrent,
+      label:
+        startOn === bucketEndOn
+          ? formatIsoDate(startOn)
+          : `${formatIsoDate(startOn)} - ${formatIsoDate(bucketEndOn)}`,
+      startOn
+    });
+
+    if (commitment.trackingInterval === "none") {
+      break;
+    }
+
+    cursor = addUtcDays(new Date(`${bucketEndOn}T00:00:00.000Z`), 1);
   }
 
-  const dayCount = getInclusiveDayCount(period.periodStartOn, period.closureOn);
+  const currentBucket =
+    buckets.find((bucket) => bucket.isCurrent) ??
+    buckets.find((bucket) => today < bucket.startOn) ??
+    buckets[buckets.length - 1] ?? {
+      amount: 0,
+      checkins: [],
+      endOn: today,
+      isCurrent: true,
+      label: formatIsoDate(today),
+      startOn: today
+    };
 
-  if (commitment.trackingInterval === "daily") {
-    return dayCount;
+  return {
+    buckets,
+    currentBucket,
+    periodTarget: targetCount * buckets.length,
+    periodTotal: buckets.reduce((sum, bucket) => sum + bucket.amount, 0),
+    targetCount
+  };
+}
+
+function getCommitmentHeatmapColumnCount(interval: Commitment["trackingInterval"]) {
+  switch (interval) {
+    case "daily":
+      return 7;
+    case "weekly":
+      return 5;
+    case "monthly":
+      return 4;
+    case "none":
+      return 1;
   }
-
-  if (commitment.trackingInterval === "monthly") {
-    return Math.max(1, Math.floor(dayCount / 30));
-  }
-
-  if (commitment.trackingInterval === "weekly") {
-    return Math.max(1, Math.floor(dayCount / 7));
-  }
-
-  return 1;
 }
 
 function buildExeDevLoginUrl() {
@@ -923,6 +1060,15 @@ function buildExeDevLoginUrl() {
   url.searchParams.set("redirect", redirect || "/");
 
   return `${url.pathname}${url.search}`;
+}
+
+function submitExeDevLogout() {
+  const form = document.createElement("form");
+  form.action = "/__exe.dev/logout";
+  form.method = "POST";
+  form.style.display = "none";
+  document.body.append(form);
+  form.submit();
 }
 
 function createAccessState(
@@ -959,6 +1105,7 @@ export function App() {
   const [isBooting, setIsBooting] = useState(true);
   const [isClaimingOwnership, setIsClaimingOwnership] = useState(false);
   const [isSwitchingAccount, setIsSwitchingAccount] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isNavOpen, setIsNavOpen] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [selectedTask, setSelectedTask] = useState<TaskDetail | null>(null);
@@ -1888,17 +2035,12 @@ export function App() {
 
   async function handleSwitchAccount() {
     setIsSwitchingAccount(true);
+    submitExeDevLogout();
+  }
 
-    try {
-      await fetch("/__exe.dev/logout", {
-        credentials: "same-origin",
-        method: "POST"
-      });
-      window.location.assign(buildExeDevLoginUrl());
-    } catch (error) {
-      showErrorToast(buildFlashMessage(error), "switch-account-error");
-      setIsSwitchingAccount(false);
-    }
+  function handleLogOut() {
+    setIsLoggingOut(true);
+    submitExeDevLogout();
   }
 
   async function handleClaimOwnership() {
@@ -1963,9 +2105,13 @@ export function App() {
             <AppNavigation
               actorDisplayName={snapshot.actor?.displayName ?? "Loading..."}
               actorRoleLabel={snapshot.actor ? formatRoleLabel(snapshot.actor) : "guest"}
+              isLoggingOut={isLoggingOut}
               isOpen={isNavOpen}
               mainItems={navItems.map((item) => ({ id: item.id, label: item.label }))}
               onClose={() => setIsNavOpen(false)}
+              onLogOut={() => {
+                handleLogOut();
+              }}
               onSelectMain={(itemId) => handleViewChange(itemId as ViewName)}
               selectedMain={view}
             />
@@ -2052,11 +2198,11 @@ export function App() {
                   actor={snapshot.actor}
                   state={retrospectiveState}
                   users={snapshot.users}
-                  onAddCheckin={(commitmentId) =>
+                  onAddCheckin={(commitmentId, checkinOn) =>
                     runRetrospectiveMutation(
                       () =>
                         api.createCommitmentCheckin(commitmentId, {
-                          checkinOn: new Date().toISOString().slice(0, 10)
+                          checkinOn
                         }),
                       "Progress marked."
                     )
@@ -2071,21 +2217,26 @@ export function App() {
                     runRetrospectiveMutation(
                       () =>
                         api.updateCommitment(commitment.id, {
-                          ...(commitment.assigneeUserId
-                            ? { assigneeUserId: commitment.assigneeUserId }
-                            : {}),
+                          ...buildCommitmentUpdatePayload(
+                            commitment,
+                            createCommitmentDraft(commitment)
+                          ),
                           checklistItems,
-                          commitmentPeriodId: commitment.commitmentPeriodId,
-                          createdInRetrospectiveId:
-                            commitment.createdInRetrospectiveId,
-                          description: commitment.description,
-                          status: commitment.status,
-                          targetCount: commitment.targetCount,
-                          title: commitment.title,
-                          trackingInterval: commitment.trackingInterval,
-                          trackingKind: commitment.trackingKind
                         }),
                       "Checklist updated."
+                    )
+                  }
+                  onArchiveCommitment={(commitment) =>
+                    runRetrospectiveMutation(
+                      () =>
+                        api.updateCommitment(commitment.id, {
+                          ...buildCommitmentUpdatePayload(
+                            commitment,
+                            createCommitmentDraft(commitment)
+                          ),
+                          status: "archived"
+                        }),
+                      "Commitment deleted."
                     )
                   }
                   onCreateCommitment={(retrospectiveId, draft) =>
@@ -2119,6 +2270,16 @@ export function App() {
                     runRetrospectiveMutation(
                       () => api.createRetrospectiveNote(input),
                       "Note added."
+                    )
+                  }
+                  onUpdateCommitment={(commitment, draft) =>
+                    runRetrospectiveMutation(
+                      () =>
+                        api.updateCommitment(
+                          commitment.id,
+                          buildCommitmentUpdatePayload(commitment, draft)
+                        ),
+                      "Commitment updated."
                     )
                   }
                   onDeleteNote={(noteId) =>
@@ -3423,7 +3584,7 @@ function TaskSheet(props: {
                   />
                   <div className="activity-composer-actions">
                     <input
-                      accept=".csv,.heic,.jpeg,.jpg,.json,.md,.pdf,.png,.txt,.webp"
+                      accept=".csv,.docx,.epub,.gif,.heic,.htm,.html,.jpeg,.jpg,.json,.m4a,.md,.mp3,.pdf,.png,.pptx,.py,.rtf,.txt,.webp,.xlsx,.xml"
                       className="sr-only"
                       multiple
                       onChange={(event) => {
@@ -6010,7 +6171,8 @@ function formatRetrospectiveRoundKind(kind: RetrospectiveRound["kind"]) {
 
 function RetrospectiveView(props: {
   actor: Actor | null;
-  onAddCheckin: (commitmentId: string) => Promise<unknown>;
+  onAddCheckin: (commitmentId: string, checkinOn: string) => Promise<unknown>;
+  onArchiveCommitment: (commitment: Commitment) => Promise<unknown>;
   onCreateCommitment: (
     retrospectiveId: string,
     draft: CommitmentDraft
@@ -6048,6 +6210,10 @@ function RetrospectiveView(props: {
     retrospectiveId: string,
     roundId: string,
     rating: "met" | "mostly_met" | "partly_met" | "missed" | "skipped"
+  ) => Promise<unknown>;
+  onUpdateCommitment: (
+    commitment: Commitment,
+    draft: CommitmentDraft
   ) => Promise<unknown>;
   state: RetrospectiveState;
   users: UserRef[];
@@ -6184,7 +6350,9 @@ function RetrospectiveView(props: {
           onDeleteNote={props.onDeleteNote}
           onEnterRound={props.onEnterRound}
           onFinalize={props.onFinalize}
+          onArchiveCommitment={props.onArchiveCommitment}
           onReviewCommitment={props.onReviewCommitment}
+          onUpdateCommitment={props.onUpdateCommitment}
           onUpdateTemplate={props.onUpdateRetrospectiveTemplate}
           onUpdateClosureOn={props.onUpdateRetrospectiveClosure}
           actor={props.actor}
@@ -6194,12 +6362,17 @@ function RetrospectiveView(props: {
       ) : null}
 
         <CommitmentTracker
-          commitments={detail?.commitments ?? home.commitments}
+          commitments={(detail?.commitments ?? home.commitments).filter(
+            (commitment) => commitment.status === "active"
+          )}
           onAddCheckin={props.onAddCheckin}
+          onArchiveCommitment={props.onArchiveCommitment}
           onDeleteCheckin={props.onDeleteCheckin}
+          onUpdateCommitment={props.onUpdateCommitment}
           onUpdateChecklist={props.onUpdateCommitmentChecklist}
           actor={props.actor}
           period={activePeriod}
+          users={props.users}
         />
 
       {activePeriod && !detail ? (
@@ -6249,11 +6422,16 @@ function ActiveRetrospectivePanel(props: {
   onDeleteNote: (noteId: string) => Promise<unknown>;
   onEnterRound: (retrospectiveId: string, roundId: string) => Promise<unknown>;
   onFinalize: (retrospectiveId: string) => Promise<unknown>;
+  onArchiveCommitment: (commitment: Commitment) => Promise<unknown>;
   onReviewCommitment: (
     commitmentId: string,
     retrospectiveId: string,
     roundId: string,
     rating: "met" | "mostly_met" | "partly_met" | "missed" | "skipped"
+  ) => Promise<unknown>;
+  onUpdateCommitment: (
+    commitment: Commitment,
+    draft: CommitmentDraft
   ) => Promise<unknown>;
   onUpdateClosureOn: (retrospectiveId: string, closureOn: string) => Promise<unknown>;
   onUpdateTemplate: (retrospectiveId: string, templateId: string) => Promise<unknown>;
@@ -6385,7 +6563,9 @@ function ActiveRetrospectivePanel(props: {
           onCreateCommitment={props.onCreateCommitment}
           onCreateNote={props.onCreateNote}
           onDeleteNote={props.onDeleteNote}
+          onArchiveCommitment={props.onArchiveCommitment}
           onReviewCommitment={props.onReviewCommitment}
+          onUpdateCommitment={props.onUpdateCommitment}
           actor={props.actor}
           round={currentRound}
           users={props.users}
@@ -6414,22 +6594,43 @@ function RetrospectiveRoundBody(props: {
     templateRoundId?: string | null;
   }) => Promise<unknown>;
   onDeleteNote: (noteId: string) => Promise<unknown>;
+  onArchiveCommitment: (commitment: Commitment) => Promise<unknown>;
   onReviewCommitment: (
     commitmentId: string,
     retrospectiveId: string,
     roundId: string,
     rating: "met" | "mostly_met" | "partly_met" | "missed" | "skipped"
   ) => Promise<unknown>;
+  onUpdateCommitment: (
+    commitment: Commitment,
+    draft: CommitmentDraft
+  ) => Promise<unknown>;
   round: RetrospectiveRound;
   users: UserRef[];
 }) {
   if (props.round.kind === "commitment_capture") {
+    const capturedCommitments = props.commitments.filter(
+      (commitment) =>
+        commitment.createdInRetrospectiveId === props.detail.id &&
+        commitment.status === "active"
+    );
+
     return (
-      <CommitmentCaptureForm
-        actor={props.actor}
-        onSubmit={(draft) => props.onCreateCommitment(props.detail.id, draft)}
-        users={props.users}
-      />
+      <div className="retrospective-capture-stack">
+        <CommitmentCaptureForm
+          actor={props.actor}
+          onSubmit={(draft) => props.onCreateCommitment(props.detail.id, draft)}
+          users={props.users}
+        />
+        <EditableCommitmentList
+          actor={props.actor}
+          commitments={capturedCommitments}
+          emptyMessage="No commitments captured yet."
+          onArchiveCommitment={props.onArchiveCommitment}
+          onUpdateCommitment={props.onUpdateCommitment}
+          users={props.users}
+        />
+      </div>
     );
   }
 
@@ -6662,26 +6863,141 @@ function RetrospectiveNoteComposer(props: {
   );
 }
 
-function CommitmentCaptureForm(props: {
+function EditableCommitmentList(props: {
   actor: Actor | null;
+  commitments: Commitment[];
+  emptyMessage: string;
+  onArchiveCommitment: (commitment: Commitment) => Promise<unknown>;
+  onUpdateCommitment: (
+    commitment: Commitment,
+    draft: CommitmentDraft
+  ) => Promise<unknown>;
+  users: UserRef[];
+}) {
+  const [editingCommitmentId, setEditingCommitmentId] = useState<string | null>(null);
+
+  if (props.commitments.length === 0) {
+    return <EmptyStateCard message={props.emptyMessage} />;
+  }
+
+  return (
+    <div className="retrospective-list">
+      {props.commitments.map((commitment) => {
+        const canEdit =
+          commitment.status === "active" &&
+          commitment.assigneeUserId !== null &&
+          commitment.assigneeUserId === props.actor?.id;
+
+        return (
+          <EditableCommitmentRow
+            canEdit={canEdit}
+            commitment={commitment}
+            isEditing={editingCommitmentId === commitment.id}
+            key={commitment.id}
+            onArchiveCommitment={props.onArchiveCommitment}
+            onCancelEdit={() => setEditingCommitmentId(null)}
+            onStartEdit={() => setEditingCommitmentId(commitment.id)}
+            onUpdateCommitment={async (draft) => {
+              await props.onUpdateCommitment(commitment, draft);
+              setEditingCommitmentId(null);
+            }}
+            users={props.users}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function EditableCommitmentRow(props: {
+  canEdit: boolean;
+  commitment: Commitment;
+  isEditing: boolean;
+  onArchiveCommitment: (commitment: Commitment) => Promise<unknown>;
+  onCancelEdit: () => void;
+  onStartEdit: () => void;
+  onUpdateCommitment: (draft: CommitmentDraft) => Promise<unknown>;
+  users: UserRef[];
+}) {
+  if (props.isEditing) {
+    return (
+      <div className="retrospective-row retrospective-row-editor">
+        <CommitmentCaptureForm
+          initialDraft={createCommitmentDraft(props.commitment)}
+          onCancel={props.onCancelEdit}
+          onSubmit={props.onUpdateCommitment}
+          submitLabel="Save Commitment"
+          users={props.users}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="retrospective-row">
+      <span>
+        <strong>{props.commitment.title}</strong>
+        <span>
+          {props.commitment.assignee?.displayName ?? "Unassigned"} ·{" "}
+          {getCommitmentProgressLabel(props.commitment)}
+        </span>
+        {props.commitment.description ? <span>{props.commitment.description}</span> : null}
+      </span>
+      <div className="retrospective-row-actions">
+        <Button
+          disabled={!props.canEdit}
+          onClick={props.onStartEdit}
+          size="icon"
+          type="button"
+          variant="outline"
+        >
+          <Pencil className="size-4" />
+          <span className="sr-only">Edit commitment</span>
+        </Button>
+        <Button
+          disabled={!props.canEdit}
+          onClick={() => {
+            if (window.confirm("Delete this commitment?")) {
+              void props.onArchiveCommitment(props.commitment);
+            }
+          }}
+          size="icon"
+          type="button"
+          variant="outline"
+        >
+          <Trash2 className="size-4" />
+          <span className="sr-only">Delete commitment</span>
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function CommitmentCaptureForm(props: {
+  actor?: Actor | null;
+  initialDraft?: CommitmentDraft;
+  onCancel?: () => void;
   onSubmit: (draft: CommitmentDraft) => Promise<unknown>;
+  submitLabel?: string;
   users: UserRef[];
 }) {
   const assignableUsers = useMemo(
     () => props.users.filter((user) => user.role === "admin"),
     [props.users]
   );
-  const [draft, setDraft] = useState<CommitmentDraft>({
-    assigneeUserId:
-      assignableUsers.find((user) => user.id === props.actor?.id)?.id ??
-      assignableUsers[0]?.id ??
-      "",
-    checklistItems: [],
-    targetCount: "",
-    title: "",
-    trackingInterval: "none",
-    trackingKind: "binary"
-  });
+  const getDefaultDraft = () =>
+    props.initialDraft ?? {
+      assigneeUserId:
+        assignableUsers.find((user) => user.id === props.actor?.id)?.id ??
+        assignableUsers[0]?.id ??
+        "",
+      checklistItems: [],
+      targetCount: "",
+      title: "",
+      trackingInterval: "none",
+      trackingKind: "binary"
+    };
+  const [draft, setDraft] = useState<CommitmentDraft>(getDefaultDraft);
   const [checklistComposerValue, setChecklistComposerValue] = useState("");
 
   useEffect(() => {
@@ -6699,17 +7015,7 @@ function CommitmentCaptureForm(props: {
   }, [assignableUsers, draft.assigneeUserId, props.actor?.id]);
 
   const resetDraft = () => {
-    setDraft({
-      assigneeUserId:
-        assignableUsers.find((user) => user.id === props.actor?.id)?.id ??
-        assignableUsers[0]?.id ??
-        "",
-      checklistItems: [],
-      targetCount: "",
-      title: "",
-      trackingInterval: "none",
-      trackingKind: "binary"
-    });
+    setDraft(getDefaultDraft());
     setChecklistComposerValue("");
   };
   const addChecklistItem = () => {
@@ -6765,7 +7071,11 @@ function CommitmentCaptureForm(props: {
               }
             : draft;
 
-        void props.onSubmit(submitDraft).then(resetDraft);
+        void props.onSubmit(submitDraft).then(() => {
+          if (!props.initialDraft) {
+            resetDraft();
+          }
+        });
       }}
     >
       <FormField label="Commitment">
@@ -6896,10 +7206,17 @@ function CommitmentCaptureForm(props: {
           </div>
         </div>
       ) : null}
-      <Button disabled={!canSubmit} type="submit">
-        <Plus className="size-4" />
-        Add Commitment
-      </Button>
+      <div className="commitment-form-actions">
+        {props.onCancel ? (
+          <Button onClick={props.onCancel} type="button" variant="outline">
+            Cancel
+          </Button>
+        ) : null}
+        <Button disabled={!canSubmit} type="submit">
+          <Plus className="size-4" />
+          {props.submitLabel ?? "Add Commitment"}
+        </Button>
+      </div>
     </form>
   );
 }
@@ -6907,13 +7224,19 @@ function CommitmentCaptureForm(props: {
 function CommitmentTracker(props: {
   actor: Actor | null;
   commitments: Commitment[];
-  onAddCheckin: (commitmentId: string) => Promise<unknown>;
+  onAddCheckin: (commitmentId: string, checkinOn: string) => Promise<unknown>;
+  onArchiveCommitment: (commitment: Commitment) => Promise<unknown>;
   onDeleteCheckin: (checkinId: string) => Promise<unknown>;
+  onUpdateCommitment: (
+    commitment: Commitment,
+    draft: CommitmentDraft
+  ) => Promise<unknown>;
   onUpdateChecklist: (
     commitment: Commitment,
     checklistItems: Array<{ body: string; isCompleted?: boolean }>
   ) => Promise<unknown>;
   period: CommitmentPeriod | null;
+  users: UserRef[];
 }) {
   const groups = groupCommitmentsByAssignee(props.commitments);
 
@@ -6940,9 +7263,12 @@ function CommitmentTracker(props: {
                     commitment={commitment}
                     key={commitment.id}
                     onAddCheckin={props.onAddCheckin}
+                    onArchiveCommitment={props.onArchiveCommitment}
                     onDeleteCheckin={props.onDeleteCheckin}
+                    onUpdateCommitment={props.onUpdateCommitment}
                     onUpdateChecklist={props.onUpdateChecklist}
                     period={props.period}
+                    users={props.users}
                   />
                 ))}
               </div>
@@ -6977,15 +7303,24 @@ function groupCommitmentsByAssignee(commitments: Commitment[]) {
 function CommitmentTrackerRow(props: {
   actor: Actor | null;
   commitment: Commitment;
-  onAddCheckin: (commitmentId: string) => Promise<unknown>;
+  onAddCheckin: (commitmentId: string, checkinOn: string) => Promise<unknown>;
+  onArchiveCommitment: (commitment: Commitment) => Promise<unknown>;
   onDeleteCheckin: (checkinId: string) => Promise<unknown>;
+  onUpdateCommitment: (
+    commitment: Commitment,
+    draft: CommitmentDraft
+  ) => Promise<unknown>;
   onUpdateChecklist: (
     commitment: Commitment,
     checklistItems: Array<{ body: string; isCompleted?: boolean }>
   ) => Promise<unknown>;
   period: CommitmentPeriod | null;
+  users: UserRef[];
 }) {
   const [checklistComposerValue, setChecklistComposerValue] = useState("");
+  const [isEditing, setIsEditing] = useState(false);
+  const [isCountDetailOpen, setIsCountDetailOpen] = useState(false);
+  const [selectedIntervalStartOn, setSelectedIntervalStartOn] = useState<string | null>(null);
   const sortedCheckins = props.commitment.checkins
     .slice()
     .sort((left, right) =>
@@ -6996,15 +7331,27 @@ function CommitmentTrackerRow(props: {
   const latestCheckin = sortedCheckins[sortedCheckins.length - 1] ?? null;
   const isCountGrid = props.commitment.trackingKind === "count_per_period";
   const isChecklist = props.commitment.trackingKind === "checklist";
-  const targetCount = Math.max(1, props.commitment.targetCount ?? 1);
-  const rowCount = isCountGrid
-    ? getCommitmentGridRows(props.commitment, props.period)
-    : 0;
-  const slotCount = rowCount * targetCount;
-  const filledCount = Math.min(
-    slotCount,
-    sortedCheckins.reduce((sum, checkin) => sum + checkin.amount, 0)
+  const intervalProgress = isCountGrid
+    ? getCommitmentIntervalBuckets(props.commitment, props.period)
+    : null;
+  const selectedBucket =
+    intervalProgress?.buckets.find(
+      (bucket) => bucket.startOn === selectedIntervalStartOn
+    ) ??
+    intervalProgress?.currentBucket ??
+    null;
+  const targetCount = intervalProgress?.targetCount ?? 1;
+  const currentFilledCount = Math.min(
+    targetCount,
+    selectedBucket?.amount ?? 0
   );
+  const latestCurrentIntervalCheckin =
+    selectedBucket?.checkins
+      .slice()
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+      .at(-1) ?? null;
+  const todayIso = isoDateFromUtc(new Date());
+  const selectedIsCurrent = selectedBucket?.isCurrent ?? true;
   const canMutate =
     props.commitment.status === "active" &&
     props.commitment.assigneeUserId !== null &&
@@ -7041,6 +7388,23 @@ function CommitmentTrackerRow(props: {
     setChecklistComposerValue("");
   };
 
+  if (isEditing) {
+    return (
+      <div className="retrospective-row retrospective-row-editor">
+        <CommitmentCaptureForm
+          initialDraft={createCommitmentDraft(props.commitment)}
+          onCancel={() => setIsEditing(false)}
+          onSubmit={async (draft) => {
+            await props.onUpdateCommitment(props.commitment, draft);
+            setIsEditing(false);
+          }}
+          submitLabel="Save Commitment"
+          users={props.users}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="retrospective-row commitment-tracker-row">
       <span>
@@ -7050,28 +7414,122 @@ function CommitmentTrackerRow(props: {
           {getCommitmentProgressLabel(props.commitment)}
         </span>
       </span>
+      <div className="retrospective-row-actions">
+        <Button
+          disabled={!canMutate}
+          onClick={() => setIsEditing(true)}
+          size="icon"
+          type="button"
+          variant="outline"
+        >
+          <Pencil className="size-4" />
+          <span className="sr-only">Edit commitment</span>
+        </Button>
+        <Button
+          disabled={!canMutate}
+          onClick={() => {
+            if (window.confirm("Delete this commitment?")) {
+              void props.onArchiveCommitment(props.commitment);
+            }
+          }}
+          size="icon"
+          type="button"
+          variant="outline"
+        >
+          <Trash2 className="size-4" />
+          <span className="sr-only">Delete commitment</span>
+        </Button>
+      </div>
       {isCountGrid ? (
         <div className="commitment-grid-wrap">
-          <div
-            className="commitment-check-grid"
-            style={{ gridTemplateColumns: `repeat(${targetCount}, minmax(0, 1fr))` }}
+          <button
+            className="commitment-current-grid-button"
+            onClick={() => setIsCountDetailOpen((current) => !current)}
+            type="button"
           >
-            {Array.from({ length: slotCount }, (_, index) => (
-              <span
-                aria-label={index < filledCount ? "Completed slot" : "Open slot"}
-                className={cn(
-                  "commitment-check-cell",
-                  index < filledCount && "commitment-check-cell-filled"
-                )}
-                key={index}
-                role="img"
-              />
-            ))}
-          </div>
+            <span
+              className="commitment-check-grid"
+              style={{
+                gridTemplateColumns: `repeat(${Math.min(targetCount, 7)}, minmax(0, 1fr))`
+              }}
+            >
+              {Array.from({ length: targetCount }, (_, index) => (
+                <span
+                  aria-label={index < currentFilledCount ? "Completed slot" : "Open slot"}
+                  className={cn(
+                    "commitment-check-cell",
+                    index < currentFilledCount && "commitment-check-cell-filled"
+                  )}
+                  key={index}
+                  role="img"
+                />
+              ))}
+            </span>
+            <span className="commitment-period-summary">
+              {selectedBucket?.amount ?? 0} / {targetCount}{" "}
+              {selectedIsCurrent ? "this" : "selected"}{" "}
+              {formatCommitmentIntervalLabel(props.commitment.trackingInterval)}
+              {" · "}
+              {intervalProgress?.periodTotal ?? 0} / {intervalProgress?.periodTarget ?? targetCount} this period
+              {selectedBucket && !selectedBucket.isCurrent ? ` · selected ${selectedBucket.label}` : ""}
+            </span>
+            {isCountDetailOpen ? (
+              <SquareChevronUp className="size-4" />
+            ) : (
+              <SquareChevronDown className="size-4" />
+            )}
+          </button>
+          {isCountDetailOpen && intervalProgress ? (
+            <div
+              className="commitment-heatmap"
+              aria-label="Commitment period progress"
+              style={{
+                gridTemplateColumns: `repeat(${getCommitmentHeatmapColumnCount(
+                  props.commitment.trackingInterval
+                )}, minmax(0, 1fr))`
+              }}
+            >
+              {intervalProgress.buckets.map((bucket) => {
+                const ratio = bucket.amount / targetCount;
+
+                const isSelected = selectedBucket?.startOn === bucket.startOn;
+                const isFuture = bucket.startOn > todayIso;
+
+                return (
+                  <button
+                    className={cn(
+                      "commitment-heatmap-cell",
+                      bucket.isCurrent && "commitment-heatmap-cell-current",
+                      isSelected && "commitment-heatmap-cell-selected",
+                      isFuture && "commitment-heatmap-cell-disabled",
+                      ratio > 0 && ratio < 1 && "commitment-heatmap-cell-partial",
+                      ratio >= 1 && "commitment-heatmap-cell-complete",
+                      ratio > 1 && "commitment-heatmap-cell-over"
+                    )}
+                    disabled={isFuture}
+                    key={bucket.startOn}
+                    onClick={() => setSelectedIntervalStartOn(bucket.startOn)}
+                    title={`${bucket.label}: ${bucket.amount} / ${targetCount}`}
+                    type="button"
+                  >
+                    <span className="sr-only">
+                      {isFuture ? "Future interval, " : ""}
+                      {bucket.isCurrent ? "Current interval, " : ""}
+                      {isSelected ? "Selected interval, " : ""}
+                      {bucket.label}: {bucket.amount} / {targetCount}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
           <div className="commitment-stepper">
             <Button
-              disabled={!canMutate || filledCount >= slotCount}
-              onClick={() => void props.onAddCheckin(props.commitment.id)}
+              disabled={!canMutate || !selectedBucket || currentFilledCount >= targetCount}
+              onClick={() =>
+                selectedBucket &&
+                void props.onAddCheckin(props.commitment.id, selectedBucket.startOn)
+              }
               size="icon"
               type="button"
               variant="outline"
@@ -7080,8 +7538,11 @@ function CommitmentTrackerRow(props: {
               <span className="sr-only">Add progress</span>
             </Button>
             <Button
-              disabled={!canMutate || !latestCheckin}
-              onClick={() => latestCheckin && void props.onDeleteCheckin(latestCheckin.id)}
+              disabled={!canMutate || !latestCurrentIntervalCheckin}
+              onClick={() =>
+                latestCurrentIntervalCheckin &&
+                void props.onDeleteCheckin(latestCurrentIntervalCheckin.id)
+              }
               size="icon"
               type="button"
               variant="outline"
@@ -7188,7 +7649,7 @@ function CommitmentTrackerRow(props: {
           onClick={() =>
             isBinaryFinished && latestCheckin
               ? void props.onDeleteCheckin(latestCheckin.id)
-              : void props.onAddCheckin(props.commitment.id)
+              : void props.onAddCheckin(props.commitment.id, todayIso)
           }
           size="sm"
           type="button"
