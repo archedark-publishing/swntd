@@ -3198,6 +3198,8 @@ function TaskSheet(props: {
   const [draft, setDraft] = useState<TaskDraft>(() => createTaskDraft(null));
   const [activeControl, setActiveControl] = useState<TaskDetailControlId | null>(null);
   const [commentBody, setCommentBody] = useState("");
+  const [isPostingActivity, setIsPostingActivity] = useState(false);
+  const postingActivityRef = useRef(false);
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
   const [pendingActivityFiles, setPendingActivityFiles] = useState<File[]>([]);
   const [ignoredParsedLinks, setIgnoredParsedLinks] = useState<string[]>([]);
@@ -3343,10 +3345,12 @@ function TaskSheet(props: {
   }
 
   async function handleActivitySubmit() {
-    if (!currentTask) {
+    if (!currentTask || props.isSavingDisabled || postingActivityRef.current || (!commentBody.trim() && pendingActivityFiles.length === 0 && parsedLinks.length === 0)) {
       return;
     }
-
+    postingActivityRef.current = true;
+    setIsPostingActivity(true);
+    try {
     const didSubmit = await props.onSubmitActivity(currentTask, {
       body: commentBody,
       files: pendingActivityFiles,
@@ -3363,6 +3367,10 @@ function TaskSheet(props: {
 
     if (activityFileInputRef.current) {
       activityFileInputRef.current.value = "";
+    }
+    } finally {
+      postingActivityRef.current = false;
+      setIsPostingActivity(false);
     }
   }
 
@@ -3478,6 +3486,14 @@ function TaskSheet(props: {
                 <div className="activity-input-shell">
                   <FormTextarea
                     className="activity-textarea"
+                    disabled={isPostingActivity || props.isSavingDisabled}
+                    aria-label="Comment"
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !event.nativeEvent.isComposing) {
+                        event.preventDefault();
+                        void handleActivitySubmit();
+                      }
+                    }}
                     onChange={(event) => setCommentBody(event.target.value)}
                     placeholder="Leave a note for the household."
                     rows={3}
@@ -3513,9 +3529,9 @@ function TaskSheet(props: {
                     <Button
                       className="activity-icon-button"
                       disabled={
-                        !commentBody.trim() &&
+                        isPostingActivity || props.isSavingDisabled || (!commentBody.trim() &&
                         pendingActivityFiles.length === 0 &&
-                        parsedLinks.length === 0
+                        parsedLinks.length === 0)
                       }
                       onClick={() => {
                         void handleActivitySubmit();
@@ -3529,6 +3545,7 @@ function TaskSheet(props: {
                     </Button>
                   </div>
                 </div>
+                <p className="muted-text">Markdown supported · Ctrl+Enter or ⌘+Enter to post</p>
                 {pendingActivityFiles.length > 0 || parsedLinks.length > 0 ? (
                   <div className="activity-chip-row">
                     {pendingActivityFiles.map((file, index) => (
