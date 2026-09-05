@@ -3679,6 +3679,23 @@ function TaskSheet(props: {
             </section>
           ) : null}
 
+          {currentTask ? (
+            <section className="sheet-section">
+              <details>
+                <summary>Task history</summary>
+                <div className="timeline">
+                  {(currentTask.history ?? []).map((event) => (
+                    <div className="timeline-entry" key={event.id}>
+                      <div className="timeline-meta"><strong>{event.actor?.displayName ?? "System"}</strong><span>{formatTimestamp(event.createdAt)}</span></div>
+                      <p>{formatTaskEvent(event.eventType)}</p>
+                    </div>
+                  ))}
+                  {!currentTask.history?.length ? <p>No recorded history yet.</p> : null}
+                </div>
+              </details>
+            </section>
+          ) : null}
+
           {currentTask && currentTask.attachments.length > 0 ? (
             <section className="sheet-section">
               <p className="eyebrow">Attachments</p>
@@ -8022,3 +8039,17 @@ function RecurringTemplateForm(props: {
 }
 
 export default App;
+
+function formatTaskEvent(eventType: string) {
+  const labels: Record<string, string> = {
+    "task.created": "Created this task", "task.updated": "Updated task details",
+    "task.status_changed": "Changed status", "task.reordered": "Moved this task",
+    "task.comment_added": "Added a comment", "task.comment_updated": "Edited a comment",
+    "task.attachment_linked": "Attached a link", "task.attachment_uploaded": "Uploaded a file",
+    "task.archived": "Archived this task", "task.unarchived": "Restored this task",
+    "task.checklist_item_added": "Added a checklist item",
+    "task.checklist_item_deleted": "Deleted a checklist item",
+    "task.checklist_item_completion_set": "Updated checklist progress"
+  };
+  return labels[eventType] ?? eventType.replace(/^task\./, "").replaceAll("_", " ");
+}

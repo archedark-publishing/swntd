@@ -157,6 +157,7 @@ export type TaskListItemDto = Omit<Task, "assigneeUserId"> & {
 export type TaskDetailDto = TaskListItemDto & {
   attachments: AttachmentDto[];
   comments: CommentDto[];
+  history: Array<{ id: string; actor: UserRef | null; eventType: string; createdAt: Date }>;
 };
 
 export type RecurringTemplateDto = {
@@ -4115,12 +4116,16 @@ export async function getTaskDetail(
   const task = await getTaskOrThrow(db, actor, taskId);
   const relations = await getTaskRelations(db, [task], true);
   const item = toTaskListItemDto(task, relations);
+  const events = await db.select().from(taskEvents).where(eq(taskEvents.taskId, taskId))
+    .orderBy(desc(taskEvents.createdAt), desc(taskEvents.id));
+  const actors = await getUserRefsById(db, events.map((event) => event.actorUserId));
 
   return {
     item: {
       ...item,
       attachments: relations.attachmentsByTaskId.get(task.id) ?? [],
-      comments: relations.commentsByTaskId.get(task.id) ?? []
+      comments: relations.commentsByTaskId.get(task.id) ?? [],
+      history: events.map((event) => ({ id: event.id, actor: actors.get(event.actorUserId) ?? null, eventType: event.eventType, createdAt: event.createdAt }))
     } satisfies TaskDetailDto
   };
 }

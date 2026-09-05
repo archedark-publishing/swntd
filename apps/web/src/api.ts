@@ -105,6 +105,7 @@ export type TaskListItem = {
 export type TaskDetail = TaskListItem & {
   attachments: Attachment[];
   comments: Comment[];
+  history: Array<{ id: string; actor: UserRef | null; eventType: string; createdAt: string }>;
 };
 
 export type Settings = {
