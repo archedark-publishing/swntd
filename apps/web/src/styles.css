@@ -2469,3 +2469,7 @@ a {
   .commitment-heatmap { gap: .4rem; }
   .commitment-heatmap-cell { min-height: 32px; }
 }
+
+.board-label-filters { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; }
+.board-label-filters button[aria-pressed="false"] { opacity: .65; }
+.board-label-filters button[aria-pressed="true"] { outline: 2px solid currentColor; outline-offset: 2px; }

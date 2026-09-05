@@ -997,6 +997,7 @@ export function App() {
   const initialRoute = readRouteFromHash();
   const [view, setView] = useState<ViewName>(initialRoute.view);
   const [onlyMyTasks, setOnlyMyTasks] = useState(initialRoute.onlyMyTasks);
+  const [boardLabelIds, setBoardLabelIds] = useState<string[]>([]);
   const [archiveMode, setArchiveMode] = useState<ArchiveMode>(
     initialRoute.archiveMode
   );
@@ -2044,6 +2045,9 @@ export function App() {
                   allTasks={activeTasks}
                   canAdmin={canAdmin}
                   isFilteredToActor={onlyMyTasks}
+                  labels={snapshot.labels}
+                  selectedLabelIds={boardLabelIds}
+                  onLabelFilterChange={setBoardLabelIds}
                   onCreateTask={createTaskFromBoardTitle}
                   onDropTask={handleTaskDrop}
                   onOpenTask={openTask}
@@ -2051,7 +2055,7 @@ export function App() {
                   onReorder={handleReorder}
                   onToggleActorFilter={() => setOnlyMyTasks((current) => !current)}
                   settings={snapshot.settings}
-                  visibleTasks={onlyMyTasks ? myTasks : activeTasks}
+                  visibleTasks={(onlyMyTasks ? myTasks : activeTasks).filter((task) => boardLabelIds.length === 0 || task.labels.some((label) => boardLabelIds.includes(label.id)))}
                 />
               ) : null}
 
@@ -2447,6 +2451,9 @@ function BoardView(props: {
   allTasks: TaskListItem[];
   canAdmin: boolean;
   isFilteredToActor: boolean;
+  labels: Label[];
+  selectedLabelIds: string[];
+  onLabelFilterChange: (ids: string[]) => void;
   onCreateTask: (title: string) => Promise<boolean>;
   onDropTask: (input: {
     targetIndex: number;
@@ -2671,6 +2678,22 @@ function BoardView(props: {
         eyebrow="Chore Board"
         title="The S#!% List"
       />
+      {props.labels.length > 0 ? (
+        <div className="board-label-filters" aria-label="Filter tasks by label">
+          <span className="muted-text">Labels</span>
+          {props.labels.map((label) => (
+            <button key={label.id} type="button" className="detail-label-chip"
+              aria-pressed={props.selectedLabelIds.includes(label.id)}
+              style={getLabelBadgeStyle(label.color)}
+              onClick={() => props.onLabelFilterChange(props.selectedLabelIds.includes(label.id)
+                ? props.selectedLabelIds.filter((id) => id !== label.id) : [...props.selectedLabelIds, label.id])}>
+              {props.selectedLabelIds.includes(label.id) ? <Check className="size-3" /> : null}{label.name}
+            </button>
+          ))}
+          {props.selectedLabelIds.length > 0 ? <Button variant="ghost" size="sm" onClick={() => props.onLabelFilterChange([])}>Clear labels</Button> : null}
+        </div>
+      ) : null}
+      {props.selectedLabelIds.length > 0 && props.visibleTasks.length === 0 ? <p className="muted-text">No tasks match these filters.</p> : null}
       <DndContext
         autoScroll={false}
         collisionDetection={closestCorners}
