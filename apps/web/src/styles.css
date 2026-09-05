@@ -2433,3 +2433,16 @@ a {
     @apply font-sans;
   }
 }
+
+.comment-content { min-width: 0; overflow-wrap: anywhere; }
+.comment-content p { white-space: pre-wrap; }
+.comment-content > * + * { margin-top: .65rem; }
+.comment-content ul { list-style: disc; padding-left: 1.4rem; }
+.comment-content ol { list-style: decimal; padding-left: 1.4rem; }
+.comment-content a { text-decoration: underline; }
+.comment-content pre { overflow-x: auto; padding: .75rem; background: var(--muted); border-radius: .5rem; }
+.comment-content code { font-family: monospace; }
+.comment-content blockquote { border-left: 3px solid var(--border); padding-left: .75rem; }
+.comment-content table { display: block; overflow-x: auto; border-collapse: collapse; }
+.comment-content td, .comment-content th { border: 1px solid var(--border); padding: .4rem; }
+.comment-content h1, .comment-content h2, .comment-content h3 { font-size: 1.1rem; font-weight: 700; }

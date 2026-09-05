@@ -119,6 +119,7 @@ import {
 import { getTaskDueState } from "./due-status";
 import { applyOptimisticTaskPlacement } from "./task-ordering";
 import { toast } from "sonner";
+import { CommentContent } from "./components/comment-content";
 import "./styles.css";
 
 type ViewName = "archive" | "board" | "recurring" | "retrospective" | "settings";
@@ -3670,7 +3671,7 @@ function TaskSheet(props: {
                         <strong>{comment.author.displayName}</strong>
                         <span>{formatTimestamp(comment.createdAt)}</span>
                       </div>
-                      <p>{comment.body}</p>
+                      <CommentContent body={comment.body} />
                     </SurfaceCard>
                   ))}
                 </div>
