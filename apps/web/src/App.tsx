@@ -1010,9 +1010,9 @@ export function App() {
   const [isSwitchingAccount, setIsSwitchingAccount] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isNavOpen, setIsNavOpen] = useState(false);
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(window.history.state?.swntdTaskId ?? null);
   const [selectedTask, setSelectedTask] = useState<TaskDetail | null>(null);
-  const [isTaskSheetOpen, setIsTaskSheetOpen] = useState(false);
+  const [isTaskSheetOpen, setIsTaskSheetOpen] = useState(Boolean(window.history.state?.swntdTaskId));
   const [archiveRetrospectiveDetail, setArchiveRetrospectiveDetail] =
     useState<RetrospectiveDetail | null>(null);
   const [isCreatingTask, setIsCreatingTask] = useState(false);
@@ -1068,6 +1068,23 @@ export function App() {
       document.body.style.overflow = previousOverflow;
     };
   }, [archiveRetrospectiveDetail, editingTemplateKey, isNavOpen, isTaskSheetOpen]);
+
+  useEffect(() => {
+    const onPopState = () => {
+      const taskId = window.history.state?.swntdTaskId ?? null;
+      setSelectedTaskId(taskId);
+      setIsTaskSheetOpen(Boolean(taskId));
+      setIsCreatingTask(false);
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  function closeTaskSheet() {
+    setIsTaskSheetOpen(false);
+    setIsCreatingTask(false);
+    if (window.history.state?.swntdTaskId) window.history.back();
+  }
 
   const loadTaskDetail = useEffectEvent(async (taskId: string | null) => {
     if (!taskId) {
@@ -1306,10 +1323,7 @@ export function App() {
         toast.success(successMessage);
       }
 
-      if (options?.closeTaskSheet) {
-        setIsTaskSheetOpen(false);
-        setIsCreatingTask(false);
-      }
+      if (options?.closeTaskSheet) closeTaskSheet();
 
       if (!options?.skipRefresh) {
         await refreshApp({ background: true });
@@ -1395,6 +1409,13 @@ export function App() {
   }
 
   function openTask(taskId: string) {
+    if (!window.history.state?.swntdTaskId) {
+      window.history.replaceState({ ...window.history.state, swntdTaskId: null }, "");
+      window.history.pushState({ ...window.history.state, swntdTaskId: taskId }, "");
+    } else {
+      window.history.replaceState({ ...window.history.state, swntdTaskId: taskId }, "");
+    }
+    setSelectedTask(null);
     setSelectedTaskId(taskId);
     setIsCreatingTask(false);
     setIsTaskSheetOpen(true);
@@ -2306,10 +2327,7 @@ export function App() {
 
               downloadIcsFile(task, snapshot.settings.defaultTimezone);
             }}
-            onClose={() => {
-              setIsTaskSheetOpen(false);
-              setIsCreatingTask(false);
-            }}
+            onClose={closeTaskSheet}
             onDeleteArchivedTask={handleDeleteArchivedTask}
             onDownloadAttachment={async (attachment) => {
               if (!attachment.downloadUrl) {
@@ -3352,6 +3370,14 @@ function TaskSheet(props: {
       window.clearTimeout(timeoutId);
     };
   }, [draft, props.isSavingDisabled, props.task, props.variant, submitAutosave]);
+
+  const closeFromHistory = useEffectEvent(() => {
+    if (props.isOpen && !window.history.state?.swntdTaskId) handleClose();
+  });
+  useEffect(() => {
+    window.addEventListener("popstate", closeFromHistory);
+    return () => window.removeEventListener("popstate", closeFromHistory);
+  }, []);
 
   if (!props.isOpen) {
     return null;
