@@ -120,6 +120,7 @@ import { getTaskDueState } from "./due-status";
 import { applyOptimisticTaskPlacement } from "./task-ordering";
 import { toast } from "sonner";
 import { CommentContent } from "./components/comment-content";
+import { getCommitmentIntervalBuckets, isoDateFromUtc } from "./commitment-progress";
 import "./styles.css";
 
 type ViewName = "archive" | "board" | "recurring" | "retrospective" | "settings";
@@ -916,11 +917,15 @@ function formatCommitmentIntervalLabel(
   }
 }
 
-function getCommitmentProgressLabel(commitment: Commitment) {
+function getCommitmentProgressLabel(commitment: Commitment, period: CommitmentPeriod | null = null) {
   if (commitment.trackingKind === "count_per_period") {
     const total = commitment.checkins.reduce((sum, checkin) => sum + checkin.amount, 0);
 
-    return `${total}${commitment.targetCount ? ` / ${commitment.targetCount}` : ""} this period`;
+    if (period) {
+      const progress = getCommitmentIntervalBuckets(commitment, period);
+      return `${progress.periodTotal} / ${progress.periodTarget} this period`;
+    }
+    return `${total} logged · target ${commitment.targetCount ?? 1} per ${formatCommitmentIntervalLabel(commitment.trackingInterval)}`;
   }
 
   if (commitment.trackingKind === "checklist") {
@@ -934,111 +939,6 @@ function getCommitmentProgressLabel(commitment: Commitment) {
   }
 
   return commitment.status;
-}
-
-function addUtcDays(date: Date, days: number) {
-  const next = new Date(date);
-  next.setUTCDate(next.getUTCDate() + days);
-  return next;
-}
-
-function addUtcMonths(date: Date, months: number) {
-  const next = new Date(date);
-  next.setUTCMonth(next.getUTCMonth() + months);
-  return next;
-}
-
-function isoDateFromUtc(date: Date) {
-  return date.toISOString().slice(0, 10);
-}
-
-function getIntervalEnd(startOn: string, periodEndOn: string, interval: Commitment["trackingInterval"]) {
-  const start = new Date(`${startOn}T00:00:00.000Z`);
-  const rawEnd =
-    interval === "daily"
-      ? addUtcDays(start, 0)
-      : interval === "weekly"
-        ? addUtcDays(start, 6)
-        : interval === "monthly"
-          ? addUtcDays(addUtcMonths(start, 1), -1)
-          : new Date(`${periodEndOn}T00:00:00.000Z`);
-  const boundedEnd = rawEnd.getTime() > new Date(`${periodEndOn}T00:00:00.000Z`).getTime()
-    ? new Date(`${periodEndOn}T00:00:00.000Z`)
-    : rawEnd;
-
-  return isoDateFromUtc(boundedEnd);
-}
-
-function getCommitmentIntervalBuckets(
-  commitment: Commitment,
-  period: CommitmentPeriod | null,
-  today = isoDateFromUtc(new Date())
-) {
-  const targetCount = Math.max(1, commitment.targetCount ?? 1);
-  const periodStartOn = period?.periodStartOn ?? today;
-  const periodEndOn = period?.closureOn ?? today;
-  const buckets: Array<{
-    amount: number;
-    checkins: Commitment["checkins"];
-    endOn: string;
-    isCurrent: boolean;
-    label: string;
-    startOn: string;
-  }> = [];
-  let cursor = new Date(`${periodStartOn}T00:00:00.000Z`);
-  const end = new Date(`${periodEndOn}T00:00:00.000Z`);
-
-  while (cursor.getTime() <= end.getTime()) {
-    const startOn = isoDateFromUtc(cursor);
-    const bucketEndOn = getIntervalEnd(
-      startOn,
-      periodEndOn,
-      commitment.trackingInterval
-    );
-    const checkins = commitment.checkins.filter(
-      (checkin) => checkin.checkinOn >= startOn && checkin.checkinOn <= bucketEndOn
-    );
-    const amount = checkins.reduce((sum, checkin) => sum + checkin.amount, 0);
-    const isCurrent = today >= startOn && today <= bucketEndOn;
-
-    buckets.push({
-      amount,
-      checkins,
-      endOn: bucketEndOn,
-      isCurrent,
-      label:
-        startOn === bucketEndOn
-          ? formatIsoDate(startOn)
-          : `${formatIsoDate(startOn)} - ${formatIsoDate(bucketEndOn)}`,
-      startOn
-    });
-
-    if (commitment.trackingInterval === "none") {
-      break;
-    }
-
-    cursor = addUtcDays(new Date(`${bucketEndOn}T00:00:00.000Z`), 1);
-  }
-
-  const currentBucket =
-    buckets.find((bucket) => bucket.isCurrent) ??
-    buckets.find((bucket) => today < bucket.startOn) ??
-    buckets[buckets.length - 1] ?? {
-      amount: 0,
-      checkins: [],
-      endOn: today,
-      isCurrent: true,
-      label: formatIsoDate(today),
-      startOn: today
-    };
-
-  return {
-    buckets,
-    currentBucket,
-    periodTarget: targetCount * buckets.length,
-    periodTotal: buckets.reduce((sum, bucket) => sum + bucket.amount, 0),
-    targetCount
-  };
 }
 
 function getCommitmentHeatmapColumnCount(interval: Commitment["trackingInterval"]) {
@@ -7358,7 +7258,7 @@ function CommitmentTrackerRow(props: {
     ) ??
     intervalProgress?.currentBucket ??
     null;
-  const targetCount = intervalProgress?.targetCount ?? 1;
+  const targetCount = selectedBucket?.targetCount ?? intervalProgress?.targetCount ?? 1;
   const currentFilledCount = Math.min(
     targetCount,
     selectedBucket?.amount ?? 0
@@ -7508,7 +7408,7 @@ function CommitmentTrackerRow(props: {
               }}
             >
               {intervalProgress.buckets.map((bucket) => {
-                const ratio = bucket.amount / targetCount;
+                const ratio = bucket.amount / bucket.targetCount;
 
                 const isSelected = selectedBucket?.startOn === bucket.startOn;
                 const isFuture = bucket.startOn > todayIso;
@@ -7527,14 +7427,14 @@ function CommitmentTrackerRow(props: {
                     disabled={isFuture}
                     key={bucket.startOn}
                     onClick={() => setSelectedIntervalStartOn(bucket.startOn)}
-                    title={`${bucket.label}: ${bucket.amount} / ${targetCount}`}
+                    title={`${bucket.label}: ${bucket.amount} / ${bucket.targetCount}`}
                     type="button"
                   >
                     <span className="sr-only">
                       {isFuture ? "Future interval, " : ""}
                       {bucket.isCurrent ? "Current interval, " : ""}
                       {isSelected ? "Selected interval, " : ""}
-                      {bucket.label}: {bucket.amount} / {targetCount}
+                      {bucket.label}: {bucket.amount} / {bucket.targetCount}
                     </span>
                   </button>
                 );
@@ -7543,10 +7443,10 @@ function CommitmentTrackerRow(props: {
           ) : null}
           <div className="commitment-stepper">
             <Button
-              disabled={!canMutate || !selectedBucket || currentFilledCount >= targetCount}
+              disabled={!canMutate || !selectedBucket || selectedBucket.startOn > todayIso}
               onClick={() =>
                 selectedBucket &&
-                void props.onAddCheckin(props.commitment.id, selectedBucket.startOn)
+                void props.onAddCheckin(props.commitment.id, selectedBucket.isCurrent ? todayIso : selectedBucket.startOn)
               }
               size="icon"
               type="button"
