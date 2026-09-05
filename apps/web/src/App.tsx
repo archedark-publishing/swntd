@@ -3646,7 +3646,7 @@ function TaskSheet(props: {
                   {currentTask.comments.map((comment) => (
                     <TaskComment key={comment.id} comment={comment}
                       canEdit={comment.author.id === props.actor?.id}
-                      onSave={(body) => props.onEditComment(currentTask.id, comment, body)} />
+                      onSave={(body, original) => props.onEditComment(currentTask.id, original, body)} />
                   ))}
                 </div>
               ) : null}
@@ -7465,7 +7465,8 @@ function CommitmentTrackerRow(props: {
               {formatCommitmentIntervalLabel(props.commitment.trackingInterval)}
               {" · "}
               {intervalProgress?.periodTotal ?? 0} / {intervalProgress?.periodTarget ?? targetCount} this period
-              {selectedBucket && !selectedBucket.isCurrent ? ` · selected ${selectedBucket.label}` : ""}
+              {selectedBucket ? ` · ${selectedBucket.label}` : ""}
+              {targetCount < (intervalProgress?.targetCount ?? targetCount) ? " · partial interval target" : ""}
             </span>
             {isCountDetailOpen ? (
               <SquareChevronUp className="size-4" />
@@ -7566,7 +7567,9 @@ function CommitmentTrackerRow(props: {
                   )
                 }
               />
-              <FormInput
+              <FormTextarea
+                aria-label="Commitment checklist item"
+                rows={2}
                 defaultValue={item.body}
                 disabled={!canMutate}
                 onBlur={(event) => {
@@ -7582,7 +7585,8 @@ function CommitmentTrackerRow(props: {
                   }
                 }}
                 onKeyDown={(event) => {
-                  if (event.key === "Enter") {
+                  if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+                    event.preventDefault();
                     event.currentTarget.blur();
                   }
                 }}
@@ -8030,23 +8034,24 @@ function formatTaskEvent(eventType: string) {
   return labels[eventType] ?? eventType.replace(/^task\./, "").replaceAll("_", " ");
 }
 
-function TaskComment(props: { comment: Comment; canEdit: boolean; onSave: (body: string) => Promise<boolean> }) {
+function TaskComment(props: { comment: Comment; canEdit: boolean; onSave: (body: string, original: Comment) => Promise<boolean> }) {
   const [isEditing, setIsEditing] = useState(false);
   const [body, setBody] = useState(props.comment.body);
+  const originalRef = useRef(props.comment);
   const [isSaving, setIsSaving] = useState(false);
   const savingRef = useRef(false);
   async function save() {
     if (!body.trim() || savingRef.current) return;
     savingRef.current = true;
     setIsSaving(true);
-    try { if (await props.onSave(body)) setIsEditing(false); }
+    try { if (await props.onSave(body, originalRef.current)) setIsEditing(false); }
     finally { savingRef.current = false; setIsSaving(false); }
   }
   return <SurfaceCard className="timeline-entry gap-2 py-4">
     <div className="timeline-meta">
       <strong>{props.comment.author.displayName}</strong>
       <span>{formatTimestamp(props.comment.createdAt)}{props.comment.updatedAt !== props.comment.createdAt ? " · edited" : ""}</span>
-      {props.canEdit && !isEditing ? <Button size="sm" variant="ghost" onClick={() => { setBody(props.comment.body); setIsEditing(true); }}>Edit comment</Button> : null}
+      {props.canEdit && !isEditing ? <Button size="sm" variant="ghost" onClick={() => { originalRef.current = props.comment; setBody(props.comment.body); setIsEditing(true); }}>Edit comment</Button> : null}
     </div>
     {isEditing ? <>
       <FormTextarea aria-label="Edit comment" value={body} disabled={isSaving} onChange={(event) => setBody(event.target.value)}

@@ -1,6 +1,7 @@
 import type { Commitment, CommitmentPeriod } from "./api";
 
 export function isoDateFromUtc(date: Date) { return date.toISOString().slice(0, 10); }
+const dateLabel = (on: string) => new Intl.DateTimeFormat("en", { month: "short", day: "numeric", timeZone: "UTC" }).format(date(on));
 const dayMs = 86_400_000;
 const date = (on: string) => new Date(`${on}T00:00:00.000Z`);
 const addDays = (start: Date, days: number) => new Date(start.getTime() + days * dayMs);
@@ -39,7 +40,7 @@ export function getCommitmentIntervalBuckets(
     buckets.push({
       amount: checkins.reduce((sum, entry) => sum + entry.amount, 0), checkins, startOn, endOn,
       isCurrent: today >= startOn && today <= endOn,
-      label: startOn === endOn ? startOn : `${startOn} – ${endOn}`,
+      label: startOn === endOn ? dateLabel(startOn) : `${dateLabel(startOn)} – ${dateLabel(endOn)}`,
       targetCount: Math.ceil(targetCount * ((bounded.getTime() - cursor.getTime()) / (next.getTime() - cursor.getTime())))
     });
     cursor = bounded;

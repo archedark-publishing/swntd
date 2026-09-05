@@ -1,8 +1,10 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { Dialog } from "radix-ui";
 import { X, Download } from "lucide-react";
 import { Button } from "./ui/button";
 import { loadAttachmentObjectUrl, type Attachment } from "../api";
+
+const PdfPreview = lazy(() => import("./pdf-preview"));
 
 export function AttachmentViewer({ attachment, onClose, onDownload }: {
   attachment: Attachment | null; onClose: () => void; onDownload: (attachment: Attachment) => Promise<void>;
@@ -35,7 +37,7 @@ export function AttachmentViewer({ attachment, onClose, onDownload }: {
             : kind === "unsupported" ? <p>This file type has no browser preview. Download it to open in its app.</p>
             : !url ? <p role="status">Loading preview…</p>
             : kind === "image" ? <img src={url} alt={attachment?.originalName} onError={() => setError(true)} />
-            : kind === "pdf" ? <iframe src={url} title={attachment?.originalName} sandbox="allow-same-origin allow-scripts" />
+            : kind === "pdf" ? <Suspense fallback={<p>Loading PDF…</p>}><PdfPreview url={url} /></Suspense>
             : <audio src={url} controls onError={() => setError(true)} />}
         </div>
         <footer><Button variant="outline" onClick={() => { if (attachment) void onDownload(attachment); }}><Download className="size-4" />Download original</Button></footer>
