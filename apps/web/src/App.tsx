@@ -88,6 +88,7 @@ import {
   type Actor,
   type Attachment,
   type Label,
+  type Comment,
   type Commitment,
   type CommitmentPeriod,
   type CommitmentTrackingKind,
@@ -2282,6 +2283,11 @@ export function App() {
             isSavingDisabled={!canAdmin}
             labels={snapshot.labels}
             onSubmitActivity={handleActivitySubmit}
+            onEditComment={async (taskId, comment, body) => {
+              const result = await runMutation(() => api.updateComment(taskId, comment.id, { body, expectedUpdatedAt: comment.updatedAt }), "Comment updated.");
+              if (result) setSelectedTask((current) => current?.id === taskId ? result.item : current);
+              return result !== null;
+            }}
             onArchive={handleArchive}
             onCalendarAction={(task, calendarKind) => {
               if (!snapshot.settings) {
@@ -3208,6 +3214,7 @@ function TaskSheet(props: {
     options?: { silentSuccess?: boolean }
   ) => Promise<TaskDetail | null>;
   onStatusChange: (task: TaskDetail, status: TaskStatus) => Promise<void>;
+  onEditComment: (taskId: string, comment: Comment, body: string) => Promise<boolean>;
   onSubmitActivity: (
     task: TaskDetail,
     input: { body: string; files: File[]; links: string[] }
@@ -3606,13 +3613,9 @@ function TaskSheet(props: {
               {currentTask.comments.length > 0 ? (
                 <div className="timeline">
                   {currentTask.comments.map((comment) => (
-                    <SurfaceCard className="timeline-entry gap-2 py-4" key={comment.id}>
-                      <div className="timeline-meta">
-                        <strong>{comment.author.displayName}</strong>
-                        <span>{formatTimestamp(comment.createdAt)}</span>
-                      </div>
-                      <CommentContent body={comment.body} />
-                    </SurfaceCard>
+                    <TaskComment key={comment.id} comment={comment}
+                      canEdit={comment.author.id === props.actor?.id}
+                      onSave={(body) => props.onEditComment(currentTask.id, comment, body)} />
                   ))}
                 </div>
               ) : null}
@@ -7992,4 +7995,31 @@ function formatTaskEvent(eventType: string) {
     "task.checklist_item_completion_set": "Updated checklist progress"
   };
   return labels[eventType] ?? eventType.replace(/^task\./, "").replaceAll("_", " ");
+}
+
+function TaskComment(props: { comment: Comment; canEdit: boolean; onSave: (body: string) => Promise<boolean> }) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [body, setBody] = useState(props.comment.body);
+  const [isSaving, setIsSaving] = useState(false);
+  const savingRef = useRef(false);
+  async function save() {
+    if (!body.trim() || savingRef.current) return;
+    savingRef.current = true;
+    setIsSaving(true);
+    try { if (await props.onSave(body)) setIsEditing(false); }
+    finally { savingRef.current = false; setIsSaving(false); }
+  }
+  return <SurfaceCard className="timeline-entry gap-2 py-4">
+    <div className="timeline-meta">
+      <strong>{props.comment.author.displayName}</strong>
+      <span>{formatTimestamp(props.comment.createdAt)}{props.comment.updatedAt !== props.comment.createdAt ? " · edited" : ""}</span>
+      {props.canEdit && !isEditing ? <Button size="sm" variant="ghost" onClick={() => { setBody(props.comment.body); setIsEditing(true); }}>Edit comment</Button> : null}
+    </div>
+    {isEditing ? <>
+      <FormTextarea aria-label="Edit comment" value={body} disabled={isSaving} onChange={(event) => setBody(event.target.value)}
+        onKeyDown={(event) => { if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !event.nativeEvent.isComposing) { event.preventDefault(); void save(); } }} />
+      <div className="flex gap-2"><Button disabled={isSaving || !body.trim()} onClick={() => void save()}>Save comment</Button>
+      <Button variant="ghost" disabled={isSaving} onClick={() => setIsEditing(false)}>Cancel</Button></div>
+    </> : <CommentContent body={props.comment.body} />}
+  </SurfaceCard>;
 }

@@ -31,6 +31,7 @@ import {
   addAttachmentLinkToTask,
   addChecklistItemToTask,
   addCommentToTask,
+  updateTaskComment,
   addUploadToTask,
   archiveTask,
   completeRetrospectiveRound,
@@ -981,6 +982,11 @@ export function createApp() {
     );
   });
 
+  app.patch("/api/v1/tasks/:taskId/comments/:commentId", async (c) => {
+    const input = await parseJsonBody(c, commentSchema.extend({ expectedUpdatedAt: z.iso.datetime() }));
+    return jsonOk(c, await updateTaskComment(c.var.db, c.var.actor, c.req.param("taskId"), c.req.param("commentId"), input));
+  });
+
   app.post("/api/v1/tasks/:taskId/comments", async (c) => {
     const input = await parseJsonBody(c, commentSchema);
 
@@ -1140,6 +1146,7 @@ export function createApp() {
         "/api/v1/tasks/{taskId}/checklist-items/{checklistItemId}/completion": ["post"],
         "/api/v1/tasks/{taskId}/attachments/{attachmentId}/download": ["get"],
         "/api/v1/tasks/{taskId}/comments": ["post"],
+        "/api/v1/tasks/{taskId}/comments/{commentId}": ["patch"],
         "/api/v1/tasks/{taskId}/reorder": ["post"],
         "/api/v1/tasks/{taskId}/status": ["post"],
         "/api/v1/tasks/{taskId}/unarchive": ["post"],

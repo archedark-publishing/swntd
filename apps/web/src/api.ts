@@ -485,6 +485,9 @@ export const api = {
       method: "POST"
     });
   },
+  updateComment(taskId: string, commentId: string, input: { body: string; expectedUpdatedAt: string }) {
+    return request<{ item: TaskDetail }>(`/api/v1/tasks/${taskId}/comments/${commentId}`, { method: "PATCH", body: JSON.stringify(input) });
+  },
   addComment(taskId: string, input: { body: string }) {
     return request<{ item: TaskDetail }>(`/api/v1/tasks/${taskId}/comments`, {
       body: JSON.stringify(input),
