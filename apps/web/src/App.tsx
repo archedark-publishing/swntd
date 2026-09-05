@@ -120,6 +120,7 @@ import {
 import { getTaskDueState } from "./due-status";
 import { applyOptimisticTaskPlacement } from "./task-ordering";
 import { toast } from "sonner";
+import { AttachmentViewer, PendingFilePreview } from "./components/attachment-viewer";
 import { CommentContent } from "./components/comment-content";
 import { getCommitmentIntervalBuckets, isoDateFromUtc } from "./commitment-progress";
 import "./styles.css";
@@ -3249,6 +3250,7 @@ function TaskSheet(props: {
   const [isPostingActivity, setIsPostingActivity] = useState(false);
   const postingActivityRef = useRef(false);
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
+  const [previewAttachment, setPreviewAttachment] = useState<Attachment | null>(null);
   const [pendingActivityFiles, setPendingActivityFiles] = useState<File[]>([]);
   const [ignoredParsedLinks, setIgnoredParsedLinks] = useState<string[]>([]);
   const lastServerDraftKeyRef = useRef(serializeTaskDraft(createTaskDraft(null)));
@@ -3397,6 +3399,7 @@ function TaskSheet(props: {
     }
 
     setIsDeleteConfirmOpen(false);
+    setPreviewAttachment(null);
     props.onClose();
   }
 
@@ -3432,6 +3435,7 @@ function TaskSheet(props: {
 
   return (
     <div className="sheet-backdrop" role="presentation">
+      <AttachmentViewer attachment={previewAttachment} onClose={() => setPreviewAttachment(null)} onDownload={props.onDownloadAttachment} />
       <aside aria-label="Task details" className="sheet-panel">
         <header className="sheet-header">
           <div className="sheet-header-copy">
@@ -3615,6 +3619,7 @@ function TaskSheet(props: {
                         }
                         type="button"
                       >
+                        <PendingFilePreview file={file} />
                         <span>{file.name}</span>
                         <span aria-hidden="true">x</span>
                       </button>
@@ -3671,7 +3676,9 @@ function TaskSheet(props: {
               <div className="attachment-list">
                 {currentTask.attachments.map((attachment) => (
                   <div className="attachment-row" key={attachment.id}>
-                    <AttachmentPreview attachment={attachment} />
+                    {attachment.storageKind === "upload" ? <button type="button" className="attachment-preview-trigger" aria-label={`Preview ${attachment.originalName}`} onClick={() => setPreviewAttachment(attachment)}>
+                      <AttachmentPreview attachment={attachment} />
+                    </button> : <AttachmentPreview attachment={attachment} />}
                     <div className="attachment-copy">
                       <strong>{attachment.originalName}</strong>
                       <p className="attachment-meta">
@@ -4069,12 +4076,12 @@ function AttachmentPreview(props: {
         URL.revokeObjectURL(objectUrlToRevoke);
       }
     };
-  }, [props.attachment]);
+  }, [props.attachment.id, props.attachment.downloadUrl, props.attachment.mimeType, props.attachment.storageKind]);
 
   if (imageObjectUrl && !hasPreviewError) {
     return (
       <span className="attachment-preview" aria-hidden="true">
-        <img alt="" className="attachment-preview-image" src={imageObjectUrl} />
+        <img alt="" className="attachment-preview-image" src={imageObjectUrl} onError={() => setHasPreviewError(true)} />
       </span>
     );
   }
