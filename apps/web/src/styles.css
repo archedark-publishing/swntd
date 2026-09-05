@@ -2446,3 +2446,26 @@ a {
 .comment-content table { display: block; overflow-x: auto; border-collapse: collapse; }
 .comment-content td, .comment-content th { border: 1px solid var(--border); padding: .4rem; }
 .comment-content h1, .comment-content h2, .comment-content h3 { font-size: 1.1rem; font-weight: 700; }
+
+/* Keep commitment summaries readable alongside their progress controls. */
+.commitment-grid-wrap { width: 100%; grid-template-columns: minmax(0, 1fr) auto; justify-content: stretch; }
+.commitment-current-grid-button { width: 100%; grid-template-columns: minmax(0, 1fr) auto; gap: .65rem; }
+.commitment-check-grid { grid-column: 1; }
+.commitment-period-summary { grid-column: 1; line-height: 1.55; }
+.commitment-current-grid-button > svg { grid-column: 2; grid-row: 1 / 3; }
+.commitment-heatmap { width: 100%; justify-self: stretch; grid-row: 2; }
+.commitment-stepper { grid-column: 2; grid-row: 1; }
+.commitment-checklist-track { grid-column: 1 / -1; min-width: 0; }
+.commitment-checklist-item { grid-template-columns: auto minmax(0, 1fr) auto; }
+.commitment-tracker-row > span > strong { line-height: 1.4; }
+@media (max-width: 640px) {
+  .retrospective-row { flex-wrap: wrap; padding: .8rem; gap: .75rem; }
+  .retrospective-row > span { flex: 1 1 12rem; }
+  .commitment-tracker-row { grid-template-columns: minmax(0, 1fr); }
+  .commitment-tracker-row > .retrospective-row-actions { justify-content: flex-start; }
+  .commitment-assignee-heading { flex-wrap: wrap; gap: .25rem; }
+  .retrospective-rating-row { justify-content: flex-start; }
+  .commitment-stepper button, .commitment-tracker-row .retrospective-row-actions button { min-width: 44px; min-height: 44px; }
+  .commitment-heatmap { gap: .4rem; }
+  .commitment-heatmap-cell { min-height: 32px; }
+}
