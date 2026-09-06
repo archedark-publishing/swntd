@@ -362,6 +362,30 @@ describe("Phase 3 API", () => {
     await teardownApiTestEnvironment(uploadsDir);
   });
 
+  it("edits only the author's comments, detects conflicts, and returns history", async () => {
+    const headers = trustedHeader("admin1@example.com");
+    const created = await (await app.request("/api/v1/tasks", jsonRequest({ headers, method: "POST", body: { title: "Comment edit test" } }))).json() as { item: { id: string } };
+    const taskPath = `/api/v1/tasks/${created.item.id}`;
+    const added = await (await app.request(`${taskPath}/comments`, jsonRequest({ headers, method: "POST", body: { body: "First\nsecond" } }))).json() as { item: { comments: Array<{ id: string; updatedAt: string }> } };
+    const comment = added.item.comments[0]!;
+    const path = `${taskPath}/comments/${comment.id}`;
+    const input = { body: "**Edited**\n\n- List item", expectedUpdatedAt: comment.updatedAt };
+    const forbidden = await app.request(path, jsonRequest({ headers: trustedHeader("admin2@example.com"), method: "PATCH", body: input }));
+    expect(forbidden.status).toBe(403);
+    const edited = await app.request(path, jsonRequest({ headers, method: "PATCH", body: input }));
+    expect(edited.status).toBe(200);
+    const detail = await edited.json() as { item: { comments: Array<{ body: string }>; history: Array<{ eventType: string; actor: { displayName: string } }> } };
+    expect(detail.item.comments[0]?.body).toBe(input.body);
+    expect(detail.item.history.map((event) => event.eventType)).toContain("task.comment_updated");
+    expect(detail.item.history.every((event) => event.actor?.displayName)).toBe(true);
+    const stale = await app.request(path, jsonRequest({ headers, method: "PATCH", body: { ...input, expectedUpdatedAt: "2000-01-01T00:00:00.000Z" } }));
+    expect(stale.status).toBe(409);
+    const empty = await app.request(path, jsonRequest({ headers, method: "PATCH", body: { ...input, body: " " } }));
+    expect(empty.status).toBe(400);
+    const otherTask = await (await app.request("/api/v1/tasks", jsonRequest({ headers, method: "POST", body: { title: "Other task" } }))).json() as { item: { id: string } };
+    expect((await app.request(`/api/v1/tasks/${otherTask.item.id}/comments/${comment.id}`, jsonRequest({ headers, method: "PATCH", body: input }))).status).toBe(404);
+  });
+
   it("exposes an unauthenticated health check", async () => {
     const response = await app.request("/healthz");
 

@@ -88,6 +88,7 @@ import {
   type Actor,
   type Attachment,
   type Label,
+  type Comment,
   type Commitment,
   type CommitmentPeriod,
   type CommitmentTrackingKind,
@@ -119,6 +120,9 @@ import {
 import { getTaskDueState } from "./due-status";
 import { applyOptimisticTaskPlacement } from "./task-ordering";
 import { toast } from "sonner";
+import { AttachmentViewer, PendingFilePreview } from "./components/attachment-viewer";
+import { CommentContent } from "./components/comment-content";
+import { getCommitmentIntervalBuckets, isoDateFromUtc } from "./commitment-progress";
 import "./styles.css";
 
 type ViewName = "archive" | "board" | "recurring" | "retrospective" | "settings";
@@ -915,11 +919,15 @@ function formatCommitmentIntervalLabel(
   }
 }
 
-function getCommitmentProgressLabel(commitment: Commitment) {
+function getCommitmentProgressLabel(commitment: Commitment, period: CommitmentPeriod | null = null) {
   if (commitment.trackingKind === "count_per_period") {
     const total = commitment.checkins.reduce((sum, checkin) => sum + checkin.amount, 0);
 
-    return `${total}${commitment.targetCount ? ` / ${commitment.targetCount}` : ""} this period`;
+    if (period) {
+      const progress = getCommitmentIntervalBuckets(commitment, period);
+      return `${progress.periodTotal} / ${progress.periodTarget} this period`;
+    }
+    return `${total} logged · target ${commitment.targetCount ?? 1} per ${formatCommitmentIntervalLabel(commitment.trackingInterval)}`;
   }
 
   if (commitment.trackingKind === "checklist") {
@@ -933,111 +941,6 @@ function getCommitmentProgressLabel(commitment: Commitment) {
   }
 
   return commitment.status;
-}
-
-function addUtcDays(date: Date, days: number) {
-  const next = new Date(date);
-  next.setUTCDate(next.getUTCDate() + days);
-  return next;
-}
-
-function addUtcMonths(date: Date, months: number) {
-  const next = new Date(date);
-  next.setUTCMonth(next.getUTCMonth() + months);
-  return next;
-}
-
-function isoDateFromUtc(date: Date) {
-  return date.toISOString().slice(0, 10);
-}
-
-function getIntervalEnd(startOn: string, periodEndOn: string, interval: Commitment["trackingInterval"]) {
-  const start = new Date(`${startOn}T00:00:00.000Z`);
-  const rawEnd =
-    interval === "daily"
-      ? addUtcDays(start, 0)
-      : interval === "weekly"
-        ? addUtcDays(start, 6)
-        : interval === "monthly"
-          ? addUtcDays(addUtcMonths(start, 1), -1)
-          : new Date(`${periodEndOn}T00:00:00.000Z`);
-  const boundedEnd = rawEnd.getTime() > new Date(`${periodEndOn}T00:00:00.000Z`).getTime()
-    ? new Date(`${periodEndOn}T00:00:00.000Z`)
-    : rawEnd;
-
-  return isoDateFromUtc(boundedEnd);
-}
-
-function getCommitmentIntervalBuckets(
-  commitment: Commitment,
-  period: CommitmentPeriod | null,
-  today = isoDateFromUtc(new Date())
-) {
-  const targetCount = Math.max(1, commitment.targetCount ?? 1);
-  const periodStartOn = period?.periodStartOn ?? today;
-  const periodEndOn = period?.closureOn ?? today;
-  const buckets: Array<{
-    amount: number;
-    checkins: Commitment["checkins"];
-    endOn: string;
-    isCurrent: boolean;
-    label: string;
-    startOn: string;
-  }> = [];
-  let cursor = new Date(`${periodStartOn}T00:00:00.000Z`);
-  const end = new Date(`${periodEndOn}T00:00:00.000Z`);
-
-  while (cursor.getTime() <= end.getTime()) {
-    const startOn = isoDateFromUtc(cursor);
-    const bucketEndOn = getIntervalEnd(
-      startOn,
-      periodEndOn,
-      commitment.trackingInterval
-    );
-    const checkins = commitment.checkins.filter(
-      (checkin) => checkin.checkinOn >= startOn && checkin.checkinOn <= bucketEndOn
-    );
-    const amount = checkins.reduce((sum, checkin) => sum + checkin.amount, 0);
-    const isCurrent = today >= startOn && today <= bucketEndOn;
-
-    buckets.push({
-      amount,
-      checkins,
-      endOn: bucketEndOn,
-      isCurrent,
-      label:
-        startOn === bucketEndOn
-          ? formatIsoDate(startOn)
-          : `${formatIsoDate(startOn)} - ${formatIsoDate(bucketEndOn)}`,
-      startOn
-    });
-
-    if (commitment.trackingInterval === "none") {
-      break;
-    }
-
-    cursor = addUtcDays(new Date(`${bucketEndOn}T00:00:00.000Z`), 1);
-  }
-
-  const currentBucket =
-    buckets.find((bucket) => bucket.isCurrent) ??
-    buckets.find((bucket) => today < bucket.startOn) ??
-    buckets[buckets.length - 1] ?? {
-      amount: 0,
-      checkins: [],
-      endOn: today,
-      isCurrent: true,
-      label: formatIsoDate(today),
-      startOn: today
-    };
-
-  return {
-    buckets,
-    currentBucket,
-    periodTarget: targetCount * buckets.length,
-    periodTotal: buckets.reduce((sum, bucket) => sum + bucket.amount, 0),
-    targetCount
-  };
 }
 
 function getCommitmentHeatmapColumnCount(interval: Commitment["trackingInterval"]) {
@@ -1096,6 +999,7 @@ export function App() {
   const initialRoute = readRouteFromHash();
   const [view, setView] = useState<ViewName>(initialRoute.view);
   const [onlyMyTasks, setOnlyMyTasks] = useState(initialRoute.onlyMyTasks);
+  const [boardLabelIds, setBoardLabelIds] = useState<string[]>([]);
   const [archiveMode, setArchiveMode] = useState<ArchiveMode>(
     initialRoute.archiveMode
   );
@@ -1107,9 +1011,9 @@ export function App() {
   const [isSwitchingAccount, setIsSwitchingAccount] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isNavOpen, setIsNavOpen] = useState(false);
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(window.history.state?.swntdTaskId ?? null);
   const [selectedTask, setSelectedTask] = useState<TaskDetail | null>(null);
-  const [isTaskSheetOpen, setIsTaskSheetOpen] = useState(false);
+  const [isTaskSheetOpen, setIsTaskSheetOpen] = useState(Boolean(window.history.state?.swntdTaskId));
   const [archiveRetrospectiveDetail, setArchiveRetrospectiveDetail] =
     useState<RetrospectiveDetail | null>(null);
   const [isCreatingTask, setIsCreatingTask] = useState(false);
@@ -1165,6 +1069,23 @@ export function App() {
       document.body.style.overflow = previousOverflow;
     };
   }, [archiveRetrospectiveDetail, editingTemplateKey, isNavOpen, isTaskSheetOpen]);
+
+  useEffect(() => {
+    const onPopState = () => {
+      const taskId = window.history.state?.swntdTaskId ?? null;
+      setSelectedTaskId(taskId);
+      setIsTaskSheetOpen(Boolean(taskId));
+      setIsCreatingTask(false);
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  function closeTaskSheet() {
+    setIsTaskSheetOpen(false);
+    setIsCreatingTask(false);
+    if (window.history.state?.swntdTaskId) window.history.back();
+  }
 
   const loadTaskDetail = useEffectEvent(async (taskId: string | null) => {
     if (!taskId) {
@@ -1403,10 +1324,7 @@ export function App() {
         toast.success(successMessage);
       }
 
-      if (options?.closeTaskSheet) {
-        setIsTaskSheetOpen(false);
-        setIsCreatingTask(false);
-      }
+      if (options?.closeTaskSheet) closeTaskSheet();
 
       if (!options?.skipRefresh) {
         await refreshApp({ background: true });
@@ -1492,6 +1410,13 @@ export function App() {
   }
 
   function openTask(taskId: string) {
+    if (!window.history.state?.swntdTaskId) {
+      window.history.replaceState({ ...window.history.state, swntdTaskId: null }, "");
+      window.history.pushState({ ...window.history.state, swntdTaskId: taskId }, "");
+    } else {
+      window.history.replaceState({ ...window.history.state, swntdTaskId: taskId }, "");
+    }
+    setSelectedTask(null);
     setSelectedTaskId(taskId);
     setIsCreatingTask(false);
     setIsTaskSheetOpen(true);
@@ -2143,6 +2068,9 @@ export function App() {
                   allTasks={activeTasks}
                   canAdmin={canAdmin}
                   isFilteredToActor={onlyMyTasks}
+                  labels={snapshot.labels}
+                  selectedLabelIds={boardLabelIds}
+                  onLabelFilterChange={setBoardLabelIds}
                   onCreateTask={createTaskFromBoardTitle}
                   onDropTask={handleTaskDrop}
                   onOpenTask={openTask}
@@ -2150,7 +2078,7 @@ export function App() {
                   onReorder={handleReorder}
                   onToggleActorFilter={() => setOnlyMyTasks((current) => !current)}
                   settings={snapshot.settings}
-                  visibleTasks={onlyMyTasks ? myTasks : activeTasks}
+                  visibleTasks={(onlyMyTasks ? myTasks : activeTasks).filter((task) => boardLabelIds.length === 0 || task.labels.some((label) => boardLabelIds.includes(label.id)))}
                 />
               ) : null}
 
@@ -2377,6 +2305,11 @@ export function App() {
             isSavingDisabled={!canAdmin}
             labels={snapshot.labels}
             onSubmitActivity={handleActivitySubmit}
+            onEditComment={async (taskId, comment, body) => {
+              const result = await runMutation(() => api.updateComment(taskId, comment.id, { body, expectedUpdatedAt: comment.updatedAt }), "Comment updated.");
+              if (result) setSelectedTask((current) => current?.id === taskId ? result.item : current);
+              return result !== null;
+            }}
             onArchive={handleArchive}
             onCalendarAction={(task, calendarKind) => {
               if (!snapshot.settings) {
@@ -2395,10 +2328,7 @@ export function App() {
 
               downloadIcsFile(task, snapshot.settings.defaultTimezone);
             }}
-            onClose={() => {
-              setIsTaskSheetOpen(false);
-              setIsCreatingTask(false);
-            }}
+            onClose={closeTaskSheet}
             onDeleteArchivedTask={handleDeleteArchivedTask}
             onDownloadAttachment={async (attachment) => {
               if (!attachment.downloadUrl) {
@@ -2546,6 +2476,9 @@ function BoardView(props: {
   allTasks: TaskListItem[];
   canAdmin: boolean;
   isFilteredToActor: boolean;
+  labels: Label[];
+  selectedLabelIds: string[];
+  onLabelFilterChange: (ids: string[]) => void;
   onCreateTask: (title: string) => Promise<boolean>;
   onDropTask: (input: {
     targetIndex: number;
@@ -2770,6 +2703,22 @@ function BoardView(props: {
         eyebrow="Chore Board"
         title="The S#!% List"
       />
+      {props.labels.length > 0 ? (
+        <div className="board-label-filters" aria-label="Filter tasks by label">
+          <span className="muted-text">Labels</span>
+          {props.labels.map((label) => (
+            <button key={label.id} type="button" className="detail-label-chip"
+              aria-pressed={props.selectedLabelIds.includes(label.id)}
+              style={getLabelBadgeStyle(label.color)}
+              onClick={() => props.onLabelFilterChange(props.selectedLabelIds.includes(label.id)
+                ? props.selectedLabelIds.filter((id) => id !== label.id) : [...props.selectedLabelIds, label.id])}>
+              {props.selectedLabelIds.includes(label.id) ? <Check className="size-3" /> : null}{label.name}
+            </button>
+          ))}
+          {props.selectedLabelIds.length > 0 ? <Button variant="ghost" size="sm" onClick={() => props.onLabelFilterChange([])}>Clear labels</Button> : null}
+        </div>
+      ) : null}
+      {props.selectedLabelIds.length > 0 && props.visibleTasks.length === 0 ? <p className="muted-text">No tasks match these filters.</p> : null}
       <DndContext
         autoScroll={false}
         collisionDetection={closestCorners}
@@ -3284,6 +3233,7 @@ function TaskSheet(props: {
     options?: { silentSuccess?: boolean }
   ) => Promise<TaskDetail | null>;
   onStatusChange: (task: TaskDetail, status: TaskStatus) => Promise<void>;
+  onEditComment: (taskId: string, comment: Comment, body: string) => Promise<boolean>;
   onSubmitActivity: (
     task: TaskDetail,
     input: { body: string; files: File[]; links: string[] }
@@ -3297,7 +3247,10 @@ function TaskSheet(props: {
   const [draft, setDraft] = useState<TaskDraft>(() => createTaskDraft(null));
   const [activeControl, setActiveControl] = useState<TaskDetailControlId | null>(null);
   const [commentBody, setCommentBody] = useState("");
+  const [isPostingActivity, setIsPostingActivity] = useState(false);
+  const postingActivityRef = useRef(false);
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
+  const [previewAttachment, setPreviewAttachment] = useState<Attachment | null>(null);
   const [pendingActivityFiles, setPendingActivityFiles] = useState<File[]>([]);
   const [ignoredParsedLinks, setIgnoredParsedLinks] = useState<string[]>([]);
   const lastServerDraftKeyRef = useRef(serializeTaskDraft(createTaskDraft(null)));
@@ -3420,6 +3373,14 @@ function TaskSheet(props: {
     };
   }, [draft, props.isSavingDisabled, props.task, props.variant, submitAutosave]);
 
+  const closeFromHistory = useEffectEvent(() => {
+    if (props.isOpen && !window.history.state?.swntdTaskId) handleClose();
+  });
+  useEffect(() => {
+    window.addEventListener("popstate", closeFromHistory);
+    return () => window.removeEventListener("popstate", closeFromHistory);
+  }, []);
+
   if (!props.isOpen) {
     return null;
   }
@@ -3438,14 +3399,17 @@ function TaskSheet(props: {
     }
 
     setIsDeleteConfirmOpen(false);
+    setPreviewAttachment(null);
     props.onClose();
   }
 
   async function handleActivitySubmit() {
-    if (!currentTask) {
+    if (!currentTask || props.isSavingDisabled || postingActivityRef.current || (!commentBody.trim() && pendingActivityFiles.length === 0 && parsedLinks.length === 0)) {
       return;
     }
-
+    postingActivityRef.current = true;
+    setIsPostingActivity(true);
+    try {
     const didSubmit = await props.onSubmitActivity(currentTask, {
       body: commentBody,
       files: pendingActivityFiles,
@@ -3463,10 +3427,15 @@ function TaskSheet(props: {
     if (activityFileInputRef.current) {
       activityFileInputRef.current.value = "";
     }
+    } finally {
+      postingActivityRef.current = false;
+      setIsPostingActivity(false);
+    }
   }
 
   return (
     <div className="sheet-backdrop" role="presentation">
+      <AttachmentViewer attachment={previewAttachment} onClose={() => setPreviewAttachment(null)} onDownload={props.onDownloadAttachment} />
       <aside aria-label="Task details" className="sheet-panel">
         <header className="sheet-header">
           <div className="sheet-header-copy">
@@ -3577,6 +3546,14 @@ function TaskSheet(props: {
                 <div className="activity-input-shell">
                   <FormTextarea
                     className="activity-textarea"
+                    disabled={isPostingActivity || props.isSavingDisabled}
+                    aria-label="Comment"
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !event.nativeEvent.isComposing) {
+                        event.preventDefault();
+                        void handleActivitySubmit();
+                      }
+                    }}
                     onChange={(event) => setCommentBody(event.target.value)}
                     placeholder="Leave a note for the household."
                     rows={3}
@@ -3612,9 +3589,9 @@ function TaskSheet(props: {
                     <Button
                       className="activity-icon-button"
                       disabled={
-                        !commentBody.trim() &&
+                        isPostingActivity || props.isSavingDisabled || (!commentBody.trim() &&
                         pendingActivityFiles.length === 0 &&
-                        parsedLinks.length === 0
+                        parsedLinks.length === 0)
                       }
                       onClick={() => {
                         void handleActivitySubmit();
@@ -3628,6 +3605,7 @@ function TaskSheet(props: {
                     </Button>
                   </div>
                 </div>
+                <p className="muted-text">Markdown supported · Ctrl+Enter or ⌘+Enter to post</p>
                 {pendingActivityFiles.length > 0 || parsedLinks.length > 0 ? (
                   <div className="activity-chip-row">
                     {pendingActivityFiles.map((file, index) => (
@@ -3641,6 +3619,7 @@ function TaskSheet(props: {
                         }
                         type="button"
                       >
+                        <PendingFilePreview file={file} />
                         <span>{file.name}</span>
                         <span aria-hidden="true">x</span>
                       </button>
@@ -3665,16 +3644,29 @@ function TaskSheet(props: {
               {currentTask.comments.length > 0 ? (
                 <div className="timeline">
                   {currentTask.comments.map((comment) => (
-                    <SurfaceCard className="timeline-entry gap-2 py-4" key={comment.id}>
-                      <div className="timeline-meta">
-                        <strong>{comment.author.displayName}</strong>
-                        <span>{formatTimestamp(comment.createdAt)}</span>
-                      </div>
-                      <p>{comment.body}</p>
-                    </SurfaceCard>
+                    <TaskComment key={comment.id} comment={comment}
+                      canEdit={comment.author.id === props.actor?.id}
+                      onSave={(body, original) => props.onEditComment(currentTask.id, original, body)} />
                   ))}
                 </div>
               ) : null}
+            </section>
+          ) : null}
+
+          {currentTask ? (
+            <section className="sheet-section">
+              <details>
+                <summary>Task history</summary>
+                <div className="timeline">
+                  {(currentTask.history ?? []).map((event) => (
+                    <div className="timeline-entry" key={event.id}>
+                      <div className="timeline-meta"><strong>{event.actor?.displayName ?? "System"}</strong><span>{formatTimestamp(event.createdAt)}</span></div>
+                      <p>{formatTaskEvent(event.eventType)}</p>
+                    </div>
+                  ))}
+                  {!currentTask.history?.length ? <p>No recorded history yet.</p> : null}
+                </div>
+              </details>
             </section>
           ) : null}
 
@@ -3684,7 +3676,9 @@ function TaskSheet(props: {
               <div className="attachment-list">
                 {currentTask.attachments.map((attachment) => (
                   <div className="attachment-row" key={attachment.id}>
-                    <AttachmentPreview attachment={attachment} />
+                    {attachment.storageKind === "upload" ? <button type="button" className="attachment-preview-trigger" aria-label={`Preview ${attachment.originalName}`} onClick={() => setPreviewAttachment(attachment)}>
+                      <AttachmentPreview attachment={attachment} />
+                    </button> : <AttachmentPreview attachment={attachment} />}
                     <div className="attachment-copy">
                       <strong>{attachment.originalName}</strong>
                       <p className="attachment-meta">
@@ -4082,12 +4076,12 @@ function AttachmentPreview(props: {
         URL.revokeObjectURL(objectUrlToRevoke);
       }
     };
-  }, [props.attachment]);
+  }, [props.attachment.id, props.attachment.downloadUrl, props.attachment.mimeType, props.attachment.storageKind]);
 
   if (imageObjectUrl && !hasPreviewError) {
     return (
       <span className="attachment-preview" aria-hidden="true">
-        <img alt="" className="attachment-preview-image" src={imageObjectUrl} />
+        <img alt="" className="attachment-preview-image" src={imageObjectUrl} onError={() => setHasPreviewError(true)} />
       </span>
     );
   }
@@ -7340,7 +7334,7 @@ function CommitmentTrackerRow(props: {
     ) ??
     intervalProgress?.currentBucket ??
     null;
-  const targetCount = intervalProgress?.targetCount ?? 1;
+  const targetCount = selectedBucket?.targetCount ?? intervalProgress?.targetCount ?? 1;
   const currentFilledCount = Math.min(
     targetCount,
     selectedBucket?.amount ?? 0
@@ -7471,7 +7465,8 @@ function CommitmentTrackerRow(props: {
               {formatCommitmentIntervalLabel(props.commitment.trackingInterval)}
               {" · "}
               {intervalProgress?.periodTotal ?? 0} / {intervalProgress?.periodTarget ?? targetCount} this period
-              {selectedBucket && !selectedBucket.isCurrent ? ` · selected ${selectedBucket.label}` : ""}
+              {selectedBucket ? ` · ${selectedBucket.label}` : ""}
+              {targetCount < (intervalProgress?.targetCount ?? targetCount) ? " · partial interval target" : ""}
             </span>
             {isCountDetailOpen ? (
               <SquareChevronUp className="size-4" />
@@ -7490,7 +7485,7 @@ function CommitmentTrackerRow(props: {
               }}
             >
               {intervalProgress.buckets.map((bucket) => {
-                const ratio = bucket.amount / targetCount;
+                const ratio = bucket.amount / bucket.targetCount;
 
                 const isSelected = selectedBucket?.startOn === bucket.startOn;
                 const isFuture = bucket.startOn > todayIso;
@@ -7509,14 +7504,14 @@ function CommitmentTrackerRow(props: {
                     disabled={isFuture}
                     key={bucket.startOn}
                     onClick={() => setSelectedIntervalStartOn(bucket.startOn)}
-                    title={`${bucket.label}: ${bucket.amount} / ${targetCount}`}
+                    title={`${bucket.label}: ${bucket.amount} / ${bucket.targetCount}`}
                     type="button"
                   >
                     <span className="sr-only">
                       {isFuture ? "Future interval, " : ""}
                       {bucket.isCurrent ? "Current interval, " : ""}
                       {isSelected ? "Selected interval, " : ""}
-                      {bucket.label}: {bucket.amount} / {targetCount}
+                      {bucket.label}: {bucket.amount} / {bucket.targetCount}
                     </span>
                   </button>
                 );
@@ -7525,10 +7520,10 @@ function CommitmentTrackerRow(props: {
           ) : null}
           <div className="commitment-stepper">
             <Button
-              disabled={!canMutate || !selectedBucket || currentFilledCount >= targetCount}
+              disabled={!canMutate || !selectedBucket || selectedBucket.startOn > todayIso}
               onClick={() =>
                 selectedBucket &&
-                void props.onAddCheckin(props.commitment.id, selectedBucket.startOn)
+                void props.onAddCheckin(props.commitment.id, selectedBucket.isCurrent ? todayIso : selectedBucket.startOn)
               }
               size="icon"
               type="button"
@@ -7572,7 +7567,9 @@ function CommitmentTrackerRow(props: {
                   )
                 }
               />
-              <FormInput
+              <FormTextarea
+                aria-label="Commitment checklist item"
+                rows={2}
                 defaultValue={item.body}
                 disabled={!canMutate}
                 onBlur={(event) => {
@@ -7588,7 +7585,8 @@ function CommitmentTrackerRow(props: {
                   }
                 }}
                 onKeyDown={(event) => {
-                  if (event.key === "Enter") {
+                  if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+                    event.preventDefault();
                     event.currentTarget.blur();
                   }
                 }}
@@ -8021,3 +8019,45 @@ function RecurringTemplateForm(props: {
 }
 
 export default App;
+
+function formatTaskEvent(eventType: string) {
+  const labels: Record<string, string> = {
+    "task.created": "Created this task", "task.updated": "Updated task details",
+    "task.status_changed": "Changed status", "task.reordered": "Moved this task",
+    "task.comment_added": "Added a comment", "task.comment_updated": "Edited a comment",
+    "task.attachment_linked": "Attached a link", "task.attachment_uploaded": "Uploaded a file",
+    "task.archived": "Archived this task", "task.unarchived": "Restored this task",
+    "task.checklist_item_added": "Added a checklist item",
+    "task.checklist_item_deleted": "Deleted a checklist item",
+    "task.checklist_item_completion_set": "Updated checklist progress"
+  };
+  return labels[eventType] ?? eventType.replace(/^task\./, "").replaceAll("_", " ");
+}
+
+function TaskComment(props: { comment: Comment; canEdit: boolean; onSave: (body: string, original: Comment) => Promise<boolean> }) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [body, setBody] = useState(props.comment.body);
+  const originalRef = useRef(props.comment);
+  const [isSaving, setIsSaving] = useState(false);
+  const savingRef = useRef(false);
+  async function save() {
+    if (!body.trim() || savingRef.current) return;
+    savingRef.current = true;
+    setIsSaving(true);
+    try { if (await props.onSave(body, originalRef.current)) setIsEditing(false); }
+    finally { savingRef.current = false; setIsSaving(false); }
+  }
+  return <SurfaceCard className="timeline-entry gap-2 py-4">
+    <div className="timeline-meta">
+      <strong>{props.comment.author.displayName}</strong>
+      <span>{formatTimestamp(props.comment.createdAt)}{props.comment.updatedAt !== props.comment.createdAt ? " · edited" : ""}</span>
+      {props.canEdit && !isEditing ? <Button size="sm" variant="ghost" onClick={() => { originalRef.current = props.comment; setBody(props.comment.body); setIsEditing(true); }}>Edit comment</Button> : null}
+    </div>
+    {isEditing ? <>
+      <FormTextarea aria-label="Edit comment" value={body} disabled={isSaving} onChange={(event) => setBody(event.target.value)}
+        onKeyDown={(event) => { if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !event.nativeEvent.isComposing) { event.preventDefault(); void save(); } }} />
+      <div className="flex gap-2"><Button disabled={isSaving || !body.trim()} onClick={() => void save()}>Save comment</Button>
+      <Button variant="ghost" disabled={isSaving} onClick={() => setIsEditing(false)}>Cancel</Button></div>
+    </> : <CommentContent body={props.comment.body} />}
+  </SurfaceCard>;
+}

@@ -157,6 +157,7 @@ export type TaskListItemDto = Omit<Task, "assigneeUserId"> & {
 export type TaskDetailDto = TaskListItemDto & {
   attachments: AttachmentDto[];
   comments: CommentDto[];
+  history: Array<{ id: string; actor: UserRef | null; eventType: string; createdAt: Date }>;
 };
 
 export type RecurringTemplateDto = {
@@ -4115,12 +4116,16 @@ export async function getTaskDetail(
   const task = await getTaskOrThrow(db, actor, taskId);
   const relations = await getTaskRelations(db, [task], true);
   const item = toTaskListItemDto(task, relations);
+  const events = await db.select().from(taskEvents).where(eq(taskEvents.taskId, taskId))
+    .orderBy(desc(taskEvents.createdAt), desc(taskEvents.id));
+  const actors = await getUserRefsById(db, events.map((event) => event.actorUserId));
 
   return {
     item: {
       ...item,
       attachments: relations.attachmentsByTaskId.get(task.id) ?? [],
-      comments: relations.commentsByTaskId.get(task.id) ?? []
+      comments: relations.commentsByTaskId.get(task.id) ?? [],
+      history: events.map((event) => ({ id: event.id, actor: actors.get(event.actorUserId) ?? null, eventType: event.eventType, createdAt: event.createdAt }))
     } satisfies TaskDetailDto
   };
 }
@@ -4519,6 +4524,22 @@ export async function addCommentToTask(
 
   await createTaskEventRecord(db, taskId, actor.id, "task.comment_added", {}, options);
 
+  return getTaskDetail(db, actor, taskId);
+}
+
+export async function updateTaskComment(
+  db: DatabaseClient, actor: AuthenticatedActor, taskId: string, commentId: string,
+  input: { body: string; expectedUpdatedAt: string }
+) {
+  await getTaskOrThrow(db, actor, taskId);
+  const [comment] = await db.select().from(comments).where(and(eq(comments.id, commentId), eq(comments.taskId, taskId)));
+  if (!comment) throw new ApiError(404, "not_found", "Comment not found.");
+  if (comment.authorUserId !== actor.id) throw new ApiError(403, "forbidden", "Only the author can edit this comment.");
+  const updated = await db.update(comments).set({ body: input.body.trim(), updatedAt: new Date() })
+    .where(and(eq(comments.id, commentId), eq(comments.updatedAt, new Date(input.expectedUpdatedAt))))
+    .returning({ id: comments.id });
+  if (updated.length === 0) throw new ApiError(409, "conflict", "This comment changed. Reload it before editing again.");
+  await createTaskEventRecord(db, taskId, actor.id, "task.comment_updated", { commentId });
   return getTaskDetail(db, actor, taskId);
 }
 
