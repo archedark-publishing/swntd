@@ -4789,6 +4789,13 @@ function SettingsView(props: {
     inlineLabelInputRef.current?.select();
   }, [props.isLabelEditorOpen, props.selectedLabelKey]);
 
+  // Reset the editor only when a different actor (or editor mode) is selected.
+  // selectedUser is re-derived from the snapshot on every refresh, so keying
+  // the reset on the object identity also wipes in-progress editor state —
+  // including a freshly issued service token — whenever background data
+  // refreshes (e.g. the refresh that follows issuing the token itself).
+  const selectedUserResetKey = `${props.userEditorMode}:${props.selectedUser?.id ?? "new"}`;
+
   useEffect(() => {
     setUserDraft(createHouseholdUserDraft(props.selectedUser, props.userEditorMode));
     setServiceTokenName("");
@@ -4796,7 +4803,7 @@ function SettingsView(props: {
     setUserActionMessage(null);
     setIsUserRemovePending(false);
     setIsUserSavePending(false);
-  }, [props.selectedUser, props.userEditorMode]);
+  }, [selectedUserResetKey]);
 
   useEffect(() => {
     if (
